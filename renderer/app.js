@@ -1,4 +1,4 @@
-import { Application, Assets, Container, Graphics, Sprite, Texture } from 'pixi.js';
+import { Application, Assets } from 'pixi.js';
 import { Spine } from '@esotericsoftware/spine-pixi-v8';
 
 window.addEventListener('error', (e) => console.error('[renderer][uncaught]', e.message, e.filename, e.lineno));
@@ -10,7 +10,6 @@ const app = new Application();
 const hud = document.getElementById('hud');
 const charNameEl = document.getElementById('charName');
 const subNameEl = document.getElementById('subName');
-const hintEl = document.getElementById('hint');
 const loadingEl = document.getElementById('loading');
 const loadingText = document.getElementById('loadingText');
 const errEl = document.getElementById('err');
@@ -29,7 +28,6 @@ const log = (s) => console.log('[lobby]', s);
 // ---- state ----
 let spine = null;          // character skeleton
 let scene = null;          // room overlay skeleton (when available)
-let particles = null;
 let currentLobby = null;
 let LOBBY_INDEX = {};
 let SCHEDULE = null;
@@ -39,12 +37,12 @@ let ORDER = [];
 // ---- camera (lobby_camera_config.json) ----
 const CAMERA = { maxScale: 4, weight: 0.5 };
 let cam = { x: 0, y: 0, scale: 1 };
-let baseFitScale = 1;      // reference fit for zoom clamps
-let charFillScale = 1;     // character fills the playback area
-let sceneFitScale = 1;
+let baseScale = 1;
+let charScale = 1;
+let sceneScale = 1;
 let sceneBiasY = 0;
 let fitted = false;
-let pinch = null;
+let cameraTargetY = 0;     // Camera_Pos 骨骼的 Y（骨架坐標），無此骨骼時用 bounds 中點
 let downTime = 0;
 let downPos = null;
 let longPressTimer = null;
@@ -59,69 +57,69 @@ function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// Compute per-layer base fit (composition = scene behind, character in front).
+// Compute per-layer base fit.
+// Grounding: skeletons with a Camera_Pos/Camera_Root bone use its Y (relative to root)
+// as camera target; otherwise the Idle-pose bounding-box vertical centre is used.
 function fitScene() {
   const vw = app.renderer.width, vh = app.renderer.height;
-  // scene (room) fills the viewport
+
   if (scene) {
     const b = scene.getBounds();
     if (b && b.maxX > b.minX) {
-      sceneFitScale = Math.max(vw / (b.maxX - b.minX), vh / (b.maxY - b.minY));
+      sceneScale = Math.max(vw / (b.maxX - b.minX), vh / (b.maxY - b.minY));
     }
   } else {
-    sceneFitScale = 1;
+    sceneScale = 1;
   }
-  // character fills the playback area (anchored feet at 88% height, face keeps a top margin)
+
   if (spine) {
     const b = spine.getBounds();
     if (b && b.maxX > b.minX) {
       const w = b.maxX - b.minX, h = b.maxY - b.minY;
-      charFillScale = Math.max(vw / w, (vh * 0.84) / h);
+      // 找出相機對齊目標（遊戲場景中的 location point）
+      const camPos = spine.skeleton.findBone('Camera_Pos') || spine.skeleton.findBone('Camera_Root');
+      if (camPos) {
+        cameraTargetY = camPos.data.y;                // setup-pose local Y (e.g. 962)
+      } else {
+        cameraTargetY = (b.minY + b.maxY) / 2;       // fallback: 骨架垂直中點
+      }
+      charScale = Math.max(vw / w, vh / h);
+      sceneBiasY = vh * 0.45 - cameraTargetY * charScale;
     }
   }
-  baseFitScale = charFillScale || sceneFitScale || 1;
-  cam.scale = baseFitScale;
+
+  baseScale = charScale || sceneScale || 1;
+  cam.scale = baseScale;
   cam.x = 0;
   cam.y = 0;
   fitted = true;
   applyCamera(1);
 }
 
-const P_BG = 0.72;   // background parallax (moves slower than character)
-
 function applyCamera(w) {
   const k = clamp(w, 0, 1);
   const vw = app.renderer.width, vh = app.renderer.height;
-  const idle = idleDrift();
 
   if (scene) {
     scene.scale.set(
-      scene.scale.x + (sceneFitScale * cam.scale * P_BG - scene.scale.x) * k,
-      scene.scale.y + (sceneFitScale * cam.scale * P_BG - scene.scale.y) * k,
+      scene.scale.x + (sceneScale * cam.scale - scene.scale.x) * k,
+      scene.scale.y + (sceneScale * cam.scale - scene.scale.y) * k,
     );
-    scene.x += (vw / 2 - cam.x * P_BG + idle.x * P_BG - scene.x) * k;
-    scene.y += (vh / 2 + sceneBiasY - cam.y * P_BG + idle.y * P_BG - scene.y) * k;
+    scene.x += (vw / 2 - cam.x - scene.x) * k;
+    scene.y += (vh * 0.5 + sceneBiasY - cam.y - scene.y) * k;
   }
   if (spine) {
-    const targetS = charFillScale * cam.scale;
+    const targetS = charScale * cam.scale;
     spine.scale.set(
       spine.scale.x + (targetS - spine.scale.x) * k,
       spine.scale.y + (targetS - spine.scale.y) * k,
     );
-    spine.x += (vw / 2 - cam.x + idle.x - spine.x) * k;
-    spine.y += (vh * 0.88 - cam.y + idle.y - spine.y) * k;
+    spine.x += (vw / 2 - cam.x - spine.x) * k;
+    spine.y += (vh * 0.5 + sceneBiasY - cam.y - spine.y) * k;
   }
 }
 
-// subtle living drift when the user is idle
-let idleT = 0;
-function idleDrift() {
-  const slow = 0.6;
-  return {
-    x: Math.sin(idleT * slow * 0.5) * 16,
-    y: Math.cos(idleT * slow * 0.31) * 10,
-  };
-}
+
 
 // ---- voice + lip-sync ----
 let audioCtx = null;
@@ -388,84 +386,6 @@ function scheduleAutonomy() {
   }, rand(7000, 15000));
 }
 
-// ---- ambient layer (glow + shadow behind the character, dust motes in front) ----
-function buildGlow() {
-  const layer = new Container();
-  const g = document.createElement('canvas');
-  g.width = g.height = 256;
-  const ctx = g.getContext('2d');
-  const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
-  grad.addColorStop(0, 'rgba(255,255,255,.34)');
-  grad.addColorStop(0.5, 'rgba(190,205,255,.10)');
-  grad.addColorStop(1, 'rgba(190,205,255,0)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 256, 256);
-  const glow = new Sprite(Texture.from(g));
-  glow.anchor.set(0.5);
-  glow.blendMode = 'add';
-  glow.alpha = 0.55;
-  layer.addChild(glow);
-
-  const sh = document.createElement('canvas');
-  sh.width = sh.height = 128;
-  const sctx = sh.getContext('2d');
-  const sg = sctx.createRadialGradient(64, 64, 4, 64, 64, 62);
-  sg.addColorStop(0, 'rgba(0,0,0,.55)');
-  sg.addColorStop(1, 'rgba(0,0,0,0)');
-  sctx.fillStyle = sg;
-  sctx.fillRect(0, 0, 128, 128);
-  const shadow = new Sprite(Texture.from(sh));
-  shadow.anchor.set(0.5);
-  shadow.alpha = 0.55;
-  layer.addChild(shadow);
-  return { layer, glow, shadow };
-}
-
-function buildMotes() {
-  const layer = new Container();
-  const motes = [];
-  const n = 28;
-  for (let i = 0; i < n; i++) {
-    const dot = new Graphics();
-    const r = rand(0.6, 1.9);
-    dot.circle(0, 0, r).fill({ color: 0xfff3d6, alpha: 1 });
-    dot.alpha = rand(0.10, 0.36);
-    layer.addChild(dot);
-    motes.push({
-      dot,
-      x: Math.random() * 1200,
-      y: Math.random() * 900,
-      vy: rand(6, 22),
-      amp: rand(6, 28),
-      phase: Math.random() * Math.PI * 2,
-      sp: rand(0.2, 0.6),
-      tw: rand(0.6, 2.2),
-    });
-  }
-  return { layer, motes };
-}
-
-function updateAmbient(t) {
-  if (!particles) return;
-  const { glow, shadow } = particles.glow;
-  const { motes } = particles.motes;
-  const vw = app.renderer.width, vh = app.renderer.height;
-  glow.x = vw / 2 - cam.x;
-  glow.y = vh * 0.58 - cam.y;
-  glow.scale.set(charFillScale * cam.scale * 0.9);
-  shadow.x = vw / 2 - cam.x;
-  shadow.y = vh * 0.88 - cam.y;
-  shadow.scale.set(charFillScale * cam.scale * 0.5, charFillScale * cam.scale * 0.14);
-  for (const m of motes) {
-    m.y -= m.vy * 0.016;
-    m.x += Math.sin(t * 0.001 * m.sp + m.phase) * m.amp * 0.016;
-    m.dot.alpha = 0.10 + 0.26 * (0.5 + 0.5 * Math.sin(t * 0.001 * m.tw + m.phase));
-    if (m.y < -10) { m.y = vh + 10; m.x = Math.random() * vw; }
-    m.dot.x = m.x;
-    m.dot.y = m.y;
-  }
-}
-
 // ---- asset loading ----
 async function fetchRetry(url, retries = 4) {
   for (let i = 0; ; i++) {
@@ -507,11 +427,6 @@ async function loadLobby(name) {
     spine.destroy();
     spine = null;
   }
-  if (particles) {
-    particles.glow.layer.destroy({ children: true });
-    particles.motes.layer.destroy({ children: true });
-    particles = null;
-  }
   clearTimers();
   state.busy = null;
   patting = false;
@@ -543,13 +458,7 @@ async function loadLobby(name) {
   }
 
   await loadScene(entry);
-  // layering: scene(0) -> glow(1) -> spine(2) -> motes(3)
-  const glow = buildGlow();
-  app.stage.addChild(glow.layer);
-  app.stage.setChildIndex(spine, app.stage.children.indexOf(glow.layer));
-  const motes = buildMotes();
-  app.stage.addChild(motes.layer);
-  particles = { glow, motes };
+  app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 2));
   fitted = false;
   // frame on the Idle pose (mesh geometry only exists after a render), then play the intro
   spine.state.setAnimation(0, 'Idle_01', true);
@@ -559,7 +468,7 @@ async function loadLobby(name) {
     else {
       fitScene();
       playStart();
-      log(`[layout] ${name}: scene=${!!scene} charFit=${charFillScale.toFixed(3)} sceneFit=${sceneFitScale.toFixed(3)} camScale=${cam.scale.toFixed(3)}`);
+      log(`[layout] ${name}: scene=${!!scene} charScale=${charScale.toFixed(3)} cameraTargetY=${cameraTargetY.toFixed(0)}`);
     }
   };
   requestAnimationFrame(waitFit);
@@ -568,7 +477,6 @@ async function loadLobby(name) {
   subNameEl.textContent = 'MEMORIAL LOBBY';
   scheduleAutonomy();
   loadingEl.classList.remove('show');
-  setTimeout(() => hintEl.classList.add('hide'), 6000);
   fadeOut();
   log(`${name} 載入完成 — ${prettyName(name)}`);
 }
@@ -601,23 +509,19 @@ function onTrackComplete(entry) {
   }
 }
 
-// ---- input (no drag pan — the camera is fixed; only pat / tap / zoom) ----
+// ---- input (only pat / tap — no drag, zoom, pan) ----
 function onPointerDown(e) {
   ensureAudio();
   userActiveAt = performance.now();
   if (bgmOn && !bgmAudio) setBgm(BGM_MAP[currentLobby]);
   if (e.pointerType === 'touch') e.preventDefault();
-  if (pinch === null && e.isPrimary) {
-    downTime = performance.now();
-    downPos = { x: e.clientX, y: e.clientY };
-    longPressTimer = setTimeout(() => {
-      if (state.busy !== 'pat' && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) < 10) {
-        startPat();
-      }
-    }, 420);
-  }
-  if (!pinch) pinch = { p: [] };
-  pinch.p.push({ id: e.pointerId, x: e.clientX, y: e.clientY });
+  downTime = performance.now();
+  downPos = { x: e.clientX, y: e.clientY };
+  longPressTimer = setTimeout(() => {
+    if (state.busy !== 'pat' && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) < 10) {
+      startPat();
+    }
+  }, 420);
 }
 
 function onPointerMove(e) {
@@ -627,27 +531,11 @@ function onPointerMove(e) {
   if (longPressTimer && downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 7) {
     clearTimeout(longPressTimer);
   }
-  const p = pinch?.p.find(p => p.id === e.pointerId);
-  if (p) { p.x = e.clientX; p.y = e.clientY; }
-  if (pinch && pinch.p.length === 2) {
-    const [a, b] = pinch.p;
-    const d = Math.hypot(b.x - a.x, b.y - a.y);
-    if (pinch.d0) {
-      const f = d / pinch.d0;
-      cam.scale = clamp(pinch.s0 * f, baseFitScale * 0.3, baseFitScale * CAMERA.maxScale);
-    } else {
-      pinch.d0 = d;
-      pinch.s0 = cam.scale;
-    }
-  }
   hud.classList.toggle('idle', performance.now() - userActiveAt > 2600);
 }
 
 function onPointerUp(e) {
   clearTimeout(longPressTimer);
-  const p = pinch?.p.find(p => p.id === e.pointerId);
-  if (p) pinch.p = pinch.p.filter(x => x.id !== e.pointerId);
-  if (pinch && pinch.p.length === 0) pinch = null;
   if (downPos && state.busy !== 'pat') {
     const dt = performance.now() - downTime;
     const d = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
@@ -656,23 +544,7 @@ function onPointerUp(e) {
   if (patting) endPat();
   downPos = null;
   downTime = 0;
-  pinch = null;
 }
-
-function onWheel(e) {
-  e.preventDefault();
-  if (!spine) return;
-  const factor = Math.exp(-e.deltaY * 0.0015);
-  cam.scale = clamp(cam.scale * factor, baseFitScale * 0.3, baseFitScale * CAMERA.maxScale);
-  // zoom toward cursor: keep world point under cursor stationary
-  const wx = ((e.clientX - spine.x) / spine.scale.x) * cam.scale;
-  const wy = ((e.clientY - spine.y) / spine.scale.y) * cam.scale;
-  cam.x = e.clientX - wx - (vw() / 2);
-  cam.y = e.clientY - wy - (vh() * 0.88);
-}
-
-const vw = () => app.renderer.width;
-const vh = () => app.renderer.height;
 
 // ---- init ----
 async function init() {
@@ -710,15 +582,11 @@ async function init() {
     console.warn('[lobby] BGM 對照載入失敗', e);
   }
 
-  // camera smoothing + ambient loop
-  // camera smoothing + ambient loop
+  // camera smoothing
   app.ticker.add(() => {
-    idleT = performance.now() / 1000;
     if (spine && fitted) applyCamera(CAMERA.weight);
-    updateAmbient(performance.now());
   });
   // input
-  canvas.addEventListener('wheel', onWheel, { passive: false });
   canvas.addEventListener('pointerdown', onPointerDown);
   window.addEventListener('pointermove', onPointerMove);
   window.addEventListener('pointerup', onPointerUp);

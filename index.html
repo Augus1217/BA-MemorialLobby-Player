@@ -71,14 +71,6 @@
       text-shadow: 0 1px 8px rgba(0,0,0,.8);
     }
 
-    #hint {
-      position: fixed; left: 0; right: 0; bottom: 86px; z-index: 8; text-align: center;
-      color: rgba(214,222,255,.78); font-size: 12px; letter-spacing: .3em; pointer-events: none;
-      text-shadow: 0 1px 10px rgba(0,0,0,.9);
-      transition: opacity 1.2s ease;
-    }
-    #hint.hide { opacity: 0; }
-
     #err { position: fixed; bottom: 14px; left: 14px; right: 14px; z-index: 50;
       background: rgba(150,30,30,.9); color: #fff; padding: 10px 14px; border-radius: 8px;
       font-size: 13px; white-space: pre-wrap; display: none; }
@@ -100,7 +92,7 @@
       <button id="btnBgm" class="btn" title="音樂">♪</button>
     </div>
   </div>
-  <div id="hint">移動游標・她的眼睛會跟隨你｜長按摸頭・輕觸說話</div>
+
   <div id="loading"><div class="spin"></div><span id="loadingText">載入中</span></div>
   <div id="fade"></div>
   <div id="err"></div>
