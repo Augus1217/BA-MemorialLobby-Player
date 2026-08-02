@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BA Memorial Lobby</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #1a1a2e; font-family: system-ui, sans-serif; }
+    #app { position: fixed; inset: 0; }
+    #topbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+      display: flex; gap: 10px; align-items: center; padding: 10px 14px;
+      background: linear-gradient(rgba(0,0,0,.6), transparent); color: #fff;
+    }
+    #topbar select, #topbar button {
+      background: rgba(0,0,0,.55); color: #fff; border: 1px solid rgba(255,255,255,.25);
+      border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer;
+    }
+    #status { font-size: 12px; color: #9db4ff; opacity: .9; }
+    #lip {
+      display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+      background: #3a3a5c; transition: background .1s;
+    }
+    #lip.talking { background: #ff5c8a; box-shadow: 0 0 10px #ff5c8a; }
+    #err { position: fixed; bottom: 12px; left: 12px; right: 12px; z-index: 20;
+      background: rgba(180,30,30,.9); color: #fff; padding: 10px 14px; border-radius: 8px;
+      font-size: 13px; white-space: pre-wrap; display: none; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="topbar">
+    <select id="lobbySelect"></select>
+    <button id="playStart">開場動畫</button>
+    <button id="playIdle">待機 Idle</button>
+    <button id="playTalk">互動台詞</button>
+    <button id="playPat">摸頭姿勢</button>
+    <button id="toggleBgm">BGM 開/關</button>
+    <span id="lip"></span>
+    <span id="status"></span>
+  </div>
+  <div id="err"></div>
+  <script type="module" src="/renderer/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "ba-memorial-lobby-electron",
+  "version": "0.1.0",
+  "description": "Blue Archive Memorial Lobby viewer (Electron + Pixi v8 + spine 4.2)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "copy-assets": "python3 scripts/copy_assets.py"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "vite": "^8.2.0"
+  },
+  "dependencies": {
+    "@esotericsoftware/spine-pixi-v8": "^4.2.119",
+    "pixi.js": "^8.19.0"
+  }
+}
