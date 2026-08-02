@@ -8,6 +8,7 @@ Sources:
   - /home/augus/BA_MemorialLobby/data (schedule + mappings, reuse)
 
 Only the MAIN skeleton variant is copied (_1/_2/_3 LOD copies skipped).
+Lobby room/scene skeletons (folders like Aru_Scene) go to assets/scene/.
 """
 import os
 import shutil
@@ -21,6 +22,7 @@ SRC_BGM = os.environ.get("BA_SRC_BGM", "/home/augus/Blue-Archive-Asset-Downloade
 SRC_DATA = os.environ.get("BA_SRC_DATA", "/home/augus/BA_MemorialLobby/data")
 
 DST_SPINE = os.path.join(ROOT, "assets", "spine")
+DST_SCENE = os.path.join(ROOT, "assets", "scene")
 DST_VOICE = os.path.join(ROOT, "assets", "voice")
 DST_BGM = os.path.join(ROOT, "assets", "bgm")
 DST_DATA = os.path.join(ROOT, "assets", "data")
@@ -29,6 +31,7 @@ DST_DATA = os.path.join(ROOT, "assets", "data")
 def main():
     only = sys.argv[1:] if len(sys.argv) > 1 else None
     os.makedirs(DST_SPINE, exist_ok=True)
+    os.makedirs(DST_SCENE, exist_ok=True)
     os.makedirs(DST_VOICE, exist_ok=True)
     os.makedirs(DST_BGM, exist_ok=True)
     os.makedirs(DST_DATA, exist_ok=True)
@@ -61,6 +64,34 @@ def main():
             n_lobby += 1
             print(f"lobby {name}: {copied} files")
     print(f"lobbies copied: {n_lobby}")
+
+    # Room/scene overlay skeletons (few lobbies ship one, e.g. Aru_Scene).
+    n_scene = 0
+    for name in sorted(os.listdir(SRC_SPINE)):
+        if only and name not in only:
+            continue
+        src_lobby = os.path.join(SRC_SPINE, name)
+        if not os.path.isdir(src_lobby):
+            continue
+        for sub in os.listdir(src_lobby):
+            if "Scene" not in sub:
+                continue
+            src = os.path.join(src_lobby, sub)
+            if not os.path.isdir(src):
+                continue
+            dst = os.path.join(DST_SCENE, name)
+            os.makedirs(dst, exist_ok=True)
+            copied = 0
+            for f in os.listdir(src):
+                if re.search(r"_(1|2|3)\.(skel|atlas|png)$", f):
+                    continue
+                if f.endswith((".skel", ".atlas", ".png")):
+                    shutil.copy2(os.path.join(src, f), os.path.join(dst, f))
+                    copied += 1
+            if copied:
+                n_scene += 1
+                print(f"scene {name}: {copied} files")
+    print(f"scenes copied: {n_scene}")
 
     n_voice = 0
     for d in sorted(os.listdir(SRC_MEDIA)):
@@ -130,6 +161,27 @@ def gen_manifest():
             "atlas": atlas,
             "png": pages,
         }
+    # scene overlays (assets/scene/<name>)
+    for name in sorted(os.listdir(DST_SCENE)):
+        d = os.path.join(DST_SCENE, name)
+        if not os.path.isdir(d):
+            continue
+        skels = sorted(f for f in os.listdir(d)
+                       if f.endswith(".skel") and not re.search(r"_[1-3]\.skel$", f))
+        atlases = sorted(f for f in os.listdir(d)
+                         if f.endswith(".atlas") and not re.search(r"_[1-3]\.atlas$", f))
+        if not skels or not atlases:
+            continue
+        atlas = atlases[0]
+        atlas_base = os.path.splitext(atlas)[0].lower()
+        skel = next((s for s in skels
+                     if os.path.splitext(s)[0].lower() == atlas_base), skels[0])
+        pages = []
+        atxt = os.path.join(d, atlas)
+        if os.path.exists(atxt):
+            with open(atxt) as fh:
+                pages = [l.strip() for l in fh.read().splitlines() if l.strip().endswith(".png")]
+        idx.setdefault(name, {})["scene"] = {"skel": skel, "atlas": atlas, "png": pages}
     with open(os.path.join(ROOT, "assets", "lobby_index.json"), "w") as fh:
         _json.dump(idx, fh, ensure_ascii=False, indent=1)
     print(f"manifest: {len(idx)} lobbies")

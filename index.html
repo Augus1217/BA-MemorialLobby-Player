@@ -5,40 +5,104 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BA Memorial Lobby</title>
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #1a1a2e; font-family: system-ui, sans-serif; }
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #05060d; font-family: "Segoe UI", system-ui, sans-serif; }
     #app { position: fixed; inset: 0; }
-    #topbar {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 10;
-      display: flex; gap: 10px; align-items: center; padding: 10px 14px;
-      background: linear-gradient(rgba(0,0,0,.6), transparent); color: #fff;
+    #app canvas { touch-action: none; }
+
+    /* cinematic vignette + soft top shading (non-interactive) */
+    #fx {
+      position: fixed; inset: 0; z-index: 5; pointer-events: none;
+      background:
+        radial-gradient(ellipse at 50% 46%, transparent 55%, rgba(2,3,10,.55) 100%),
+        linear-gradient(rgba(0,0,0,.28), transparent 18%, transparent 82%, rgba(0,0,0,.32));
     }
-    #topbar select, #topbar button {
-      background: rgba(0,0,0,.55); color: #fff; border: 1px solid rgba(255,255,255,.25);
-      border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer;
+
+    /* fade overlay for load / lobby switch */
+    #fade {
+      position: fixed; inset: 0; z-index: 30; background: #05060d;
+      opacity: 0; pointer-events: none; transition: opacity .7s ease;
     }
-    #status { font-size: 12px; color: #9db4ff; opacity: .9; }
-    #lip {
-      display: inline-block; width: 10px; height: 10px; border-radius: 50%;
-      background: #3a3a5c; transition: background .1s;
+    #fade.on { opacity: 1; pointer-events: auto; }
+
+    #loading {
+      position: fixed; inset: 0; z-index: 40; display: none;
+      align-items: center; justify-content: center; color: #cfd6ff;
+      font-size: 13px; letter-spacing: .2em; background: rgba(5,6,13,.72);
     }
-    #lip.talking { background: #ff5c8a; box-shadow: 0 0 10px #ff5c8a; }
-    #err { position: fixed; bottom: 12px; left: 12px; right: 12px; z-index: 20;
-      background: rgba(180,30,30,.9); color: #fff; padding: 10px 14px; border-radius: 8px;
+    #loading.show { display: flex; }
+    #loading .spin {
+      width: 22px; height: 22px; margin-right: 14px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.15); border-top-color: #a9b6ff;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* minimal auto-hiding HUD */
+    #hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+    #hud > * { pointer-events: auto; }
+    .hudbar {
+      position: absolute; left: 0; right: 0;
+      display: flex; align-items: center;
+      transition: opacity .6s ease, transform .6s ease;
+    }
+    #hudTop { top: 0; padding: 22px 26px; justify-content: space-between; }
+    #hudBottom { bottom: 0; padding: 18px 26px; justify-content: center; }
+    #hud.idle #hudTop { opacity: 0; transform: translateY(-12px); }
+    #hud.idle #hudBottom { opacity: 0; transform: translateY(12px); }
+    #hud.idle { pointer-events: none; }
+    #hud.idle > * { pointer-events: none; }
+
+    .btn {
+      background: rgba(10,12,26,.42); color: #e8ecff; border: 1px solid rgba(255,255,255,.14);
+      border-radius: 50%; width: 40px; height: 40px; font-size: 17px; line-height: 1;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: background .25s, border-color .25s, opacity .25s;
+      backdrop-filter: blur(6px);
+    }
+    .btn:hover { background: rgba(40,48,96,.6); border-color: rgba(255,255,255,.35); }
+    .btn.off { opacity: .4; }
+    #titleBlock { text-align: center; pointer-events: none !important; }
+    #charName {
+      color: #f2f4ff; font-size: 20px; letter-spacing: .18em; font-weight: 600;
+      text-shadow: 0 2px 14px rgba(0,0,0,.8);
+    }
+    #subName {
+      color: rgba(210,220,255,.66); font-size: 11px; letter-spacing: .34em; margin-top: 4px;
+      text-shadow: 0 1px 8px rgba(0,0,0,.8);
+    }
+
+    #hint {
+      position: fixed; left: 0; right: 0; bottom: 86px; z-index: 8; text-align: center;
+      color: rgba(214,222,255,.78); font-size: 12px; letter-spacing: .3em; pointer-events: none;
+      text-shadow: 0 1px 10px rgba(0,0,0,.9);
+      transition: opacity 1.2s ease;
+    }
+    #hint.hide { opacity: 0; }
+
+    #err { position: fixed; bottom: 14px; left: 14px; right: 14px; z-index: 50;
+      background: rgba(150,30,30,.9); color: #fff; padding: 10px 14px; border-radius: 8px;
       font-size: 13px; white-space: pre-wrap; display: none; }
   </style>
 </head>
 <body>
   <div id="app"></div>
-  <div id="topbar">
-    <select id="lobbySelect"></select>
-    <button id="playStart">開場動畫</button>
-    <button id="playIdle">待機 Idle</button>
-    <button id="playTalk">互動台詞</button>
-    <button id="playPat">摸頭姿勢</button>
-    <button id="toggleBgm">BGM 開/關</button>
-    <span id="lip"></span>
-    <span id="status"></span>
+  <div id="fx"></div>
+  <div id="hud">
+    <div id="hudTop" class="hudbar">
+      <button id="btnPrev" class="btn" title="上一位">‹</button>
+      <div id="titleBlock">
+        <div id="charName"></div>
+        <div id="subName">MEMORIAL LOBBY</div>
+      </div>
+      <button id="btnNext" class="btn" title="下一位">›</button>
+    </div>
+    <div id="hudBottom" class="hudbar">
+      <button id="btnBgm" class="btn" title="音樂">♪</button>
+    </div>
   </div>
+  <div id="hint">移動游標・她的眼睛會跟隨你｜長按摸頭・輕觸說話</div>
+  <div id="loading"><div class="spin"></div><span id="loadingText">載入中</span></div>
+  <div id="fade"></div>
   <div id="err"></div>
   <script type="module" src="/renderer/app.js"></script>
 </body>
