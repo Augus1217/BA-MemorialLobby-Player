@@ -37,12 +37,11 @@ let ORDER = [];
 // ---- camera (lobby_camera_config.json) ----
 const CAMERA = { maxScale: 4, weight: 0.5 };
 let cam = { x: 0, y: 0, scale: 1 };
-let baseScale = 1;
 let charScale = 1;
 let sceneScale = 1;
 let sceneBiasY = 0;
 let fitted = false;
-let cameraTargetY = 0;     // Camera_Pos 骨骼的 Y（骨架坐標），無此骨骼時用 bounds 中點
+let cameraTargetY = 0;     // 相機線骨架（Camera_Pos/Root/All_Layer）的 setup-pose 世界 Y
 let downTime = 0;
 let downPos = null;
 let longPressTimer = null;
@@ -58,8 +57,16 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 // Compute per-layer base fit.
-// Grounding: skeletons with a Camera_Pos/Camera_Root bone use its Y (relative to root)
-// as camera target; otherwise the Idle-pose bounding-box vertical centre is used.
+// The in-game camera centres on a marker bone (Camera_Pos / Camera_Root,
+// or All_Layer for e.g. CH0070). We scale the character with kivo's "fill"
+// rule (view width / 3000 against the standard 3000-unit skeleton) and place
+// the camera line at the vertical centre of the view, which puts the
+// character's chest/face mid-screen with the ground near the bottom edge.
+function boneWorldY(bone) {
+  let y = 0;
+  for (let b = bone; b; b = b.parent) y += b.data.y;
+  return y;
+}
 function fitScene() {
   const vw = app.renderer.width, vh = app.renderer.height;
 
@@ -73,23 +80,16 @@ function fitScene() {
   }
 
   if (spine) {
-    const b = spine.getBounds();
-    if (b && b.maxX > b.minX) {
-      const w = b.maxX - b.minX, h = b.maxY - b.minY;
-      // 找出相機對齊目標（遊戲場景中的 location point）
-      const camPos = spine.skeleton.findBone('Camera_Pos') || spine.skeleton.findBone('Camera_Root');
-      if (camPos) {
-        cameraTargetY = camPos.data.y;                // setup-pose local Y (e.g. 962)
-      } else {
-        cameraTargetY = (b.minY + b.maxY) / 2;       // fallback: 骨架垂直中點
-      }
-      charScale = Math.max(vw / w, vh / h);
-      sceneBiasY = vh * 0.45 - cameraTargetY * charScale;
-    }
+    const camPos =
+      spine.skeleton.findBone('Camera_Pos') ||
+      spine.skeleton.findBone('Camera_Root') ||
+      spine.skeleton.findBone('All_Layer');
+    cameraTargetY = camPos ? boneWorldY(camPos) : 962;   // 962 = 遊戲標準相機線
+    charScale = vw / 3000;                                // kivo fill 統一縮放
+    sceneBiasY = cameraTargetY * charScale;               // 相機線置於畫面垂直中央
   }
 
-  baseScale = charScale || sceneScale || 1;
-  cam.scale = baseScale;
+  cam.scale = 1;   // 無使用者縮放（zoom/scroll/pinch 已移除）
   cam.x = 0;
   cam.y = 0;
   fitted = true;

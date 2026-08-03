@@ -5,8 +5,8 @@
 ## Features
 
 - 266 lobby skeletons from `assets/lobby_index.json` (main LOD variant per lobby, quirk handling for `Airi0/Airi`, `CH9996/CH0996`, `juri/Juri`)
-- Immersive, tool-free presentation: auto-hiding HUD (‹/› to switch lobby, ♪ for BGM), cinematic vignette, floating dust motes, soft glow and floor shadow
-- Room scene layer: lobbies that ship one (`Aru_Scene`, `Akari_Scene`, `Fuuka_Scene`, `Momoi_Scene`, `Wakamo_Scene_0`) render the room behind the character with parallax
+- Immersive, tool-free presentation: auto-hiding HUD (‹/› to switch lobby, ♪ for BGM), cinematic vignette
+- Room scene layer: lobbies that ship one (`Aru_Scene`, `Akari_Scene`, `Fuuka_Scene`, `Momoi_Scene`, `Wakamo_Scene_0`) render the room behind the character
 - Spine playback model faithful to the game:
   - Track 0: `Start_Idle_01` intro → `Idle_01` loop
   - **Eyes follow your cursor** — driven frame-by-frame from each lobby's own `Look_01` pose animation (identical to the in-game "抓眼睛" mechanic)
@@ -15,7 +15,7 @@
   - Autonomous idle chatter (no forced look — eyes already follow you)
 - Voice driven by the skeleton's embedded animation events (`Sound/` + `Talk`), routed through a WebAudio analyser; mouth-bone `scaleY` responds to live RMS amplitude on top of the baked `_M` lip-sync
 - BGM per lobby from `lobby_bgm_mapping.csv` (`Theme_*.ogg`)
-- Camera from `lobby_camera_config.json`: character fills the playback area, wheel/pinch zoom with cursor anchor, `MaxScale` clamp, `Weight` smoothing, subtle idle drift (no drag pan — the camera is fixed)
+- Camera from `lobby_camera_config.json`: framing follows the in-game camera marker. Per lobby the camera bone (`Camera_Pos` / `Camera_Root`, else `All_Layer` e.g. CH0070) is placed at the vertical centre of the view, and the character is scaled to fill the screen using the kivo "fill" rule (view width ÷ 3000 against the standard 3000-unit skeleton). The camera is fixed — no drag, pan, zoom or drift; `Weight` controls how fast the framing settles on lobby switch.
 - `CAPTURE=<png path>` env for headless screenshots, `#lobby=<name>` deep-links to a lobby
 
 ## Setup
@@ -31,7 +31,6 @@
 | Move cursor | Her eyes follow you (eyes-follow-cursor, the "抓眼睛" mechanic) |
 | Tap (quick) | Character talks (random voiced line) |
 | Hold (0.4s+) | Headpat, release to finish |
-| Scroll / pinch | Zoom |
 | ‹ / › | Previous / next lobby |
 | ♪ | Toggle BGM |
 

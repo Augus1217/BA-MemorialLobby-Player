@@ -45,13 +45,23 @@ def main():
         dst = os.path.join(DST_SPINE, name)
         os.makedirs(dst, exist_ok=True)
         copied = 0
-        # find all files recursively, skip LOD variants and scene/bg subfolders for the char
+        main_atlas_refs = set()
+        for f in os.listdir(src):
+            if not f.endswith(".atlas") or re.search(r"_(1|2|3)\.atlas$", f):
+                continue
+            with open(os.path.join(src, f), encoding="utf-8", errors="ignore") as atlas:
+                main_atlas_refs.update(
+                    line.strip() for line in atlas
+                    if line.strip().endswith(".png")
+                )
         for dirpath, _dirs, files in os.walk(src):
             rel = os.path.relpath(dirpath, src)
             if rel != "." and rel.startswith(("_",)):
                 continue
             for f in files:
-                if re.search(r"_(1|2|3)\.(skel|atlas|png)$", f):
+                if re.search(r"_(1|2|3)\.(skel|atlas)$", f):
+                    continue
+                if f.endswith(".png") and re.search(r"_(1|2|3)\.png$", f) and f not in main_atlas_refs:
                     continue
                 if "_scene" in f or "_bg" in f:
                     continue
