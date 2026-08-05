@@ -1,4 +1,4 @@
-import { Application, Assets } from 'pixi.js';
+import { Application, Assets, Texture, Sprite, MeshSimple } from 'pixi.js';
 import { Spine } from '@esotericsoftware/spine-pixi-v8';
 
 window.addEventListener('error', (e) => console.error('[renderer][uncaught]', e.message, e.filename, e.lineno));
@@ -17,6 +17,14 @@ const fadeEl = document.getElementById('fade');
 const btnPrev = document.getElementById('btnPrev');
 const btnNext = document.getElementById('btnNext');
 const btnBgm = document.getElementById('btnBgm');
+const btnSkip = document.getElementById('btnSkip');
+const btnLang = document.getElementById('btnLang');
+const btnFull = document.getElementById('btnFull');
+const btnStudents = document.getElementById('btnStudents');
+const sidePanel = document.getElementById('sidePanel');
+const sbSearch = document.getElementById('sbSearch');
+const sbList = document.getElementById('sbList');
+const sbClose = document.getElementById('sbClose');
 
 function showErr(msg) {
   errEl.style.display = 'block';
@@ -50,7 +58,6 @@ let userActiveAt = 0;
 
 // ---- eyes follow cursor (drives the same bones Look_01_M animates) ----
 let mouse = { x: -9999, y: -9999, active: false };
-let eyeBones = null;
 
 function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -127,6 +134,13 @@ let lipAnalyser = null;
 let lipActive = false;
 const lipBuf = new Uint8Array(1024);
 
+// In-memory lookup of the AudioBuffer (or fallback to a 'duration' probe) for the
+// most recently started voice. The reversed-engineered CoDialog coroutine waits
+// `audioClip.length + 0.5` seconds after each line — relying on the spine animation
+// duration (as the old code did) was wrong because talk_01_M may end before the
+// voice finishes (or vice-versa) when the line is short or has trailing ambience.
+const voiceLengthCache = new Map();   // voiceId (lower) -> seconds (Promise)
+
 function ensureAudio() {
   if (!audioCtx) {
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -139,6 +153,40 @@ function ensureAudio() {
   }
   if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
+}
+
+// Probe the ogg for its duration without downloading it twice: fetch as ArrayBuffer,
+// decodeAudioData into an AudioBuffer, cache the length.  Falls back to <audio>
+// element's .duration if WebAudio is unavailable.
+async function probeVoiceLength(name) {
+  const lower = name.toLowerCase();
+  if (voiceLengthCache.has(lower)) return voiceLengthCache.get(lower);
+  const url = `assets/voice/${currentLobbyVoiceFolder}/${lower}.ogg`;
+  const p = (async () => {
+    try {
+      const ctx = ensureAudio();
+      if (ctx) {
+        const buf = await fetchRetry(url).then((r) => r.arrayBuffer());
+        const ab = await ctx.decodeAudioData(buf);
+        return ab.duration;
+      }
+    } catch (e) {
+      // fall through
+    }
+    try {
+      const a = new Audio(url);
+      await new Promise((res) => {
+        if (a.readyState >= 1) return res();
+        a.addEventListener('loadedmetadata', res, { once: true });
+        a.addEventListener('error', res, { once: true });
+      });
+      return Number.isFinite(a.duration) ? a.duration : 1.5;
+    } catch {
+      return 1.5;
+    }
+  })();
+  voiceLengthCache.set(lower, p);
+  return p;
 }
 
 // Drive the mouth bones from live voice amplitude (on top of the baked _M lip sync),
@@ -166,65 +214,73 @@ function setupLipHook(target) {
   };
 }
 
-// ---- eyes follow cursor ----
-// Basis: 264/279 lobbies ship Look_01_M / Look_01, a single-pose animation that
-// translates the eye bones by their "looking" offsets. We drive those same bones
-// every frame toward the cursor, clamped to each lobby's own pose offsets.
+// ---- eyes follow the pointer ----
+// Mechanism (VERIFIED against the skeleton rig + BA2LW MainControl recreation):
+//   * Every lobby skeleton rigs the whole face on two master "touch" bones:
+//     `Touch_Point` (pat) and `Touch_Eye` (look). Transform constraints bind the
+//     eye globes (mix ~0.10-0.15), eyebrows, nose, mouth, halo and hair to
+//     `Touch_Eye_Key` (a CHILD of Touch_Eye) — so moving `Touch_Eye` makes the
+//     eyes track.
+//   * Look_01_M is only a single-keyframe pose on the 4 eye-globe bones
+//     (dur 0.00). The game plays it on Track 1 (Loop=1) as the "look mode" clip,
+//     but the actual tracking is the per-frame Touch_Eye movement toward the
+//     pointer, clamped to a radius and eased with a look speed (BA2LW:
+//     lookBone.SetPositionSkeletonSpace(clamp(mouse)) + MoveTowards).
+let lookBone = null;
+let LOOK_RADIUS_UNITS = 180;  // max Touch_Eye offset from its rest pose (spine units)
+let LOOK_SPEED = 6;           // ease rate (1/s)
+
 function setupEyes() {
-  eyeBones = null;
+  lookBone = null;
   if (!spine) return;
-  const name = has('Look_01_M') ? 'Look_01_M' : has('Look_01') ? 'Look_01' : null;
-  if (!name) return;
-  const look = spine.state.data.skeletonData.findAnimation(name);
-  const list = [];
-  for (const tl of look.timelines) {
-    if (tl.boneIndex === undefined || tl.constructor.name !== 'TranslateTimeline') continue;
-    const f = tl.frames;
-    const n = f.length;
-    list.push({ index: tl.boneIndex, ox: f[n - 3 + 1], oy: f[n - 3 + 2], x: 0, y: 0 });
-  }
-  if (list.length) {
-    eyeBones = list;
-    log(`眼睛跟隨: ${list.length} 骨骼 (${name}) — ${list.map(b=>b.index).join(',')}`);
-  }
+  lookBone = spine.skeleton.findBone('Touch_Eye') || spine.skeleton.findBone('Touch_Eye_Key') || null;
+  log(lookBone ? `眼睛跟隨: ${lookBone.data.name} 骨骼` : '眼睛跟隨: 無 Touch_Eye 骨骼');
 }
 
+// Place `bone` at the given world (skeleton space) position by solving its local
+// transform against its parent (bone.x/y are relative to the parent).
+function setBoneWorld(bone, wx, wy) {
+  const p = bone.parent;
+  if (!p) { bone.x = wx; bone.y = wy; return; }
+  const l = p.worldToLocal({ x: wx, y: wy });
+  bone.x = l.x; bone.y = l.y;
+}
+
+let lastEyeFollowT = 0;
 function applyEyeFollow(self) {
-  if (!eyeBones || !self.skeleton) return;
-  // 說話/摸頭時由 _M 動畫控制表情，眼睛跟隨暫停（緩慢歸零，不覆寫動畫）
-  if (state.busy) {
-    for (const b of eyeBones) { b.x *= 0.9; b.y *= 0.9; }
-    return;
-  }
-  const bones = self.skeleton.bones;
-  const sx = (mouse.x - self.x) / self.scale.x;
-  const sy = (mouse.y - self.y) / self.scale.y;
-  for (const b of eyeBones) {
-    const bone = bones[b.index];
-    if (!bone || !bone.getWorldX) continue;
-    const ex = bone.getWorldX(), ey = bone.getWorldY();
-    const dx = sx - ex, dy = sy - ey;
-    const dist = Math.hypot(dx, dy);
-    let tx = 0, ty = 0;
-    if (mouse.active && dist > 14) {
-      const p = bone.parent;
-      if (!p) continue;
-      const R = 150;
-      const ldx = dx * p.a + dy * p.b;
-      const ldy = dx * p.c + dy * p.d;
-      tx = b.ox * clamp(ldx / R, -1, 1);
-      ty = b.oy * clamp(ldy / R, -1, 1);
+  const bone = lookBone;
+  if (!bone || !self.skeleton) return;
+  const now = performance.now() / 1000;
+  const dt = Math.min(0.05, Math.max(0, now - (lastEyeFollowT || now)));
+  lastEyeFollowT = now;
+  if (state.busy === 'look') {
+    // 抓眼：Touch_Eye 朝指標移動（clamp 到 LOOK_RADIUS_UNITS 內），constraints 帶動全臉。
+    const c = self.worldTransform.applyInverse({ x: mouse.x, y: mouse.y });
+    const rest = bone.parent.localToWorld({ x: bone.data.x, y: bone.data.y });
+    let dx = c.x - rest.x, dy = c.y - rest.y;
+    const d = Math.hypot(dx, dy);
+    if (d > LOOK_RADIUS_UNITS) { dx *= LOOK_RADIUS_UNITS / d; dy *= LOOK_RADIUS_UNITS / d; }
+    const k = clamp(LOOK_SPEED * dt, 0, 1);
+    setBoneWorld(bone,
+      bone.worldX + (rest.x + dx - bone.worldX) * k,
+      bone.worldY + (rest.y + dy - bone.worldY) * k);
+  } else {
+    // 其餘情況（idle / talk / pat / 釋放後）緩慢回歸 setup pose，眼睛不再盯指標。
+    const k = Math.max(clamp(LOOK_SPEED * dt, 0, 1), 0.06);
+    if (Math.abs(bone.x - bone.data.x) < 0.01 && Math.abs(bone.y - bone.data.y) < 0.01) {
+      bone.setToSetupPose();
+      return;
     }
-    b.x += (tx - b.x) * 0.16;
-    b.y += (ty - b.y) * 0.16;
-    bone.x = b.x;
-    bone.y = b.y;
+    bone.x += (bone.data.x - bone.x) * k;
+    bone.y += (bone.data.y - bone.y) * k;
   }
 }
 
 let currentLobbyVoiceFolder = null;
 let voiceCalls = 0;
-
+// Returned by playVoice() so callers (CoDialog-style coroutines) can `await` the
+// end-of-line event with the precise `audioClip.length + 0.5` pacing that the
+// real client uses.
 function playVoice(voiceId) {
   voiceCalls++;
   const name = voiceId.toLowerCase();
@@ -244,15 +300,44 @@ function playVoice(voiceId) {
   audio.onended = stopLip;
   audio.onerror = stopLip;
   audio.play().catch(() => stopLip());
+  // Returns a promise that settles when the voice finishes (+0.5s margin for
+  // trailing ambience), replicating the CoDialog `WaitForSeconds(length+0.5)`
+  // pacing found in the reversed ChatDialog.<CoDialog>d__43.MoveNext.
+  const endPromise = new Promise((resolve) => {
+    const done = () => { lipActive = false; resolve(); };
+    audio.addEventListener('ended', done, { once: true });
+    audio.addEventListener('error', done, { once: true });
+  }).then(() => new Promise((r) => setTimeout(r, 500)));
+  // Save as last seen voice promise so playTalk() can await it for CoDialog pacing.
+  lastVoicePromise = endPromise;
+  lastVoiceName = voiceId;
+  nextVoiceToken();   // bump the token so playTalk() detects a new voice fired
+  return endPromise;
 }
 
 function onAnimationEvent(_entry, ev) {
-  let voiceId = null;
-  if (ev.data.name.startsWith('Sound/')) voiceId = ev.data.name.slice(6);
-  else if (ev.data.name === 'Talk' && ev.stringValue) voiceId = ev.stringValue;
+  // Voice-event format in BA MemorialLobby skeletons — VERIFIED by dumping the
+  // SkeletonBinary EventTimelines: the generic marker event is named "Talk"
+  // (ev.data.name) while the REAL voice id lives in ev.stringValue, e.g.
+  //   EventTimeline frames=2
+  //     t=1.333 ev.data.name="Talk"  ev.stringValue="Airi_MemorialLobby_1_1"
+  //     t=8.600 ev.data.name="Talk"  ev.stringValue="Airi_MemorialLobby_1_2"
+  // (Reading ev.data.name alone made every line fire a bogus playVoice("Talk")
+  // against the non-existent talk.ogg, erroring instantly and cutting the whole
+  // talk animation short.) lowercase id + voiceFolder -> /assets/voice/<Folder>/<id>.ogg.
+  if (!ev || !ev.data) return;
+  const voiceId = (ev.stringValue || ev.data.stringValue || ev.data.name || '').trim();
   if (!voiceId) return;
-  if (voiceSkip.has(voiceId)) return;
-  // Sound/ 與 Talk 事件在同時刻成對出現，避免重複播放
+  // VERIFIED: Media stores files by lowercase id (e.g. airi_memoriallobby_1_1.ogg)
+  // and missingMedia records that FILENAME. Compare against the lower id, exactly
+  // the key playVoice() uses, so the two known-missing files are actually skipped.
+  if (voiceSkip.has(voiceId.toLowerCase())) return;
+  // The generic "Talk" marker (and any other non-voice id) has no matching .ogg;
+  // filter against the character's known voice list so it never fires a bogus
+  // playVoice (which errored and cut the whole talk short).
+  if (validVoices && !validVoices.has(voiceId.toLowerCase())) return;
+  // Some events fire twice in close succession (e.g. from overlapping tracks);
+  // dedupe identical voices within 500 ms.
   const now = performance.now();
   if (voiceId === lastVoiceId && now - lastVoiceTime < 500) return;
   lastVoiceId = voiceId;
@@ -263,6 +348,8 @@ function onAnimationEvent(_entry, ev) {
 let lastVoiceId = null;
 let lastVoiceTime = 0;
 const voiceSkip = new Set();
+let validVoices = null;   // 合法語音檔名集合（voice_index.json[characterId]），過濾泛用事件
+let VOICE_INDEX = {};     // characterId -> 該角色語音檔名清單
 
 // ---- BGM ----
 let bgmAudio = null;
@@ -297,11 +384,38 @@ function toggleBgm() {
 //   Track 0: Start_Idle_01 (once) -> Idle_01 (loop)
 //   Track 1: reactive _M (talk/look/pat, lip + mouth)
 //   Track 2: reactive _A (secondary, synced with _M)
+// State mirrors the fields at [SpineCharacter+0xb0 / +0xa8 / +0xa0]:
+//   blockInteractionOnPlay  ⇔ byte [+0xb0]  – when true, the spine event path
+//                                               (OnSpikeEvent -> PlayVoiceEvent) is
+//                                               short-circuited and the player must
+//                                               finish the current talk animation
+//                                               before the next voice line plays.
+//   blockList               ⇔ List<object> [+0xc8] – requester instances that are
+//                                               currently blocking interactions
+//                                               (in-game: dialog boxes add themselves
+//                                               via BlockInteraction(dialogBox, true)).
+//   talkDelegate / voiceDelegate (we don't bind Spine delegates in JS; the
+//   equivalent is just the talk/pat flow below).
 const state = {
-  busy: null,        // 'talk' | 'pat' | null
-  autonomy: null,    // scheduled timeout
+  busy: null,                 // 'talk' | 'look' | 'pat' | null
+  blockInteractionOnPlay: false,  // mirrors SpineCharacter+0xb0
+  blockList: [],                   // mirrors SpineCharacter+0xc8 (List<object>)
+  autonomy: null,
   timers: [],
+  introBlock: false,          // memorial intro timeline (Start_Idle_01) locks input
 };
+
+// BlockInteraction-equivalent: any object (e.g. a dialog box) can register itself
+// as a blocker; BodyTouch (pat) checks the list before allowing input.  Used here
+// to suppress pat while a Talk animation is mid-play.
+function blockInteraction(requester, block) {
+  const i = state.blockList.indexOf(requester);
+  if (block && i < 0) state.blockList.push(requester);
+  else if (!block && i >= 0) state.blockList.splice(i, 1);
+}
+function isInteractionAvailable() {
+  return state.blockList.length === 0 && !state.blockInteractionOnPlay;
+}
 
 function animNames() {
   return spine.state.data.skeletonData.animations.map(a => a.name);
@@ -320,39 +434,151 @@ function clearTimers() {
   clearTimeout(state.autonomy);
 }
 
-function playStart() {
-  if (!spine) return;
-  spine.state.setAnimation(0, 'Start_Idle_01', false);
-  spine.state.addAnimation(0, 'Idle_01', true, 0);
-}
-
 function restTracks() {
   if (!spine) return;
   spine.state.setEmptyAnimation(1, 0.45);
   spine.state.setEmptyAnimation(2, 0.45);
 }
 
-function playTalk() {
-  if (!spine || state.busy === 'pat') return;
+async function playTalk() {
+  if (!spine) return;
+  // ---- BlockInteraction constraint from reversed code ----
+  // In-game, the dialog system calls BlockInteraction(dialogBox, true) which
+  // pushes the blocking requester onto [SpineCharacter+0xc8] (the blockList).
+  // While blocked, BodyTouch (pat) is no-op.  And the OnSpikeEvent path checks
+  // [SpineCharacter+0xb0] (BlockInteractionOnPlay) to determine whether a new
+  // voice line should be allowed while the previous one is still running.
+  if (state.blockInteractionOnPlay) { log('Talk: 拒絕 (voice busy)'); return; }
+  if (state.busy === 'pat') { log('Talk: 拒絕 (pat)'); return; }
+
   state.busy = 'talk';
+  blockInteraction('talk', true);           // mirrors [this+0xc8].Add(requester)
+  state.blockInteractionOnPlay = true;      // mirrors byte [+0xb0] ← from dialog start
+
   const talks = animNames().filter(n => n.startsWith('Talk_') && n.endsWith('_M'));
   if (!talks.length) { state.busy = null; return; }
-  const m = pick(talks);
+
+  // Prefer Talk animations that have voice events (lobby_voice_schedule.json).
+  // In-game the dialog excel (CharacterDialogInfo.AnimationName) hands the
+  // exact clip name, but server doesn't expose MemorialLobby dialogs — the
+  // closest determinism we can deliver is to filter to clips that actually
+  // emit voice events. Falls back to all Talk_N_M if schedule is unavailable.
+  const schAnim = SCHEDULE?.lobbies?.[currentLobby]?.animations || {};
+  const withVoice = talks.filter(n => (schAnim[n]?.voice || []).length > 0);
+  const pool = withVoice.length ? withVoice : talks;
+  const m = pick(pool);
   const a = m.replace(/_M$/, '_A');
   spine.state.setAnimation(1, m, false);
   if (animNames().includes(a)) spine.state.setAnimation(2, a, false);
   else spine.state.setEmptyAnimation(2, 0.3);
-  after(spine.state.data.skeletonData.findAnimation(m).duration * 1000 + 600, () => {
+
+  // ---- CoDialog-style pacing ----
+  // Play the full talk animation and let EVERY voice event along its timeline
+  // fire (each playVoice starts its own <audio> and bumps lastVoicePromise).
+  // We wait until the animation finishes on track 1, then hold for the trailing
+  // margin of the last voice line (`audioClip.length + 0.5`), mirroring the
+  // reversed ChatDialog.<CoDialog>d__43.MoveNext pacing.
+  const anim = spine.state.data.skeletonData.findAnimation(m);
+  const animMs = (anim?.duration ?? 2.0) * 1000;
+  const startToken = voiceToken;
+  const t0 = performance.now();
+
+  // Poll until the talk animation on track 1 has played through (animationTime
+  // reached its end) — this guarantees multi-line talks (e.g. Talk_01_M with
+  // events at 1.33s and 8.60s) run to completion instead of cutting after the
+  // first line. Bail early if the interaction was superseded.
+  let voiceFired = false;
+  const deadline = t0 + animMs + 500;
+  while (performance.now() < deadline) {
+    if (state.busy !== 'talk') return;
+    const tr = spine.state.tracks[1];
+    const animEnd = tr?.animationEnd || animMs;
+    const animDone = tr ? tr.animationTime >= animEnd - 0.05 : true;
+    if (animDone) { voiceFired = voiceToken > startToken; break; }
+    await new Promise((r) => setTimeout(r, 60));
+  }
+
+  // Wait for the most-recently-fired voice to finish. `lastVoicePromise` was
+  // reassigned by playVoice() during the run; re-read it here so we await the
+  // last line actually played. If nothing fired, wait out the anim remainder.
+  if (voiceFired) {
+    await lastVoicePromise;
+  } else {
+    const remain = animMs - (performance.now() - t0);
+    if (remain > 0) await new Promise((r) => setTimeout(r, remain + 200));
+  }
+
+  if (state.busy !== 'talk') return;
+
+  const done = () => {
     if (state.busy !== 'talk') return;
     restTracks();
     state.busy = null;
+    blockInteraction('talk', false);
+    state.blockInteractionOnPlay = false;
+    scheduleAutonomy();
+  };
+  done();
+}
+
+// Track the last voice end-Promise so playTalk() can use it for CoDialog pacing.
+// `voiceToken` is a monotonically increasing counter, bumped every time a new
+// voice starts; playTalk() can compare its snapshot to detect that a new voice
+// has fired (and await the corresponding `lastVoicePromise`).
+let lastVoicePromise = Promise.resolve();
+let lastVoiceName = null;
+let voiceToken = 0;
+function nextVoiceToken() { return ++voiceToken; }
+
+// Look (抓眼) — a hold interaction, VERIFIED:
+//   * BA2LW recreation (Look.cs) uses IPointerDownHandler/IPointerUpHandler, so
+//     Look = press-and-hold, not a tap.
+//   * SpineClip assets (SpineLobbies/*_home/*.json) show Look_01_M Loop=1 (loop
+//     while held) and LookEnd_01_M/LookEnd_01_A Loop=0 (release). Look_01_M is a
+//     single-keyframe pose on the eye-globe bones (dur 0.00) — it flags "look
+//     mode"; the actual eye tracking is the per-frame Touch_Eye bone movement
+//     that applyEyeFollow() performs (see setupEyes), which the face transform
+//     constraints relay to the eyes.
+// On release the LookEnd plays and Touch_Eye eases back to its setup pose.
+// BodyTouchCB carries no screen coordinate, so Pat-vs-Look is routed here by the
+// head region test (Touch_Eye/Touch_Point anchor).
+function startLook() {
+  if (!spine) return;
+  if (state.introBlock) return;                 // intro timeline locks input
+  if (state.blockInteractionOnPlay) { log('Look: 拒絕 (voice busy)'); return; }
+  if (state.busy === 'pat') { log('Look: 拒絕 (pat)'); return; }
+  if (state.busy === 'look') return;
+  if (!has('Look_01_M')) return;
+
+  clearTimers();                       // interrupt an ongoing talk
+  state.busy = 'look';
+  blockInteraction('look', true);      // mirrors [this+0xc8].Add(requester)
+  state.blockInteractionOnPlay = true; // mirrors byte [+0xb0]
+
+  spine.state.setAnimation(1, 'Look_01_M', true);
+  if (has('Look_01_A')) spine.state.setAnimation(2, 'Look_01_A', true);
+  log('抓眼 (hold)');
+}
+
+function endLook() {
+  if (!spine || state.busy !== 'look') return;
+  state.busy = null;
+  blockInteraction('look', false);
+  state.blockInteractionOnPlay = false;
+  spine.state.setAnimation(1, 'LookEnd_01_M', false);
+  if (has('LookEnd_01_A')) spine.state.setAnimation(2, 'LookEnd_01_A', false);
+  after(500, () => {
+    if (state.busy || patting) return;
+    restTracks();
     scheduleAutonomy();
   });
-  log(`互動: ${m}`);
+  log('抓眼結束');
 }
 
 function startPat() {
   if (!spine || patting) return;
+  if (state.introBlock) return;                 // intro timeline locks input
+  if (state.busy === 'talk' && !isInteractionAvailable()) return; // blocked by dialog
   patting = true;
   if (!has('Pat_01_M')) { patting = false; return; }
   clearTimers();              // interrupt an ongoing talk / look
@@ -380,11 +606,548 @@ function endPat() {
 function scheduleAutonomy() {
   clearTimeout(state.autonomy);
   state.autonomy = setTimeout(() => {
-    if (!spine || state.busy) { scheduleAutonomy(); return; }
+    if (!spine || state.busy || state.introBlock) { scheduleAutonomy(); return; }
     if (Math.random() < 0.5 && hasAny('Talk_')) playTalk();
     else scheduleAutonomy();
   }, rand(7000, 15000));
 }
+
+// ---- idle clip switching (reversed PortraitSpineCharacter.set_ClipToPlayOnIdle) ----
+// The in-game UILobbyContainer.Init loads [x21+0x24] (isMemorial) and then sets
+// either "01" (default portrait idle) or "S2_01" (memorial lobby timeline intro).
+// We load this from the lobby_index metadata entry and switch the idle clip name.
+//
+// Idle chain: Start_Idle_01 once → Idle_01 (or S2_01) loop on track 0.
+// The reversed RefreshClipToPlayOnIdle looks up the animation in the dictionary
+// [this+0x58] for the given clip name, then plays it via the standard flow.
+let idleClip = null;   // effective idle loop name
+
+function loadIdleClip(entry) {
+  const isMemorial = !!(entry?.isMemorial);
+  idleClip = isMemorial ? 'S2_01' : 'Idle_01';
+  if (isMemorial && !has(idleClip)) idleClip = 'Idle_01'; // fallback
+}
+
+function playStart() {
+  if (!spine) return;
+  const introName = 'Start_Idle_01';
+  const hasStart = has(introName);
+  if (!idleClip) idleClip = has('S2_01') ? 'S2_01' : 'Idle_01';
+  if (hasStart) {
+    // Memorial intro timeline (PlayableDirector) occupies the screen and locks
+    // interaction until it finishes (matching UILobby memory lobby flow). Track 0
+    // completion of the intro clears the lock (see onTrackComplete).
+    state.introBlock = true;
+    spine.state.setAnimation(0, introName, false);
+    spine.state.addAnimation(0, idleClip, true, 0);
+  } else {
+    spine.state.setAnimation(0, idleClip, true);
+  }
+}
+
+// ---- MemoryLobbySkip (reversed UILobbySpineController.MemoryLobbySkip) ----
+// The in-game logic sets `PlayableDirector.set_time = duration` followed by
+// `SpineBase.SkipToIdleImmediately()`.  On the Electron side, this translates
+// to immediately cutting from the Idle_01 intro animation (Start_Idle_01) to
+// the final Idle_01 looping track.
+function memoryLobbySkip() {
+  if (!spine) return;
+  state.introBlock = false;
+  spine.state.setAnimation(0, idleClip || 'Idle_01', true);
+  log('skip to idle');
+}
+
+// ---- debug surface for the reversed state ----
+// `ba_debug.state` is a frozen-ish snapshot that other tools (or the devtools
+// console) can use to inspect the BlockInteraction / Talk / Voice state machine.
+// Mirrors the SpineCharacter+0xb0 / +0xc8 / busy fields, useful when tweaking.
+window.ba_debug = {
+  state: () => ({
+    busy: state.busy,
+    blockInteractionOnPlay: state.blockInteractionOnPlay,
+    blockList: [...state.blockList],
+    introBlock: state.introBlock,
+    pendingVoiceName: lastVoiceName,
+    idleClip,
+    validVoices: validVoices ? [...validVoices].sort().slice(0, 8) : null,
+  }),
+  triggerTalk: () => playTalk(),
+  triggerLook: (on) => on ? startLook() : endLook(),
+  triggerPat: (on) => on ? startPat() : endPat(),
+  skipMemoryLobby: () => memoryLobbySkip(),
+  headPos: () => {
+    const b = headBone();
+    if (!spine || !b) return null;
+    const g = spine.toGlobal({ x: b.worldX, y: b.worldY });
+    return { x: g.x, y: g.y, scale: spine.scale.x, radius: HEAD_PAT_RADIUS * spine.scale.x };
+  },
+  look: {
+    radius: () => LOOK_RADIUS_UNITS,
+    speed: () => LOOK_SPEED,
+    setRadius: (v) => { LOOK_RADIUS_UNITS = v; },
+    setSpeed: (v) => { LOOK_SPEED = v; },
+  },
+  boneWorld: (name) => {
+    if (!spine) return null;
+    const b = spine.skeleton.findBone(name);
+    return b ? { x: b.worldX, y: b.worldY } : null;
+  },
+  spineSlot: (name) => {
+    if (!spine) return null;
+    const slot = spine.skeleton.findSlot(name);
+    if (!slot) return null;
+    return {
+      blendMode: slot.data.blendMode,
+      bone: slot.bone ? slot.bone.data.name : null,
+      attachment: slot.getAttachment() ? slot.getAttachment().name : null,
+      color: slot.color ? { r: slot.color.r, g: slot.color.g, b: slot.color.b, a: slot.color.a } : null,
+    };
+  },
+  setTimeScale: (v) => { if (spine) spine.state.timeScale = v; },
+  setSlotBlend: (name, m) => { const s = spine?.skeleton?.findSlot(name); if (s) s.data.blendMode = m; },
+  dbgRenderer: () => ({ type: app.renderer.type, w: app.canvas.width, h: app.canvas.height, spineVisible: spine ? spine.visible : null }),
+  setSpineVisible: (v) => { if (spine) spine.visible = v; },
+  dbgTexPixels: () => {
+    if (!spine) return 'no-spine';
+    const slot = spine.skeleton.findSlot('top_light');
+    const at = slot && slot.getAttachment();
+    const res = at && at.region && at.region.texture && at.region.texture.source ? at.region.texture.source.resource : null;
+    if (!res) return 'no-resource';
+    const c = document.createElement('canvas');
+    const N = 8;
+    c.width = N; c.height = N;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(res, 0, 0, N, N);
+    const d = ctx.getImageData(0, 0, N, N).data;
+    const out = [];
+    for (let y = 0; y < N; y++) { const row = []; for (let x = 0; x < N; x++) { const i = (y * N + x) * 4; row.push(`${d[i]},${d[i + 1]},${d[i + 2]},${d[i + 3]}`); } out.push(row.join(' ')); }
+    return { resType: res.constructor.name, grid: out };
+  },
+  dbgClearMeshes: () => {
+    try {
+      for (const k of ['__dbgMesh', '__dbgWhiteMesh', '__dbgLightQuad', '__dbgSpr']) {
+        if (window[k]) { app.stage.removeChild(window[k]); window[k] = null; }
+      }
+      return 'cleared';
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgTestRegion: () => {
+    try {
+      const slot = spine.skeleton.findSlot('top_light');
+      const at = slot && slot.getAttachment();
+      const cd = spine.attachmentCacheData[slot.data.index][at.name];
+      if (!window.__dbgRegQuad) {
+        const m = new MeshSimple({
+          texture: cd.texture,
+          vertices: new Float32Array([-200, -200, 200, -200, 200, 200, -200, 200]),
+          uvs: new Float32Array([0.002, 0.002, 0.994, 0.002, 0.994, 0.739, 0.002, 0.739]),
+          indices: new Uint16Array([0, 1, 2, 0, 2, 3]),
+        });
+        window.__dbgRegQuad = m;
+        app.stage.addChild(m);
+      }
+      const m = window.__dbgRegQuad;
+      m.scale.set(1, 1);
+      m.position.set(app.renderer.width / 2, app.renderer.height / 2);
+      return 'region quad added';
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgShowMeshTint: (hex) => {
+    try {
+      const slot = spine.skeleton.findSlot('top_light');
+      const at = slot && slot.getAttachment();
+      const cd = spine.attachmentCacheData[slot.data.index][at.name];
+      if (!window.__dbgMesh2) {
+        const m = new MeshSimple({
+          texture: cd.texture,
+          vertices: cd.vertices,
+          uvs: cd.uvs,
+          indices: new Uint16Array(cd.indices),
+        });
+        window.__dbgMesh2 = m;
+        app.stage.addChild(m);
+      }
+      const m = window.__dbgMesh2;
+      m.texture = cd.texture;
+      m.vertices = cd.vertices;
+      m.tint = hex || 0xffffff;
+      m.alpha = 1;
+      m.blendMode = 'normal';
+      m.scale.set(spine.scale.x, spine.scale.y);
+      m.position.set(spine.x, spine.y);
+      return 'tint mesh added: ' + (hex || 'white');
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgShowMeshUVs: (mode) => {
+    try {
+      const slot = spine.skeleton.findSlot('top_light');
+      const at = slot && slot.getAttachment();
+      const cd = spine.attachmentCacheData[slot.data.index][at.name];
+      if (!window.__dbgMesh3) {
+        const m = new MeshSimple({
+          texture: cd.texture,
+          vertices: cd.vertices,
+          uvs: cd.uvs,
+          indices: new Uint16Array(cd.indices),
+        });
+        window.__dbgMesh3 = m;
+        app.stage.addChild(m);
+      }
+      const m = window.__dbgMesh3;
+      m.texture = cd.texture;
+      m.vertices = cd.vertices;
+      const n = cd.vertices.length / 2;
+      let uvs;
+      if (mode === 'zero') uvs = new Float32Array(n * 2);
+      else if (mode === 'region') {
+        uvs = new Float32Array(n * 2);
+        for (let i = 0; i < n; i++) { uvs[i * 2] = 0.25 + 0.5 * (i % 2); uvs[i * 2 + 1] = 0.15 + 0.3 * ((i >> 1) % 2); }
+      } else uvs = cd.uvs;
+      m.geometry.getBuffer('aUv').data = uvs;
+      m.geometry.getBuffer('aUv').update();
+      m.tint = 0xffffff;
+      m.scale.set(spine.scale.x, spine.scale.y);
+      m.position.set(spine.x, spine.y);
+      return { mode, n, texSrc: cd.texture.source?.resource?.url || cd.texture.source?.resource?.constructor?.name };
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgShowMeshAlpha: (alpha, blend) => {
+    try {
+      const slot = spine.skeleton.findSlot('top_light');
+      const at = slot && slot.getAttachment();
+      const cd = spine.attachmentCacheData[slot.data.index][at.name];
+      if (!window.__dbgMeshA) {
+        const m = new MeshSimple({
+          texture: cd.texture,
+          vertices: cd.vertices,
+          uvs: cd.uvs,
+          indices: new Uint16Array(cd.indices),
+        });
+        window.__dbgMeshA = m;
+        app.stage.addChild(m);
+      }
+      const m = window.__dbgMeshA;
+      m.texture = cd.texture;
+      m.vertices = cd.vertices;
+      m.alpha = alpha;
+      m.blendMode = blend || 'normal';
+      m.scale.set(spine.scale.x, spine.scale.y);
+      m.position.set(spine.x, spine.y);
+      return 'mesh alpha=' + alpha + ' blend=' + (blend || 'normal');
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgDrawOrder: () => {
+    try {
+      const do_ = spine.skeleton.drawOrder;
+      const idx = do_.findIndex(s => s.data.name === 'top_light');
+      return { total: do_.length, lightIdx: idx, around: do_.slice(Math.max(0, idx - 3), idx + 4).map(s => s.data.name) };
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgLightLive: () => {
+    try {
+      const slot = spine.skeleton.findSlot('top_light');
+      const at = slot && slot.getAttachment();
+      const cd = at && spine.attachmentCacheData[slot.data.index] ? spine.attachmentCacheData[slot.data.index][at.name] : null;
+      const skColor = spine.skeleton.color;
+      const slColor = slot ? slot.color : null;
+      const atColor = at ? at.color : null;
+      return {
+        hasCd: !!cd,
+        skipRender: cd ? cd.skipRender : null,
+        clipped: cd ? cd.clipped : null,
+        darkTint: cd ? cd.darkTint : null,
+        darkColor: cd && cd.darkColor ? { r: cd.darkColor.r, g: cd.darkColor.g, b: cd.darkColor.b, a: cd.darkColor.a } : null,
+        verts: cd ? cd.vertices.length : null,
+        vertsVals: cd ? [...cd.vertices].slice(0, 8).map(x => +x.toFixed(0)) : null,
+        uvs: cd ? [...cd.uvs].slice(0, 8).map(x => +x.toFixed(3)) : null,
+        idx: cd ? cd.indices.length : null,
+        tex: cd ? { w: cd.texture.width, h: cd.texture.height, src: cd.texture.source?.resource?.constructor?.name, uid: cd.texture.uid } : null,
+        skA: skColor.a, slotA: slColor ? slColor.a : null, attA: atColor ? atColor.a : null,
+        alpha: skColor.a * (slColor ? slColor.a : 0) * (atColor ? atColor.a : 0),
+        spineAlpha: spine.alpha, groupAlpha: spine.groupAlpha,
+      };
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgBatchState: () => {
+    try {
+      const pipe = app.renderer.renderPipes.spine;
+      if (!pipe || !pipe.gpuSpineData) return 'no-spine-pipe';
+      const gpu = pipe.gpuSpineData[spine.uid];
+      if (!gpu) return 'no-gpu-data';
+      const slot = spine.skeleton.findSlot('top_light');
+      const at = slot && slot.getAttachment();
+      const cd = spine.attachmentCacheData[slot.data.index][at.name];
+      const b = gpu.slotBatches[cd.id];
+      const slotNames = Object.keys(gpu.slotBatches);
+      return {
+        batchCount: slotNames.length,
+        lightBatchable: b ? {
+          batcherName: b.batcherName,
+          texture: b.texture ? b.texture.uid : null,
+          indexSize: b.indexSize, attributeSize: b.attributeSize,
+          blendMode: b.blendMode,
+          positions0: b.positions ? [...b.positions].slice(0, 4).map(x => +x.toFixed(0)) : null,
+          uvs0: b.uvs ? [...b.uvs].slice(0, 4).map(x => +x.toFixed(3)) : null,
+        } : null,
+        hasDirty: spine.spineAttachmentsDirty,
+        hasTexDirty: spine.spineTexturesDirty,
+      };
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgForceDirty: () => {
+    try {
+      spine.spineAttachmentsDirty = true;
+      spine.spineTexturesDirty = true;
+      return 'forced dirty';
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgTransform: () => {
+    try {
+      const gt = spine.groupTransform;
+      const pipe = app.renderer.renderPipes.spine;
+      const gpu = pipe.gpuSpineData[spine.uid];
+      const slot = spine.skeleton.findSlot('top_light');
+      const at = slot.getAttachment();
+      const cd = spine.attachmentCacheData[slot.data.index][at.name];
+      const b = gpu.slotBatches[cd.id];
+      return {
+        spineScale: [spine.scale.x, spine.scale.y],
+        spinePos: [spine.x, spine.y],
+        groupTransform: { a: gt.a, b: gt.b, c: gt.c, d: gt.d, tx: gt.tx, ty: gt.ty },
+        batchableTransform: b.transform === gt ? 'same-object' : 'different',
+        batchTransform: b.transform ? { a: b.transform.a, b: b.transform.b, c: b.transform.c, d: b.transform.d, tx: b.transform.tx, ty: b.transform.ty } : null,
+      };
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgSwapLightTex: () => {
+    try {
+      const pipe = app.renderer.renderPipes.spine;
+      const gpu = pipe.gpuSpineData[spine.uid];
+      const slot = spine.skeleton.findSlot('top_light');
+      const at = slot.getAttachment();
+      const cd = spine.attachmentCacheData[slot.data.index][at.name];
+      const b = gpu.slotBatches[cd.id];
+      const other = Object.values(gpu.slotBatches).find(x => x.texture && x.texture !== b.texture && x.texture.width === 2048);
+      if (!other) return 'no-other-texture';
+      b.texture = other.texture;
+      cd.texture = other.texture;
+      spine.spineAttachmentsDirty = true;
+      spine.spineTexturesDirty = true;
+      return { swappedTo: { w: other.texture.width, h: other.texture.height, uid: other.texture.uid } };
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgScreenSprite: (mode) => {
+    try {
+      if (!window.__dbgSpr2) {
+        const s = new Sprite(Texture.WHITE);
+        s.width = 300;
+        s.height = 300;
+        s.tint = 0xff0000;
+        s.position.set(200, 600);
+        window.__dbgSpr2 = s;
+        app.stage.addChild(s);
+      }
+      window.__dbgSpr2.blendMode = mode || 'screen';
+      return 'sprite blend=' + (mode || 'screen');
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgTexAlphaMode: () => {
+    try {
+      const slot = spine.skeleton.findSlot('top_light');
+      const at = slot.getAttachment();
+      const cd = spine.attachmentCacheData[slot.data.index][at.name];
+      const out = { light: { uid: cd.texture.uid, alphaMode: cd.texture.alphaMode, srcAlphaMode: cd.texture.source.alphaMode } };
+      const pipe = app.renderer.renderPipes.spine;
+      const gpu = pipe.gpuSpineData[spine.uid];
+      const others = Object.values(gpu.slotBatches).map(b => ({ uid: b.texture?.uid, alphaMode: b.texture?.alphaMode, srcAlphaMode: b.texture?.source?.alphaMode, w: b.texture?.width }));
+      const unique = {};
+      for (const o of others) { const k = o.uid + '|' + o.srcAlphaMode + '|' + o.w; unique[k] = o; }
+      out.all = Object.values(unique).slice(0, 20);
+      return out;
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgShowTex: () => {
+    if (!spine) return 'no-spine';
+    const slot = spine.skeleton.findSlot('top_light');
+    const at = slot && slot.getAttachment();
+    const tex = at && at.region ? at.region.texture : null;
+    const cacheTex = spine.attachmentCacheData[slot?.data?.index]?.[at?.name]?.texture;
+    const pixiTex = cacheTex instanceof Texture ? cacheTex : (tex && tex.texture instanceof Texture ? tex.texture : null);
+    const info = {
+      regionTexCtor: tex && tex.constructor ? tex.constructor.name : null,
+      regionTexW: tex ? tex.width : null,
+      cacheTexCtor: cacheTex && cacheTex.constructor ? cacheTex.constructor.name : null,
+      cacheTexW: cacheTex ? cacheTex.width : null,
+      cacheTexH: cacheTex ? cacheTex.height : null,
+      pixiTex: pixiTex ? { w: pixiTex.width, h: pixiTex.height, src: pixiTex.source ? pixiTex.source.constructor.name : null } : null,
+    };
+    if (!pixiTex) { info.msg = 'no pixi texture'; return info; }
+    try {
+      if (!window.__dbgSprite) {
+        const s = new Sprite(Texture.EMPTY);
+        s.anchor.set(0.5);
+        window.__dbgSprite = s;
+        app.stage.addChild(s);
+      }
+      window.__dbgSprite.texture = pixiTex;
+      window.__dbgSprite.width = app.renderer.width * 0.8;
+      window.__dbgSprite.height = app.renderer.height * 0.8;
+      window.__dbgSprite.position.set(app.renderer.width / 2, app.renderer.height / 2);
+    } catch (e) { info.drawErr = String(e); }
+    return info;
+  },
+  dbgLight: async () => {
+    if (!spine) return 'no-spine';
+    const slot = spine.skeleton.findSlot('top_light');
+    if (!slot) return 'no-slot';
+    const at = slot.getAttachment();
+    const r = at && at.region ? { name: at.region.name, w: at.region.width, h: at.region.height } : null;
+    let cache = [];
+    try { cache = [...Assets.cache.keys()].slice(0, 60); } catch (e) { cache = ['err:' + e.message]; }
+    const texOf = (nm) => {
+      const s = spine.skeleton.findSlot(nm);
+      const a = s && s.getAttachment();
+      const t = a && a.region ? a.region.texture : null;
+      if (!t) return 'no-tex';
+      return {
+        name: a.region.name, w: t.width, h: t.height,
+        res: t.source && t.source.resource ? t.source.resource.constructor.name : null,
+        isEmpty: t === Texture.EMPTY,
+      };
+    };
+    const bodies = [];
+    for (const nm of ['body_01', 'body_02', 'hair_01', 'Face', 'L_Arm_01', 'R_eye_01']) {
+      const s = spine.skeleton.findSlot(nm);
+      if (s) bodies.push([nm, texOf(nm)]);
+    }
+    return {
+      attachType: at && at.constructor ? at.constructor.name : null,
+      region: r,
+      uvLen: at.uvs ? at.uvs.length : null,
+      uvs: at.uvs ? [...at.uvs].map(x => +x.toFixed(3)) : null,
+      regionUVs: at.regionUVs ? [...at.regionUVs].map(x => +x.toFixed(3)) : null,
+      worldVerticesLength: at.worldVerticesLength,
+      bodies,
+      cache,
+    };
+  },
+  dbgShowMesh: () => {
+    if (!spine) return 'no-spine';
+    const slot = spine.skeleton.findSlot('top_light');
+    const at = slot && slot.getAttachment();
+    const cd = at && spine.attachmentCacheData[slot.data.index] ? spine.attachmentCacheData[slot.data.index][at.name] : null;
+    if (!cd) return 'no-cache';
+    try {
+      if (!window.__dbgMesh) {
+        const m = new MeshSimple({
+          texture: cd.texture,
+          vertices: cd.vertices,
+          uvs: cd.uvs,
+          indices: new Uint16Array(cd.indices),
+        });
+        window.__dbgMesh = m;
+        app.stage.addChild(m);
+      }
+      const m = window.__dbgMesh;
+      m.texture = cd.texture;
+      m.vertices = cd.vertices;
+      m.scale.set(spine.scale.x, spine.scale.y);
+      m.position.set(spine.x, spine.y);
+      return { verts: cd.vertices.length, vertsVals: [...cd.vertices].map(x => +x.toFixed(1)), uvs: cd.uvs.length, idx: cd.indices.length, texW: cd.texture.width };
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgShowMeshWhite: () => {
+    try {
+      const slot = spine.skeleton.findSlot('top_light');
+      const at = slot && slot.getAttachment();
+      const cd = spine.attachmentCacheData[slot.data.index][at.name];
+      if (!window.__dbgMeshW) {
+        const m = new MeshSimple({
+          texture: Texture.WHITE,
+          vertices: cd.vertices,
+          uvs: cd.uvs,
+          indices: new Uint16Array(cd.indices),
+        });
+        window.__dbgMeshW = m;
+        app.stage.addChild(m);
+      }
+      const m = window.__dbgMeshW;
+      m.texture = Texture.WHITE;
+      m.vertices = cd.vertices;
+      m.tint = 0x00ff00;
+      m.scale.set(spine.scale.x, spine.scale.y);
+      m.position.set(spine.x, spine.y);
+      return 'white mesh added';
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgTestLight: () => {
+    try {
+      const slot = spine.skeleton.findSlot('top_light');
+      const at = slot && slot.getAttachment();
+      const cd = spine.attachmentCacheData[slot.data.index][at.name];
+      if (!window.__dbgLightQuad) {
+        const m = new MeshSimple({
+          texture: cd.texture,
+          vertices: new Float32Array([-150, -150, 150, -150, 150, 150, -150, 150]),
+          uvs: new Float32Array([0.25, 0.15, 0.75, 0.15, 0.75, 0.45, 0.25, 0.45]),
+          indices: new Uint16Array([0, 1, 2, 0, 2, 3]),
+        });
+        window.__dbgLightQuad = m;
+        app.stage.addChild(m);
+      }
+      const m = window.__dbgLightQuad;
+      m.scale.set(1, 1);
+      m.position.set(app.renderer.width / 2, app.renderer.height / 2);
+      return 'light quad added at center';
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgTestQuad: () => {
+    try {
+      if (!window.__dbgQuad) {
+        const m = new MeshSimple({
+          texture: Texture.WHITE,
+          vertices: new Float32Array([0, 0, 400, 0, 400, 400, 0, 400]),
+          uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
+          indices: new Uint16Array([0, 1, 2, 0, 2, 3]),
+        });
+        window.__dbgQuad = m;
+        app.stage.addChild(m);
+      }
+      window.__dbgQuad.tint = 0xff0000;
+      window.__dbgQuad.position.set(100, 100);
+      window.__dbgQuad.scale.set(1, 1);
+      return 'quad added';
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgLightBounds: () => {
+    if (!spine) return 'no-spine';
+    const slot = spine.skeleton.findSlot('top_light');
+    if (!slot) return 'no-slot';
+    const at = slot.getAttachment();
+    if (!at || !at.vertices || !at.triangles) return { msg: 'no-mesh', v: at && at.vertices ? at.vertices.length : null, t: at && at.triangles ? at.triangles.length : null };
+    const world = new Float32Array(at.worldVerticesLength);
+    if (at.computeWorldVertices) at.computeWorldVertices(slot, 0, at.worldVerticesLength, world, 0, 2);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i < world.length; i += 2) { minX = Math.min(minX, world[i]); minY = Math.min(minY, world[i + 1]); maxX = Math.max(maxX, world[i]); maxY = Math.max(maxY, world[i + 1]); }
+    const g0 = spine.toGlobal({ x: minX, y: minY });
+    const g1 = spine.toGlobal({ x: maxX, y: maxY });
+    return {
+      world: [minX.toFixed(1), minY.toFixed(1), maxX.toFixed(1), maxY.toFixed(1)],
+      screen: [g0.x.toFixed(1), g0.y.toFixed(1), g1.x.toFixed(1), g1.y.toFixed(1)],
+      vw: app.renderer.width, vh: app.renderer.height,
+      spineX: spine.x.toFixed(1), spineY: spine.y.toFixed(1), spineScale: spine.scale.x.toFixed(4),
+      verts: at.vertices.length, tris: at.triangles.length,
+    };
+  },
+  layout: () => ({
+    vw: app.renderer.width,
+    vh: app.renderer.height,
+    charScale,
+    sceneScale,
+    spineScale: spine ? +spine.scale.x.toFixed(4) : null,
+    cameraTargetY,
+  }),
+};
 
 // ---- asset loading ----
 async function fetchRetry(url, retries = 4) {
@@ -401,6 +1164,172 @@ async function fetchRetry(url, retries = 4) {
 
 function prettyName(name) {
   return name.replace(/_home$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// ---- student display names (students_data.csv, keyed by file_id) ----
+const LANG_MODES = [
+  ['tw', '繁', 'name_tw'],
+  ['jp', '日', 'name_jp'],
+  ['cn', '簡', 'name_cn'],
+  ['en', 'EN', 'name_en'],
+];
+let STUDENTS = null;
+let langMode = null;
+try { langMode = localStorage.getItem('ba_lang') || 'tw'; } catch { langMode = 'tw'; }
+
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQ = false;
+      } else field += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); field = '';
+      if (row.some(f => f !== '')) rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+async function loadStudents() {
+  try {
+    const r = await fetchRetry('assets/data/students_data.csv');
+    const rows = parseCSV(await r.text());
+    if (!rows.length) return;
+    const header = rows[0].map(h => h.trim());
+    const map = {};
+    for (let i = 1; i < rows.length; i++) {
+      const rec = {};
+      for (let j = 0; j < header.length; j++) rec[header[j]] = (rows[i][j] ?? '').trim();
+      const key = (rec.file_id || '').toLowerCase();
+      if (key && !map[key]) map[key] = rec;
+    }
+    STUDENTS = map;
+  } catch (e) {
+    console.warn('[lobby] 學生名單載入失敗', e);
+  }
+}
+
+function studentForLobby(lobbyKey) {
+  if (!STUDENTS) return null;
+  const cands = [lobbyKey.toLowerCase()];
+  let b = lobbyKey.toLowerCase();
+  let prev;
+  while (b !== prev) {
+    prev = b;
+    for (const suf of ['_home_gl', '_home', '_gl', '_teen', '_multi']) {
+      if (b.endsWith(suf)) { b = b.slice(0, -suf.length); break; }
+    }
+    if (b.length > 5 && b.startsWith('lobby')) b = b.slice(5);
+  }
+  cands.push(b);
+  const s = b.replace(/[0-9]+$/, '');
+  if (s !== b && s) cands.push(s);
+  for (const c of cands) {
+    if (STUDENTS[c]) return STUDENTS[c];
+  }
+  return null;
+}
+
+function langField(mode) {
+  return (LANG_MODES.find(l => l[0] === mode) || LANG_MODES[0])[2];
+}
+function langLabel(mode) {
+  return (LANG_MODES.find(l => l[0] === mode) || LANG_MODES[0])[1];
+}
+
+function renderStudentName(lobbyKey) {
+  const rec = studentForLobby(lobbyKey);
+  const label = rec ? rec[langField(langMode)] : null;
+  charNameEl.textContent = label || prettyName(lobbyKey);
+  btnLang.textContent = langLabel(langMode);
+  btnLang.title = `名稱語言 (${LANG_MODES.map(l => l[1]).join('/')})`;
+}
+
+// ---- collapsible student sidebar ----
+const SIDEBAR_FIELDS = ['full_name', 'name', 'skin_name', 'spine_remark', 'name_cn', 'name_jp', 'name_tw', 'name_en', 'name_kr'];
+
+function studentDisplay(rec) {
+  if (!rec) return null;
+  return rec[langField(langMode)] || rec.name_tw || rec.name_en || rec.name_jp || rec.full_name || rec.name || null;
+}
+
+function buildSidebarGroups() {
+  const groups = new Map();
+  for (const key of ORDER) {
+    const rec = studentForLobby(key);
+    const display = studentDisplay(rec) || prettyName(key);
+    if (!groups.has(display)) groups.set(display, { display, rec, children: [] });
+    groups.get(display).children.push({ key, variant: prettyName(key) });
+  }
+  return [...groups.values()].sort((a, b) => a.display.localeCompare(b.display, 'zh-Hant'));
+}
+
+function groupMatches(g, q) {
+  if (!q) return true;
+  if (g.display.toLowerCase().includes(q)) return true;
+  if (g.rec && SIDEBAR_FIELDS.some(f => g.rec[f] && g.rec[f].toLowerCase().includes(q))) return true;
+  return g.children.some(c => c.key.toLowerCase().includes(q));
+}
+
+function renderSidebar() {
+  const q = sbSearch.value.trim().toLowerCase();
+  sbList.innerHTML = '';
+  let shown = 0;
+  for (const g of buildSidebarGroups()) {
+    if (!groupMatches(g, q)) continue;
+    const nameMatch = !q || g.display.toLowerCase().includes(q)
+      || (g.rec && SIDEBAR_FIELDS.some(f => g.rec[f] && g.rec[f].toLowerCase().includes(q)));
+    const kids = nameMatch
+      ? g.children
+      : g.children.filter(c => c.key.toLowerCase().includes(q));
+    if (!kids.length) continue;
+    shown += kids.length;
+    const head = document.createElement('div');
+    head.className = 'sb-group-head';
+    head.textContent = g.display;
+    const cnt = document.createElement('span');
+    cnt.className = 'cnt';
+    cnt.textContent = String(kids.length);
+    head.appendChild(cnt);
+    sbList.appendChild(head);
+    for (const c of kids) {
+      const b = document.createElement('button');
+      b.className = 'sb-item';
+      b.dataset.key = c.key;
+      b.textContent = c.variant;
+      if (c.key === currentLobby) b.classList.add('cur');
+      sbList.appendChild(b);
+    }
+  }
+  if (!shown) {
+    const e = document.createElement('div');
+    e.className = 'sb-empty';
+    e.textContent = '沒有符合的學生';
+    sbList.appendChild(e);
+  }
+}
+
+function toggleSidebar(force) {
+  const open = force === undefined ? !sidePanel.classList.contains('open') : force;
+  sidePanel.classList.toggle('open', open);
+  btnStudents.textContent = open ? '✕' : '☰';
+  if (open) renderSidebar();
+}
+
+function selectLobby(key) {
+  if (key === currentLobby) { toggleSidebar(false); return; }
+  toggleSidebar(false);
+  fadeIn().then(() => loadLobby(key));
 }
 
 async function loadScene(entry) {
@@ -429,10 +1358,13 @@ async function loadLobby(name) {
   }
   clearTimers();
   state.busy = null;
+  state.introBlock = false;
   patting = false;
+  headAnchorBone = null;
 
   const entry = LOBBY_INDEX[name];
   if (!entry) { showErr(`索引中無 ${name}`); return; }
+  loadIdleClip(entry);
   loadingEl.classList.add('show');
   loadingText.textContent = `載入 ${prettyName(name)}`;
   try {
@@ -445,6 +1377,7 @@ async function loadLobby(name) {
     currentLobbyVoiceFolder = sch?.voiceFolder || null;
     voiceSkip.clear();
     for (const m of sch?.missingMedia || []) voiceSkip.add(m);
+    validVoices = new Set((VOICE_INDEX[sch?.characterId] || []).map(f => f.toLowerCase().replace(/\.ogg$/, '')));
     spine.state.addListener({ event: onAnimationEvent, complete: onTrackComplete });
     spine.state.data.defaultMix = 0.25;
     setupLipHook(spine);
@@ -473,7 +1406,7 @@ async function loadLobby(name) {
   };
   requestAnimationFrame(waitFit);
   setBgm(BGM_MAP[name]);
-  charNameEl.textContent = prettyName(name);
+  renderStudentName(name);
   subNameEl.textContent = 'MEMORIAL LOBBY';
   scheduleAutonomy();
   loadingEl.classList.remove('show');
@@ -503,13 +1436,48 @@ function switchLobby(dir) {
 
 // spine track completion -> return reactive tracks to rest
 function onTrackComplete(entry) {
+  // Intro (Start_Idle_01) finished on track 0 -> release the interaction lock so
+  // the player can tap/pat; track 0 now loops the idle clip.
+  if (entry.trackIndex === 0 && state.introBlock) state.introBlock = false;
   if (entry.trackIndex === 1 && !state.busy) {
     if (state.busy === 'talk') return; // handled by timer
     restTracks();
   }
 }
 
-// ---- input (only pat / tap — no drag, zoom, pan) ----
+// Head anchor for the Pat-vs-Look hold region test. Every lobby skeleton ships a
+// Touch_Point / Touch_Eye bone pair under head_Rot (Airi: Touch_Point≈(582,66),
+// Touch_Eye≈(493,82) in the 3000-unit skeleton) — the very bones the Pat_01_M /
+// Look_01_M animations key, so they mark the head region.
+let headAnchorBone = null;
+const HEAD_PAT_RADIUS = 130;   // spine units around the head anchor
+
+function headBone() {
+  if (headAnchorBone) return headAnchorBone;
+  if (!spine) return null;
+  headAnchorBone =
+    spine.skeleton.findBone('Touch_Eye') ||
+    spine.skeleton.findBone('Touch_Point') ||
+    spine.skeleton.findBone('head') ||
+    null;
+  return headAnchorBone;
+}
+function isHeadRegion(sx, sy) {
+  const b = headBone();
+  if (!b) return false;   // no anchor → whole body is Look (no Pat region)
+  const g = spine.toGlobal({ x: b.worldX, y: b.worldY });
+  const r = HEAD_PAT_RADIUS * spine.scale.x;
+  return Math.hypot(sx - g.x, sy - g.y) <= r;
+}
+
+// ---- input: tap → Talk, press-and-hold / press-and-drag → Look, on head → Pat ----
+// VERIFIED interaction model (JP community wiki wikiru + GameWith + NoxPlayer):
+//   * tap               → Talk (one-shot _M + _A + voice)
+//   * hold head region  → Pat (撫でる, eyes close — Pat_01_M Loop=1 → PatEnd_01_M)
+//   * hold / drag body  → Look (目で追う — Look_01_M Loop=1 → LookEnd_01_M, eyes
+//                         follow the pointer). Confirmed by the Touch_Point /
+//                         Touch_Eye anchor bones the Pat/Look animations key.
+// No drag / zoom / pan.
 function onPointerDown(e) {
   ensureAudio();
   userActiveAt = performance.now();
@@ -518,8 +1486,10 @@ function onPointerDown(e) {
   downTime = performance.now();
   downPos = { x: e.clientX, y: e.clientY };
   longPressTimer = setTimeout(() => {
-    if (state.busy !== 'pat' && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) < 10) {
-      startPat();
+    if (downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) < 10) {
+      // Hold gesture: on the head region → Pat, anywhere else → Look.
+      if (isHeadRegion(e.clientX, e.clientY)) startPat();
+      else startLook();
     }
   }, 420);
 }
@@ -528,20 +1498,33 @@ function onPointerMove(e) {
   mouse.x = e.clientX;
   mouse.y = e.clientY;
   mouse.active = true;
+  // Press-and-drag gesture — matches the real game: "頭以外の場所をタップしたまま
+  // 指を移動させると目で追ってくれます". Moving while pressed starts Pat on the
+  // head (撫でる) or Look anywhere else; a stationary long-press still falls back to
+  // the 420 ms hold timer in onPointerDown.
   if (longPressTimer && downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 7) {
     clearTimeout(longPressTimer);
+    if (state.busy === null) {
+      if (isHeadRegion(downPos.x, downPos.y)) startPat();
+      else startLook();
+    }
   }
   hud.classList.toggle('idle', performance.now() - userActiveAt > 2600);
 }
 
 function onPointerUp(e) {
   clearTimeout(longPressTimer);
-  if (downPos && state.busy !== 'pat') {
+  if (downPos) {
     const dt = performance.now() - downTime;
     const d = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
-    if (dt < 340 && d < 10) playTalk();
+    // Quick tap (short, still) → Talk (one-shot _M + _A + voice). A tap while
+    // a hold is active is ignored — the hold branches below handle the release.
+    if (dt < 340 && d < 10 && !state.introBlock && state.busy !== 'look' && state.busy !== 'pat') {
+      playTalk();
+    }
   }
-  if (patting) endPat();
+  if (state.busy === 'look') endLook();
+  else if (patting) endPat();
   downPos = null;
   downTime = 0;
 }
@@ -571,6 +1554,11 @@ async function init() {
     console.warn('[lobby] 語音排程載入失敗，語音將無法播放', e);
   }
   try {
+    VOICE_INDEX = await fetchRetry('assets/data/voice_index.json').then(r => r.json());
+  } catch (e) {
+    console.warn('[lobby] 語音索引載入失敗', e);
+  }
+  try {
     const br = await fetchRetry('assets/data/lobby_bgm_mapping.csv');
     const txt = await br.text();
     for (const line of txt.trim().split('\n').slice(1)) {
@@ -581,10 +1569,19 @@ async function init() {
   } catch (e) {
     console.warn('[lobby] BGM 對照載入失敗', e);
   }
+  await loadStudents();
 
   // camera smoothing
   app.ticker.add(() => {
     if (spine && fitted) applyCamera(CAMERA.weight);
+  });
+  // Re-fit on window resize (resizeTo resizes the canvas, but charScale/sceneScale
+  // are only recomputed in fitScene — re-run it so the layout doesn't go stale
+  // until the next character switch).
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (spine && fitted) fitScene(); }, 80);
   });
   // input
   canvas.addEventListener('pointerdown', onPointerDown);
@@ -603,6 +1600,52 @@ async function init() {
   btnPrev.addEventListener('click', () => switchLobby(-1));
   btnNext.addEventListener('click', () => switchLobby(1));
   btnBgm.addEventListener('click', toggleBgm);
+  btnSkip.addEventListener('click', memoryLobbySkip);
+  btnLang.addEventListener('click', () => {
+    const i = LANG_MODES.findIndex(l => l[0] === langMode);
+    langMode = LANG_MODES[(i + 1) % LANG_MODES.length][0];
+    try { localStorage.setItem('ba_lang', langMode); } catch {}
+    if (currentLobby) renderStudentName(currentLobby);
+    if (sidePanel.classList.contains('open')) renderSidebar();
+    log(`名稱語言: ${langLabel(langMode)}`);
+  });
+
+  btnStudents.addEventListener('click', () => toggleSidebar());
+  sbClose.addEventListener('click', () => toggleSidebar(false));
+  sbSearch.addEventListener('input', () => renderSidebar());
+  sbList.addEventListener('click', (e) => {
+    const item = e.target.closest('.sb-item');
+    if (item) selectLobby(item.dataset.key);
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sidePanel.classList.contains('open')) toggleSidebar(false);
+  });
+  // fullscreen toggle (button + F11 / F)
+  const updateFullBtn = () => {
+    const on = !!document.fullscreenElement;
+    btnFull.textContent = on ? '⤡' : '⤢';
+    btnFull.title = on ? '結束全螢幕' : '全螢幕';
+    btnFull.classList.toggle('off', false);
+  };
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+    } else {
+      document.documentElement.requestFullscreen?.();
+    }
+  };
+  btnFull.addEventListener('click', toggleFullscreen);
+  document.addEventListener('fullscreenchange', () => {
+    updateFullBtn();
+    if (spine && fitted) fitScene();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'F11' || e.key === 'f' || e.key === 'F') {
+      e.preventDefault();
+      toggleFullscreen();
+    }
+  });
+  updateFullBtn();
 
   if (ORDER.length) {
     const m = location.hash.match(/^#lobby=([^&]+)/);

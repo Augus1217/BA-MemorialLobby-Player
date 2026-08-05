@@ -74,6 +74,48 @@
     #err { position: fixed; bottom: 14px; left: 14px; right: 14px; z-index: 50;
       background: rgba(150,30,30,.9); color: #fff; padding: 10px 14px; border-radius: 8px;
       font-size: 13px; white-space: pre-wrap; display: none; }
+
+    /* left student sidebar (collapsible) */
+    #btnStudents {
+      position: fixed; left: 14px; top: 50%; transform: translateY(-50%);
+      z-index: 18; border-radius: 10px; width: 38px; height: 38px;
+    }
+    #sidePanel {
+      position: fixed; left: 0; top: 0; bottom: 0; width: 320px; z-index: 20;
+      background: rgba(8,10,22,.92); border-right: 1px solid rgba(255,255,255,.12);
+      backdrop-filter: blur(10px); display: flex; flex-direction: column;
+      transform: translateX(-100%); transition: transform .3s ease;
+    }
+    #sidePanel.open { transform: translateX(0); }
+    #sidePanel .sb-head {
+      display: flex; gap: 8px; align-items: center; padding: 12px;
+      border-bottom: 1px solid rgba(255,255,255,.1);
+    }
+    #sbSearch {
+      flex: 1; background: rgba(255,255,255,.06); color: #e8ecff;
+      border: 1px solid rgba(255,255,255,.14); border-radius: 6px;
+      padding: 8px 10px; font-size: 13px; outline: none; min-width: 0;
+    }
+    #sbSearch:focus { border-color: rgba(169,182,255,.6); }
+    #sbSearch::placeholder { color: rgba(210,220,255,.45); }
+    #sbClose { width: 34px; height: 34px; border-radius: 6px; flex: none; }
+    #sbList { flex: 1; overflow-y: auto; padding: 6px 10px 20px; }
+    #sbList::-webkit-scrollbar { width: 8px; }
+    #sbList::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 4px; }
+    .sb-group-head {
+      color: #9aa4e0; font-size: 12px; letter-spacing: .08em; font-weight: 600;
+      padding: 12px 4px 4px; display: flex; align-items: baseline; gap: 8px;
+    }
+    .sb-group-head:first-child { padding-top: 6px; }
+    .sb-group-head .cnt { color: rgba(200,210,255,.4); font-size: 11px; font-weight: 400; }
+    .sb-item {
+      display: block; width: 100%; text-align: left; background: transparent;
+      border: none; color: #dfe4ff; font-size: 13px; padding: 7px 10px;
+      border-radius: 6px; cursor: pointer;
+    }
+    .sb-item:hover { background: rgba(60,70,140,.35); }
+    .sb-item.cur { background: rgba(80,95,180,.45); color: #fff; }
+    .sb-empty { color: rgba(210,220,255,.5); font-size: 13px; padding: 22px 8px; text-align: center; }
   </style>
 </head>
 <body>
@@ -89,8 +131,20 @@
       <button id="btnNext" class="btn" title="下一位">›</button>
     </div>
     <div id="hudBottom" class="hudbar">
-      <button id="btnBgm" class="btn" title="音樂">♪</button>
+      <button id="btnSkip" class="btn" style="margin-right:20px" title="ˑˑˑˑ (跳過)">ˑˑˑˑ</button>
+      <button id="btnLang" class="btn" title="名稱語言 (繁/日/簡/EN)">繁</button>
+      <button id="btnFull" class="btn" style="margin-left:10px" title="全螢幕">⤢</button>
+      <button id="btnBgm" class="btn" style="margin-left:10px" title="音樂">♪</button>
     </div>
+  </div>
+
+  <button id="btnStudents" class="btn" title="學生列表">☰</button>
+  <div id="sidePanel">
+    <div class="sb-head">
+      <input id="sbSearch" type="text" placeholder="搜尋學生 / 名稱 / ID…" />
+      <button id="sbClose" class="btn" title="收合">×</button>
+    </div>
+    <div id="sbList"></div>
   </div>
 
   <div id="loading"><div class="spin"></div><span id="loadingText">載入中</span></div>
