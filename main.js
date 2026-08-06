@@ -3,7 +3,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-const DEV_URL = 'http://localhost:5173';
+const DEV_URL = 'http://127.0.0.1:5173';
 let win = null;
 let vite = null;
 
@@ -17,13 +17,26 @@ function findNode() {
   return 'node';
 }
 
-function startVite() {
+function probeDevUrl(timeout = 1000) {
+  return new Promise((resolve) => {
+    const http = require('http');
+    const req = http.get(DEV_URL, { timeout }, (res) => {
+      res.destroy();
+      resolve(true);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
+
+async function startVite() {
+  if (await probeDevUrl()) return;
   vite = spawn(findNode(), [path.join(__dirname, 'node_modules', 'vite', 'bin', 'vite.js')], {
     cwd: __dirname,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let buf = '';
-  return new Promise((resolve, reject) => {
+  await new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('Vite dev server 啟動逾時')), 20000);
     const onData = (d) => {
       buf += d.toString();
@@ -34,7 +47,9 @@ function startVite() {
     };
     vite.stdout.on('data', onData);
     vite.stderr.on('data', onData);
+    vite.on('exit', () => reject(new Error('Vite dev server 已退出')));
   });
+  if (!(await probeDevUrl())) throw new Error('Vite dev server 連線失敗');
 }
 
 function createWindow() {

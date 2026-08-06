@@ -42,6 +42,16 @@ let SCHEDULE = null;
 let BGM_MAP = {};
 let ORDER = [];
 
+// kivo.wiki 光線修復: 所有角色的 top light slot 改為 Screen 混色
+// (對照 kivo 修復版 skel: CH0070_home top_light blendMode = 3)
+const isTopLightSlot = (name) => {
+  const s = name.replace(/\s+/g, ' ');
+  return /^top[\s_]*light/i.test(s)
+    || /^fx[\s_]*top[\s_]*light/i.test(s)
+    || /^light[\s_]*top[\s_]*(\d|_|$)/i.test(s)
+    || s === 'T_Light';
+};
+
 // ---- camera (lobby_camera_config.json) ----
 const CAMERA = { maxScale: 4, weight: 0.5 };
 let cam = { x: 0, y: 0, scale: 1 };
@@ -703,6 +713,12 @@ window.ba_debug = {
       color: slot.color ? { r: slot.color.r, g: slot.color.g, b: slot.color.b, a: slot.color.a } : null,
     };
   },
+  dbgTopLight: () => {
+    if (!spine) return null;
+    return spine.skeleton.slots
+      .filter(s => isTopLightSlot(s.data.name))
+      .map(s => `${s.data.name}=${s.data.blendMode}`);
+  },
   setTimeScale: (v) => { if (spine) spine.state.timeScale = v; },
   setSlotBlend: (name, m) => { const s = spine?.skeleton?.findSlot(name); if (s) s.data.blendMode = m; },
   dbgRenderer: () => ({ type: app.renderer.type, w: app.canvas.width, h: app.canvas.height, spineVisible: spine ? spine.visible : null }),
@@ -899,6 +915,34 @@ window.ba_debug = {
       spine.spineAttachmentsDirty = true;
       spine.spineTexturesDirty = true;
       return 'forced dirty';
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgTraceBatches: (on) => {
+    try {
+      const pipe = app.renderer.renderPipes.batch;
+      const adaptor = pipe._adaptor;
+      if (!window.__trOrigExecute && on) {
+        window.__trOrigExecute = adaptor.execute.bind(adaptor);
+        window.__trBatches = [];
+        adaptor.execute = (batchPipe, batch) => {
+          if (window.__trBatches.length < 4000) {
+            window.__trBatches.push({
+              blend: batch.blendMode,
+              size: batch.size,
+              tex: batch.textures && batch.textures.count,
+              texUid: batch.textures && batch.textures.textures ? batch.textures.textures[0]?.uid : null,
+            });
+          }
+          return window.__trOrigExecute(batchPipe, batch);
+        };
+        return 'tracing on';
+      }
+      if (!on && window.__trOrigExecute) {
+        adaptor.execute = window.__trOrigExecute;
+        window.__trOrigExecute = null;
+        return 'tracing off, collected=' + (window.__trBatches ? window.__trBatches.length : 0);
+      }
+      return 'already ' + (on ? 'on' : 'off');
     } catch (e) { return 'EXC: ' + String(e); }
   },
   dbgTransform: () => {
@@ -1373,6 +1417,9 @@ async function loadLobby(name) {
       : [];
     await Promise.all(charAssets.map(a => Assets.load(a)));
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
+    for (const slot of spine.skeleton.slots) {
+      if (isTopLightSlot(slot.data.name)) slot.data.blendMode = 3;
+    }
     const sch = SCHEDULE?.lobbies?.[name];
     currentLobbyVoiceFolder = sch?.voiceFolder || null;
     voiceSkip.clear();
