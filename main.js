@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -89,6 +89,109 @@ ipcMain.handle('lobby-list', async () => {
   return fs.readdirSync(dir).filter((d) => {
     try { return fs.statSync(path.join(dir, d)).isDirectory(); } catch { return false; }
   });
+});
+
+// 影片匯出：寫入使用者選的路徑（或 EXPORT_DIR 環境變數指定的目錄，供自動化/批次使用）
+// 逐幀動畫匯出：renderer 手動推進 spine 逐幀渲染，把 WebP 幀串流進 ffmpeg（stdin），
+// 編碼為固定 fps / 精確時長的 MP4 / WebM，完全不依賴即時錄影。
+let animProc = null;
+let animQueued = Promise.resolve();
+let animOutPath = null;
+
+function writeAnim(buf) {
+  if (!animProc || !animProc.stdin.writable) return;
+  animQueued = animQueued.then(() => new Promise((res, rej) => {
+    animProc.stdin.write(buf, (err) => (err ? rej(err) : res()));
+  })).catch(() => {});
+}
+
+ipcMain.handle('anim-start', async (event, payload) => {
+  const { w = 1280, h = 720, fps = 30, duration = 10, ext = 'mp4', defaultName = 'lobby.mp4', audioFile = null } = payload || {};
+  try {
+    let outPath;
+    const autoDir = process.env.EXPORT_DIR;
+    if (autoDir) {
+      outPath = path.join(autoDir, defaultName);
+    } else {
+      const { canceled, filePath } = await dialog.showSaveDialog(win, {
+        title: '匯出動畫',
+        defaultPath: defaultName,
+        filters: [
+          { name: ext === 'webm' ? 'WebM 影片' : 'MP4 影片', extensions: [ext || 'mp4'] },
+          { name: '所有檔案', extensions: ['*'] },
+        ],
+      });
+      if (canceled || !filePath) return { canceled: true };
+      outPath = filePath;
+    }
+
+    const vargs = ['-y', '-f', 'image2pipe', '-framerate', String(fps), '-i', 'pipe:'];
+    const audioPath = audioFile ? path.join(__dirname, 'assets', 'bgm', audioFile) : null;
+    const hasAudio = audioPath && fs.existsSync(audioPath);
+    if (hasAudio) vargs.push('-i', audioPath);
+    vargs.push('-map', '0:v');
+    if (hasAudio) vargs.push('-map', '1:a');
+    if (ext === 'webm') {
+      vargs.push('-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '30', '-pix_fmt', 'yuv420p', '-c:a', 'libopus', '-b:a', '160k', '-shortest', outPath);
+    } else {
+      vargs.push('-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', outPath);
+    }
+
+    animOutPath = outPath;
+    animQueued = Promise.resolve();
+    console.log('[anim] spawn ffmpeg', vargs.join(' '));
+    animProc = spawn('ffmpeg', vargs, { stdio: ['pipe', 'ignore', 'pipe'] });
+    animProc.stderr.on('data', () => {});
+    animProc.on('error', (e) => { console.error('[anim] ffmpeg spawn 失敗', e); });
+    animProc.on('exit', (c) => { if (c !== 0 && c !== null) console.error('[anim] ffmpeg exit', c); });
+    return { ok: true };
+  } catch (e) {
+    console.error('[anim] start 失敗', e);
+    return { error: e.message };
+  }
+});
+
+ipcMain.on('anim-frame', (event, buf) => {
+  writeAnim(Buffer.from(buf));
+});
+
+ipcMain.handle('anim-finish', async () => {
+  if (!animProc) return { error: '沒有進行中的動畫匯出' };
+  const proc = animProc;
+  try { await animQueued; proc.stdin.end(); } catch (e) { proc.stdin.destroy(); }
+  const code = await new Promise((res) => proc.on('exit', (c) => res(c)));
+  animProc = null;
+  if (code !== 0) return { error: `ffmpeg 結束碼 ${code}` };
+  const p = animOutPath;
+  animOutPath = null;
+  return { path: p };
+});
+
+ipcMain.on('anim-abort', () => {
+  if (animProc) { try { animProc.stdin.destroy(); } catch {} try { animProc.kill('SIGKILL'); } catch {} animProc = null; }
+});
+
+ipcMain.handle('save-video', async (event, payload) => {
+  const { data, defaultName, ext } = payload || {};
+  if (!data || !defaultName) return { canceled: true };
+  const buf = Buffer.from(new Uint8Array(data));
+  const autoDir = process.env.EXPORT_DIR;
+  if (autoDir) {
+    const filePath = path.join(autoDir, defaultName);
+    fs.writeFileSync(filePath, buf);
+    return { path: filePath };
+  }
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: '匯出影片',
+    defaultPath: defaultName,
+    filters: [
+      { name: ext === 'webm' ? 'WebM 影片' : 'MP4 影片', extensions: [ext || 'mp4'] },
+      { name: '所有檔案', extensions: ['*'] },
+    ],
+  });
+  if (canceled || !filePath) return { canceled: true };
+  fs.writeFileSync(filePath, buf);
+  return { path: filePath };
 });
 
 app.whenReady().then(async () => {

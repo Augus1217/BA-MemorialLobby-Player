@@ -25,6 +25,46 @@ const sidePanel = document.getElementById('sidePanel');
 const sbSearch = document.getElementById('sbSearch');
 const sbList = document.getElementById('sbList');
 const sbClose = document.getElementById('sbClose');
+const btnExport = document.getElementById('btnExport');
+const exportPanel = document.getElementById('exportPanel');
+const expChar = document.getElementById('expChar');
+const expStart = document.getElementById('expStart');
+const expCancel = document.getElementById('expCancel');
+const expAudio = document.getElementById('expAudio');
+const expAudioRow = document.getElementById('expAudioRow');
+const expModeLabel = document.getElementById('expModeLabel');
+const recBadge = document.getElementById('recBadge');
+const recTime = document.getElementById('recTime');
+const recDur = document.getElementById('recDur');
+const recStop = document.getElementById('recStop');
+const toastEl = document.getElementById('toast');
+const chatDialog = document.getElementById('chatDialog');
+const chatBubble = document.getElementById('chatBubble');
+const chatName = document.getElementById('chatName');
+const chatText = document.getElementById('chatText');
+// Screen point the balloon is placed from for the CURRENT dialog. Round-3:
+// the balloon lives in the lobby container's NGUI space, NOT on the head bone.
+// Game data (LobbyCH*.prefab, all 262 prefabs extracted from the uilobbyelement
+// bundles): the ChatDialog root sits at the container origin and its Talk child
+// (Sprite pivot bottom-left) has a per-lobby offset; the SkeletonAnimation child
+// is ALWAYS at (0, -962) scale 100, so the container origin sits 962 UI units
+// ABOVE the spine root on screen. assets/data/lobby_chat_anchors.json holds the
+// per-lobby combined NGUI offset (tx, ty) = chatDialog.pos + talk.pos, and
+//   balloonBtmLeft = (spine root global) + (tx, -962, +ty) * bs   (y-up → up)
+//                  = (spine.x + tx·bs, spine.y - (962+ty)·bs)
+// with the box growing up/right from its bottom-left (sprite pivot bottom-left)
+// and the tail hanging on the LEFT edge. No head alignment; the container is
+// fixed, so capture the spine root once per dialog. Cleared on hide.
+let chatAnchor = null;
+let CHAT_ANCHORS = {};   // app lobby key -> { tx, ty, skY, skScale } from lobby_chat_anchors.json
+
+let toastTimer = null;
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2800);
+}
 
 function showErr(msg) {
   errEl.style.display = 'block';
@@ -46,10 +86,9 @@ let ORDER = [];
 // (對照 kivo 修復版 skel: CH0070_home top_light blendMode = 3)
 const isTopLightSlot = (name) => {
   const s = name.replace(/\s+/g, ' ');
-  return /^top[\s_]*light/i.test(s)
-    || /^fx[\s_]*top[\s_]*light/i.test(s)
+  return /top[\s_]*light/i.test(s)
     || /^light[\s_]*top[\s_]*(\d|_|$)/i.test(s)
-    || s === 'T_Light';
+    || /^T_light$/i.test(s);
 };
 
 // ---- camera (lobby_camera_config.json) ----
@@ -288,6 +327,131 @@ function applyEyeFollow(self) {
 
 let currentLobbyVoiceFolder = null;
 let voiceCalls = 0;
+// 逐字稿查詢（lobby_subtitle.json：voiceId -> { jp, tw, en } 或字串）。
+// GL dump 未含 memorial lobby 逐字稿，此檔現為空，放入資料即可自動顯示。
+let SUBTITLES = null;
+// DialogType per voice (assets/data/lobby_dialog_types.json, from the GL
+// CharacterDialogExcel table): "Talk" (Lobby_balloon) / "Think" (Lobby_balloon2)
+// / "UITalk" (Common_Balloon_Type2). Missing voice -> "Talk" (newest JP-only
+// lobbies are not in the GL table yet).
+let DIALOG_TYPES = null;
+async function loadSubtitles() {
+  try {
+    SUBTITLES = await fetchRetry('assets/data/lobby_subtitle.json').then(r => r.json());
+  } catch (e) {
+    SUBTITLES = {};
+  }
+  try {
+    DIALOG_TYPES = await fetchRetry('assets/data/lobby_dialog_types.json').then(r => r.json());
+  } catch (e) {
+    DIALOG_TYPES = {};
+  }
+}
+function dialogTypeFor(voiceId) {
+  if (!DIALOG_TYPES) return 'Talk';
+  return DIALOG_TYPES[voiceId] ?? DIALOG_TYPES[voiceId.toLowerCase()] ?? 'Talk';
+}
+function subtitlePick(voiceId) {
+  if (!SUBTITLES) return null;
+  const hit = SUBTITLES[voiceId] ?? SUBTITLES[voiceId.toLowerCase()];
+  if (hit == null) return null;
+  if (typeof hit === 'string') return { text: hit, lang: null };
+  for (const k of ['tw', 'ja', 'jp', 'en', 'zh']) {
+    if (hit[k]) return { text: hit[k], lang: k };
+  }
+  return null;
+}
+function subtitleFor(voiceId) {
+  const r = subtitlePick(voiceId);
+  return r ? r.text : null;
+}
+// Language the balloon text was picked from (drives the game's font swap:
+// tw/zh -> Noto Sans TC, ja/jp -> M PLUS 1p, en -> Noto Sans).
+function subtitleLang(voiceId) {
+  const r = subtitlePick(voiceId);
+  return r ? r.lang : null;
+}
+function showChat(name, text) {
+  chatName.textContent = name || '';
+  chatText.textContent = text || '';
+  if (!chatDialog.classList.contains('show')) {
+    // First show of this dialog: capture the spine ROOT (the lobby container
+    // origin in the app's model) as the anchor so the box stays put for the
+    // whole talk; later lines only re-fit the text. The container never moves.
+    if (spine) {
+      const g = spine.toGlobal({ x: 0, y: 0 });
+      chatAnchor = { x: g.x, y: g.y };
+    }
+  }
+  chatDialog.classList.add('show');
+  positionChat();
+}
+function hideChat() {
+  chatAnchor = null;
+  chatDialog.classList.remove('show');
+}
+
+// The balloon auto-sizes to its text (label + NGUI anchor padding L79 R59 T45
+// B44); the 9-slice borders stay at their native sprite size (L80 R50 T84 B60
+// × bs) and only the middle stretches, exactly like an NGUI sliced sprite, with
+// the tail jutting out of the sprite's LEFT edge (apex ≈ x7/136, centre ≈ y62/146).
+// Each lobby carries its own sprite flip (see positionChat: H moves the tail to
+// the right edge, V mirrors it vertically), mirroring the LobbyCH*.prefab mFlip.
+// Round-3 position: the box is placed by its bottom-left corner at the Talk
+// origin — the lobby container origin (skUp UI units above the spine root per
+// SkeletonAnimation localPosition (0,-962), constant across all prefabs) plus
+// the per-lobby combined NGUI offset (tx, ty) = ChatDialog.pos + Talk.pos from
+// assets/data/lobby_chat_anchors.json (extracted from the LobbyCH*.prefab
+// bundles; e.g. CH0239 = (-208,+429), Airi = (-19,+306)). bs here is the NGUI
+// canvas scale (vw/3840), the SAME scale the balloon is rendered at, so size
+// and position use one consistent unit.
+function positionChat() {
+  if (!chatDialog.classList.contains('show')) return;
+  const bs = window.innerWidth / 3840;   // NGUI canvas scale (balloon)
+  chatDialog.style.bottom = 'auto';
+  chatDialog.style.transform = 'none';
+  const bw = chatDialog.offsetWidth, bh = chatDialog.offsetHeight;
+  const ax = chatAnchor ? chatAnchor.x : (spine ? spine.x : window.innerWidth / 2);
+  const ay = chatAnchor ? chatAnchor.y : (spine ? spine.y : window.innerHeight);
+  const a = CHAT_ANCHORS[currentLobby] || { tx: 0, ty: 0, skY: -962 };
+  // Think (OS) bubble sits at a DIFFERENT position from Talk in the prefab
+  // (extracted per-lobby as thinkOffsetX/Y in lobby_chat_anchors.json).
+  let tx = a.tx, ty = a.ty;
+  if (chatDialog.dataset.dtype === 'Think') {
+    tx += (a.thinkOffsetX || 0);
+    ty += (a.thinkOffsetY || 0);
+  }
+  // Per-lobby NGUI UISprite mFlip (0=none,1=H,2=V,3=both, from LobbyCH*.prefab).
+  // The balloon sprite's tail hangs on the LEFT edge, so H mirrors it to point
+  // right and V mirrors it vertically. chatText is a sibling above the bubble,
+  // so it is NOT flipped; only the 9-slice border + tail are.
+  const flip = a.flip || 0;
+  const tfx = (flip & 1) ? 'scaleX(-1)' : '';
+  const tfy = (flip & 2) ? 'scaleY(-1)' : '';
+  chatBubble.style.transform = tfx + (tfx && tfy ? ' ' : '') + tfy || 'none';
+  const skUp = -a.skY;
+  let x = ax + tx * bs;
+  // Flipped lobbies (mFlip bit0 = H) mirror the whole box about the spine root:
+  // the tail (now on the right edge) must face the character, so the balloon
+  // sits on the OPPOSITE side at the same tail-to-root distance the prefab
+  // authored. Verified vs game data: 76/98 mFlip=1 lobbies have tx>0, which
+  // unmirrored would leave the right-pointing tail facing AWAY from the head.
+  if (flip & 1) x = ax - tx * bs - bw;
+  let y = ay - (skUp + ty) * bs - bh;
+  const maxX = window.innerWidth - bw - 6;
+  const maxY = window.innerHeight - bh - 6;
+  if (x < 6) x = 6;
+  if (x > maxX) x = maxX;
+  if (y < 6) y = 6;
+  if (y > maxY) y = maxY;
+  chatDialog.style.left = x + 'px';
+  chatDialog.style.top = y + 'px';
+}
+function speakerName() {
+  const rec = studentForLobby(currentLobby);
+  return (rec && rec[langField(langMode)]) || (rec && (rec.name_tw || rec.name_en || rec.name_jp)) || prettyName(currentLobby);
+}
+
 // Returned by playVoice() so callers (CoDialog-style coroutines) can `await` the
 // end-of-line event with the precise `audioClip.length + 0.5` pacing that the
 // real client uses.
@@ -306,18 +470,38 @@ function playVoice(voiceId) {
     }
   }
   const stopLip = () => { lipActive = false; };
-  audio.onplay = () => { lipActive = true; };
-  audio.onended = stopLip;
-  audio.onerror = stopLip;
-  audio.play().catch(() => stopLip());
-  // Returns a promise that settles when the voice finishes (+0.5s margin for
-  // trailing ambience), replicating the CoDialog `WaitForSeconds(length+0.5)`
-  // pacing found in the reversed ChatDialog.<CoDialog>d__43.MoveNext.
-  const endPromise = new Promise((resolve) => {
-    const done = () => { lipActive = false; resolve(); };
-    audio.addEventListener('ended', done, { once: true });
-    audio.addEventListener('error', done, { once: true });
-  }).then(() => new Promise((r) => setTimeout(r, 500)));
+  // Resolves on ended/error/play-rejection so playTalk() can never hang waiting
+  // on a voice that neither ends nor errors (e.g. autoplay-blocked audio).
+  let resolveEnd;
+  const endPromise = new Promise((r) => { resolveEnd = r; })
+    .then(() => new Promise((r) => setTimeout(r, 500)));
+  const done = () => {
+    stopLip();
+    if (!dialogActive) {
+      // CoDialog pacing: a standalone line (intro greeting) holds the balloon
+      // for `audioClip.length + 0.5` then closes it — never instantly.
+      endPromise.then(() => hideChat());
+    }
+    resolveEnd();
+  };
+  audio.onplay = () => {
+    lipActive = true;
+    const text = subtitleFor(voiceId);
+    if (!text) {
+      // No subtitle for this voice: skip the balloon instead of showing an
+      // empty bubble. Mid-dialog this keeps the previous line's balloon up
+      // (it closes with the dialog); standalone lines just show nothing.
+      return;
+    }
+    chatDialog.dataset.lang = subtitleLang(voiceId) || '';
+    // Balloon style follows the line's DialogType (Think = OS bubble
+    // Lobby_balloon2, Talk = Lobby_balloon; UITalk would use Common_Balloon_Type2).
+    chatDialog.dataset.dtype = dialogTypeFor(voiceId);
+    showChat(speakerName(), text);
+  };
+  audio.onended = done;
+  audio.onerror = done;
+  audio.play().catch(done);
   // Save as last seen voice promise so playTalk() can await it for CoDialog pacing.
   lastVoicePromise = endPromise;
   lastVoiceName = voiceId;
@@ -358,6 +542,12 @@ function onAnimationEvent(_entry, ev) {
 let lastVoiceId = null;
 let lastVoiceTime = 0;
 const voiceSkip = new Set();
+// CoDialog balloon lifecycle: the box is ONE persistent element for the whole
+// talk (text switches in place per line) and only closes after the LAST line's
+// `audioClip.length + 0.5` hold — never at each voice's end. Non-dialog lines
+// (e.g. the Start_Idle_01 greeting) still close on their own.
+let dialogActive = false;   // true while a playTalk() dialog is running
+let dialogSession = 0;      // guards the balloon watcher against stale closes
 let validVoices = null;   // 合法語音檔名集合（voice_index.json[characterId]），過濾泛用事件
 let VOICE_INDEX = {};     // characterId -> 該角色語音檔名清單
 
@@ -464,71 +654,124 @@ async function playTalk() {
   state.busy = 'talk';
   blockInteraction('talk', true);           // mirrors [this+0xc8].Add(requester)
   state.blockInteractionOnPlay = true;      // mirrors byte [+0xb0] ← from dialog start
+  const session = ++dialogSession;          // this talk's balloon session
+  dialogActive = true;
 
-  const talks = animNames().filter(n => n.startsWith('Talk_') && n.endsWith('_M'));
-  if (!talks.length) { state.busy = null; return; }
+  try {
+    const talks = animNames().filter(n => n.startsWith('Talk_') && n.endsWith('_M'));
+    if (!talks.length) return;
 
-  // Prefer Talk animations that have voice events (lobby_voice_schedule.json).
-  // In-game the dialog excel (CharacterDialogInfo.AnimationName) hands the
-  // exact clip name, but server doesn't expose MemorialLobby dialogs — the
-  // closest determinism we can deliver is to filter to clips that actually
-  // emit voice events. Falls back to all Talk_N_M if schedule is unavailable.
-  const schAnim = SCHEDULE?.lobbies?.[currentLobby]?.animations || {};
-  const withVoice = talks.filter(n => (schAnim[n]?.voice || []).length > 0);
-  const pool = withVoice.length ? withVoice : talks;
-  const m = pick(pool);
-  const a = m.replace(/_M$/, '_A');
-  spine.state.setAnimation(1, m, false);
-  if (animNames().includes(a)) spine.state.setAnimation(2, a, false);
-  else spine.state.setEmptyAnimation(2, 0.3);
+    // Prefer Talk animations that have voice events (lobby_voice_schedule.json).
+    // In-game the dialog excel (CharacterDialogInfo.AnimationName) hands the
+    // exact clip name, but server doesn't expose MemorialLobby dialogs — the
+    // closest determinism we can deliver is to filter to clips that actually
+    // emit voice events. Falls back to all Talk_N_M if schedule is unavailable.
+    const schAnim = SCHEDULE?.lobbies?.[currentLobby]?.animations || {};
+    const withVoice = talks.filter(n => (schAnim[n]?.voice || []).length > 0);
+    const pool = withVoice.length ? withVoice : talks;
+    const m = pick(pool);
+    const a = m.replace(/_M$/, '_A');
+    spine.state.setAnimation(1, m, false);
+    if (animNames().includes(a)) spine.state.setAnimation(2, a, false);
+    else spine.state.setEmptyAnimation(2, 0.3);
 
-  // ---- CoDialog-style pacing ----
-  // Play the full talk animation and let EVERY voice event along its timeline
-  // fire (each playVoice starts its own <audio> and bumps lastVoicePromise).
-  // We wait until the animation finishes on track 1, then hold for the trailing
-  // margin of the last voice line (`audioClip.length + 0.5`), mirroring the
-  // reversed ChatDialog.<CoDialog>d__43.MoveNext pacing.
-  const anim = spine.state.data.skeletonData.findAnimation(m);
-  const animMs = (anim?.duration ?? 2.0) * 1000;
-  const startToken = voiceToken;
-  const t0 = performance.now();
+    // ---- Balloon lifecycle (reversed ChatDialog.<CoDialog>d__43.MoveNext) ----
+    // The balloon is ONE persistent element for the whole talk: each recorded
+    // Talk voice event (lobby_voice_schedule.json) switches the text in place,
+    // each line is held `audioClip.length + 0.5`, and the balloon closes (with
+    // the CSS .4s fade) after the LAST line's hold — NOT at every voice's end
+    // (that flickered the box between lines and cut it off early), and NOT at
+    // the full animation length (Talk_04_M runs 40s with its last line at 32.9s).
+    const anim = spine.state.data.skeletonData.findAnimation(m);
+    const animMs = (anim?.duration ?? 2.0) * 1000;
+    const startToken = voiceToken;
+    const t0 = performance.now();
 
-  // Poll until the talk animation on track 1 has played through (animationTime
-  // reached its end) — this guarantees multi-line talks (e.g. Talk_01_M with
-  // events at 1.33s and 8.60s) run to completion instead of cutting after the
-  // first line. Bail early if the interaction was superseded.
-  let voiceFired = false;
-  const deadline = t0 + animMs + 500;
-  while (performance.now() < deadline) {
-    if (state.busy !== 'talk') return;
-    const tr = spine.state.tracks[1];
-    const animEnd = tr?.animationEnd || animMs;
-    const animDone = tr ? tr.animationTime >= animEnd - 0.05 : true;
-    if (animDone) { voiceFired = voiceToken > startToken; break; }
-    await new Promise((r) => setTimeout(r, 60));
-  }
+    const lines = schAnim[m]?.voice || [];
+    const lastLine = lines.length ? lines[lines.length - 1] : null;
+    if (lastLine) {
+      // Watch the last line's voice event fire, then hold `length + 0.5` and
+      // close the balloon — independently of the animation still running on
+      // track 1 (busy stays held until the clip finishes, below).
+      (async () => {
+        const deadline = t0 + animMs + 1000;
+        let fired = false;
+        // Phase 1 — wait until the last line's voice event fires, or the
+        // animation passes the line's recorded time (events dispatch on the
+        // next rAF, so `t` can cross the event time a frame early).
+        while (performance.now() < deadline) {
+          if (session !== dialogSession) return;
+          const tr = spine.state.tracks[1];
+          const animEnd = tr?.animationEnd || animMs;
+          const t = tr ? tr.animationTime : animEnd;
+          if (lastVoiceName === lastLine.name) { fired = true; break; }
+          if (t >= lastLine.t - 0.05 || t >= animEnd - 0.05) break;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        // Phase 2 — grace for the async event→playVoice dispatch before giving
+        // up (a missingMedia/skipped last line has no audio; close shortly after
+        // its recorded time instead of leaving the balloon up till anim end).
+        for (let i = 0; i < 20 && !fired; i++) {
+          if (session !== dialogSession) return;
+          if (lastVoiceName === lastLine.name) { fired = true; break; }
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        if (session !== dialogSession) return;
+        if (fired) {
+          await lastVoicePromise;             // last line audio + 0.5
+          if (session !== dialogSession) return;
+        }
+        dialogActive = false;
+        hideChat();                           // .4s CSS fade, not instant
+      })();
+    }
 
-  // Wait for the most-recently-fired voice to finish. `lastVoicePromise` was
-  // reassigned by playVoice() during the run; re-read it here so we await the
-  // last line actually played. If nothing fired, wait out the anim remainder.
-  if (voiceFired) {
-    await lastVoicePromise;
-  } else {
-    const remain = animMs - (performance.now() - t0);
-    if (remain > 0) await new Promise((r) => setTimeout(r, remain + 200));
-  }
+    // Poll until the talk animation on track 1 has played through (animationTime
+    // reached its end). This keeps `busy` / blockInteractionOnPlay held (mirroring
+    // byte [+0xb0]) so a new line can't start until the current talk clip finishes,
+    // even though the balloon already closed after the last line's +0.5 hold.
+    // Guarantees multi-line talks (e.g. Talk_01_M: events at 1.33s and 8.60s) run
+    // to completion instead of cutting after the first line. Bail early if the
+    // interaction was superseded.
+    let voiceFired = false;
+    const deadline = t0 + animMs + 500;
+    while (performance.now() < deadline) {
+      if (state.busy !== 'talk') return;
+      const tr = spine.state.tracks[1];
+      const animEnd = tr?.animationEnd || animMs;
+      const animDone = tr ? tr.animationTime >= animEnd - 0.05 : true;
+      if (animDone) { voiceFired = voiceToken > startToken; break; }
+      await new Promise((r) => setTimeout(r, 60));
+    }
 
-  if (state.busy !== 'talk') return;
+    // Wait for the most-recently-fired voice to finish. `lastVoicePromise` was
+    // reassigned by playVoice() during the run; re-read it here so we await the
+    // last line actually played. If nothing fired, wait out the anim remainder.
+    if (voiceFired) {
+      await lastVoicePromise;
+    } else {
+      const remain = animMs - (performance.now() - t0);
+      if (remain > 0) await new Promise((r) => setTimeout(r, remain + 200));
+    }
 
-  const done = () => {
     if (state.busy !== 'talk') return;
     restTracks();
-    state.busy = null;
+  } finally {
+    // Always close the balloon and release the talk's blocking state — a lobby
+    // switch or pat that superseded this talk must never leave the box stuck
+    // open or blockInteractionOnPlay stuck (or every later talk would be refused,
+    // "Talk: 拒絕 (voice busy)").
+    if (session === dialogSession) {
+      dialogActive = false;
+      hideChat();
+    }
     blockInteraction('talk', false);
     state.blockInteractionOnPlay = false;
-    scheduleAutonomy();
-  };
-  done();
+    if (state.busy === 'talk') {
+      state.busy = null;
+      scheduleAutonomy();
+    }
+  }
 }
 
 // Track the last voice end-Promise so playTalk() can use it for CoDialog pacing.
@@ -616,7 +859,7 @@ function endPat() {
 function scheduleAutonomy() {
   clearTimeout(state.autonomy);
   state.autonomy = setTimeout(() => {
-    if (!spine || state.busy || state.introBlock) { scheduleAutonomy(); return; }
+    if (!spine || state.busy || state.introBlock || exporting) { scheduleAutonomy(); return; }
     if (Math.random() < 0.5 && hasAny('Talk_')) playTalk();
     else scheduleAutonomy();
   }, rand(7000, 15000));
@@ -682,6 +925,8 @@ window.ba_debug = {
     validVoices: validVoices ? [...validVoices].sort().slice(0, 8) : null,
   }),
   triggerTalk: () => playTalk(),
+  subtitleProbe: (v) => subtitleFor(v),
+  subtitleKeys: () => (SUBTITLES ? Object.keys(SUBTITLES).length : -1),
   triggerLook: (on) => on ? startLook() : endLook(),
   triggerPat: (on) => on ? startPat() : endPat(),
   skipMemoryLobby: () => memoryLobbySkip(),
@@ -701,6 +946,13 @@ window.ba_debug = {
     if (!spine) return null;
     const b = spine.skeleton.findBone(name);
     return b ? { x: b.worldX, y: b.worldY } : null;
+  },
+  boneGlobal: (name) => {
+    if (!spine) return null;
+    const b = spine.skeleton.findBone(name);
+    if (!b) return null;
+    const g = spine.toGlobal({ x: b.worldX, y: b.worldY });
+    return { x: g.x, y: g.y };
   },
   spineSlot: (name) => {
     if (!spine) return null;
@@ -722,6 +974,49 @@ window.ba_debug = {
   setTimeScale: (v) => { if (spine) spine.state.timeScale = v; },
   setSlotBlend: (name, m) => { const s = spine?.skeleton?.findSlot(name); if (s) s.data.blendMode = m; },
   dbgRenderer: () => ({ type: app.renderer.type, w: app.canvas.width, h: app.canvas.height, spineVisible: spine ? spine.visible : null }),
+  extractProbe: async () => {
+    try {
+      const w = app.renderer.width, h = app.renderer.height;
+      app.render();
+      const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl');
+      const px = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      return { ok: true, w, h, hasExtract: !!app.renderer.extract, bytes: px.length, avg: Math.round(px.reduce((s, v, i) => (i % 4 === 0 ? s + v : s), 0) / (w * h)) };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  },
+  dbgLobby: () => currentLobby,
+  selectLobby: (key) => selectLobby(key),
+  showProbe: (text) => showChat('TEST', text),
+  dbgSpineTree: () => {
+    const walk = (o, d, lim) => {
+      if (!o || d > lim) return [];
+      const p = [];
+      if (o.texture !== undefined && o.texture !== null) p.push('tex');
+      if (o.skeleton) p.push('skeleton');
+      if (o.mesh) p.push('mesh');
+      const out = [{ d, c: o.constructor?.name || '?', p: p.join(','), nc: o.children?.length }];
+      if (o.children) for (const c of o.children.slice(0, 4)) out.push(...walk(c, d + 1, lim));
+      return out;
+    };
+    const a = spine ? walk(spine, 0, 5) : [];
+    const s = scene ? walk(scene, 0, 5) : [];
+    return { spine: a, scene: s };
+  },
+  dbgMem: () => {
+    let textures = 0;
+    let spineKeys = [];
+    try {
+      for (const k of Assets.cache.keys()) {
+        const v = Assets.cache.get(k);
+        if (v && v.baseTexture) { textures++; spineKeys.push(k); }
+      }
+    } catch { /* not exposed */ }
+    const live = [];
+    for (const o of [spine, scene]) if (o) for (const t of collectTextures(o)) live.push(t);
+    return { textures, spineKeys, liveTextures: live.length };
+  },
   setSpineVisible: (v) => { if (spine) spine.visible = v; },
   dbgTexPixels: () => {
     if (!spine) return 'no-spine';
@@ -1191,7 +1486,375 @@ window.ba_debug = {
     spineScale: spine ? +spine.scale.x.toFixed(4) : null,
     cameraTargetY,
   }),
+  dbgExport: () => ({ exporting, recorder: recorder ? recorder.state : null, chunks: recChunks.length }),
+  anim: {
+    start: () => startAnimExport(),
+    stop: () => stopAnimExport(true),
+    active: () => animActive,
+    dbg: () => ({ animActive, animAbort, exporting, tickerStarted: app.ticker.started, autoUpdate: spine ? spine.autoUpdate : null }),
+  },
+  exp: {
+    start: () => startExport(),
+    stop: () => stopExport(),
+    lobby: () => currentLobby,
+    duration: () => recordingDuration,
+  },
 };
+
+// ---- 影片匯出 ----
+// 用 canvas.captureStream() + MediaRecorder 錄製 pixi canvas（DOM 覆蓋層不會入鏡），
+// 語音與 BGM 透過 WebAudio MediaStreamDestination 混合成單一音軌。
+let exporting = false;
+let recorder = null;
+let recChunks = [];
+let recTimer = null;
+let recStopTimer = null;
+let recElapsedStart = 0;
+let recAudioOffs = [];     // 錄製結束時要斷開的 WebAudio 節點
+let recRestore = null;     // renderer 原狀態（resize 復原用）
+let recExt = 'mp4';
+let recSizeStr = '';
+let exportMode = 'anim';   // 'anim' | 'rec'
+let animActive = false;
+let animAbort = false;
+let animPrevAutoUpdate = true;
+let animPixels = null;        // 重複使用的 readPixels 緩衝
+let animScratchCanvas = null; // 重複使用的幀編碼 canvas
+
+const nextFrame = () => new Promise((r) => requestAnimationFrame(r));
+
+function fmtClock(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function segVal(id) {
+  const on = document.querySelector(`#${id} .on`);
+  if (!on) return null;
+  if (on.dataset.v !== undefined) return on.dataset.v;
+  if (on.dataset.w !== undefined) return on.dataset.w;
+  return on.dataset.fmt;
+}
+
+function pickMime(fmt) {
+  if (fmt === 'mp4' && MediaRecorder.isTypeSupported('video/mp4')) return { mime: 'video/mp4', ext: 'mp4' };
+  const cands = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  const mime = cands.find((m) => MediaRecorder.isTypeSupported(m)) || '';
+  return { mime, ext: 'webm' };
+}
+
+function openExportPanel() {
+  if (!spine) { showToast('尚未載入角色'); return; }
+  expChar.textContent = prettyName(currentLobby);
+  exportPanel.classList.add('open');
+}
+function closeExportPanel() { exportPanel.classList.remove('open'); }
+
+function showRecBadge() {
+  recBadge.classList.add('show');
+  recDur.textContent = fmtClock(recordingDuration);
+}
+function hideRecBadge() { recBadge.classList.remove('show'); }
+
+let recordingDuration = 10;
+function updateRecBadge() {
+  recTime.textContent = fmtClock((performance.now() - recElapsedStart) / 1000);
+}
+
+function tryCreateRecorder(stream, opts) {
+  try { return new MediaRecorder(stream, opts); } catch (e) {
+    console.warn('[export] MediaRecorder 建立失敗', e);
+    return null;
+  }
+}
+
+async function startExport() {
+  if (!spine || exporting) return;
+  const duration = Math.max(1, +segVal('expDur') || 10);
+  const w = +segVal('expRes') || 0;          // 0 = 目前視窗
+  const fps = Math.min(60, Math.max(10, +segVal('expFps') || 30));
+  const fmt = segVal('expFmt') || 'mp4';
+  const withAudio = expAudio.checked;
+  recordingDuration = duration;
+
+  let { mime, ext } = pickMime(fmt);
+  recExt = ext;
+  recSizeStr = `${app.renderer.width}x${app.renderer.height}`;
+
+  exporting = true;
+  document.body.classList.add('recording');
+  memoryLobbySkip();          // 強制回到 Idle 循環，匯出內容穩定
+  clearTimers();
+  scheduleAutonomy();         // 匯出期間只會重排、不隨機說話
+
+  recRestore = { resizeTo: app.renderer.resizeTo, w: app.renderer.width, h: app.renderer.height };
+
+  // 自訂解析度（16:9）：暫時停用 resizeTo、resize renderer、canvas CSS 填滿視窗
+  if (w > 0) {
+    const h = Math.round((w * 9) / 16);
+    try {
+      app.renderer.resizeTo = null;
+      app.renderer.resize(w, h);
+      app.canvas.style.width = '100%';
+      app.canvas.style.height = '100%';
+      await nextFrame();
+      fitScene();
+      recSizeStr = `${app.renderer.width}x${app.renderer.height}`;
+    } catch (e) {
+      console.warn('[export] resize 失敗，改用視窗解析度', e);
+      restoreRendererState();
+    }
+  }
+
+  // 音訊圖（語音走 lipAnalyser，BGM 用 captureStream 餵進 WebAudio 混音）
+  let audioTrack = null;
+  recAudioOffs = [];
+  try {
+    const ctx = ensureAudio();
+    const dest = ctx.createMediaStreamDestination();
+    if (withAudio) {
+      if (lipAnalyser) { lipAnalyser.connect(dest); recAudioOffs.push(() => lipAnalyser.disconnect(dest)); }
+      if (bgmOn && bgmAudio) {
+        const bs = ctx.createMediaStreamSource(bgmAudio.captureStream());
+        bs.connect(dest);
+        recAudioOffs.push(() => bs.disconnect());
+      }
+    }
+    audioTrack = dest.stream.getAudioTracks()[0];
+  } catch (e) {
+    console.warn('[export] 音訊圖建立失敗，改為無音軌', e);
+  }
+
+  const vstream = app.canvas.captureStream(fps);
+  const tracks = [vstream.getVideoTracks()[0]];
+  if (withAudio && audioTrack) tracks.push(audioTrack);
+  const combined = new MediaStream(tracks);
+
+  recChunks = [];
+  recorder = tryCreateRecorder(combined, {
+    mimeType: mime,
+    videoBitsPerSecond: 12_000_000,
+    audioBitsPerSecond: 160_000,
+  });
+  if (!recorder) {
+    // MP4 開錄失敗（編碼器不可用）→ 退回 WebM
+    if (fmt === 'mp4' && MediaRecorder.isTypeSupported('video/webm')) {
+      const fb = pickMime('webm');
+      mime = fb.mime; ext = fb.ext; recExt = fb.ext;
+      recorder = tryCreateRecorder(combined, { mimeType: mime, videoBitsPerSecond: 12_000_000, audioBitsPerSecond: 160_000 });
+    }
+  }
+  if (!recorder) {
+    exporting = false;
+    document.body.classList.remove('recording');
+    restoreRendererState();
+    hideRecBadge();
+    showErr('此系統不支援 MediaRecorder，無法匯出');
+    return;
+  }
+
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+  recorder.onerror = (e) => {
+    console.error('[export] recorder error', e.error || e);
+    stopExport();
+  };
+  try { recorder.start(300); } catch (e) {
+    console.error('[export] recorder.start 失敗', e);
+    exporting = false;
+    document.body.classList.remove('recording');
+    restoreRendererState();
+    hideRecBadge();
+    showErr(`錄製啟動失敗: ${e.message}`);
+    return;
+  }
+
+  showRecBadge();
+  recElapsedStart = performance.now();
+  recTimer = setInterval(updateRecBadge, 250);
+  recStopTimer = setTimeout(() => stopExport(), duration * 1000);
+  log(`匯出開始: ${duration}s ${recordingSizeName()} ${fps}fps ${ext} audio=${withAudio}`);
+}
+
+function recordingSizeName() {
+  return recSizeStr || `${app.renderer.width}x${app.renderer.height}`;
+}
+
+async function restoreRendererState() {
+  if (!recRestore) return;
+  try {
+    app.renderer.resizeTo = recRestore.resizeTo;
+    app.renderer.resize(recRestore.w, recRestore.h);
+    app.canvas.style.width = '';
+    app.canvas.style.height = '';
+    await nextFrame();
+    fitScene();
+  } catch (e) {
+    console.warn('[export] 復原 renderer 失敗', e);
+  }
+  recRestore = null;
+}
+
+async function stopExport() {
+  if (!exporting) return;
+  exporting = false;
+  clearTimeout(recStopTimer);
+  clearInterval(recTimer);
+  hideRecBadge();
+
+  const isRec = recorder && recorder.state !== 'inactive';
+  let blob = null;
+  if (isRec) {
+    blob = await new Promise((res) => {
+      recorder.onstop = () => res(new Blob(recChunks, { type: recorder.mimeType }));
+      try { recorder.stop(); } catch (e) { res(null); }
+    });
+    try { for (const t of recorder.stream?.getTracks() || []) t.stop(); } catch { /* ignore */ }
+  }
+  for (const off of recAudioOffs) { try { off(); } catch { /* ignore */ } }
+  recAudioOffs = [];
+  recorder = null;
+  recChunks = [];
+
+  document.body.classList.remove('recording');
+  await restoreRendererState();
+  scheduleAutonomy();
+
+  if (blob && blob.size > 0) {
+    const fileBase = currentLobby || 'lobby';
+    const defaultName = `${fileBase}_${recordingDuration}s_${recordingSizeName()}.${recExt}`;
+    try {
+      const res = await window.ba.saveVideo({ data: await blob.arrayBuffer(), defaultName, ext: recExt });
+      if (res?.canceled) log('匯出已取消');
+      else if (res?.path) { log(`匯出完成: ${res.path}`); showToast('影片已儲存'); }
+      else log('匯出無結果');
+    } catch (e) {
+      showErr(`儲存失敗: ${e.message}`);
+    }
+  } else {
+    showErr('錄製失敗（無資料）');
+  }
+}
+
+// ---- 逐幀動畫匯出 ----
+// 不依賴即時錄影：暫停 app.ticker 與 spine 的 autoUpdate，每幀以固定 dt=1/fps
+// 手動推進動畫並 renderer.extract 讀出畫面，把 WebP 幀串流進 main 的 ffmpeg 編碼，
+// 產出精確 fps / 精確時長的 MP4 / WebM。
+async function startAnimExport() {
+  if (!spine || animActive || exporting) return;
+  const duration = Math.max(1, +segVal('expDur') || 10);
+  const w = +segVal('expRes') || 0;
+  const fps = Math.min(60, Math.max(10, +segVal('expFps') || 30));
+  const fmt = segVal('expFmt') || 'mp4';
+  const withAudio = expAudio.checked;
+  recordingDuration = duration;
+
+  exporting = true;
+  animActive = true;
+  animAbort = false;
+
+  memoryLobbySkip();          // 固定 Idle 循環
+  clearTimers();
+  scheduleAutonomy();         // 匯出期間不隨機說話
+
+  recRestore = { resizeTo: app.renderer.resizeTo, w: app.renderer.width, h: app.renderer.height };
+  if (w > 0) {
+    const h = Math.round((w * 9) / 16);
+    try {
+      app.renderer.resizeTo = null;
+      app.renderer.resize(w, h);
+      await nextFrame();
+      fitScene();
+    } catch (e) {
+      console.warn('[anim] resize 失敗，改用視窗解析度', e);
+      await restoreRendererState();
+    }
+  }
+  recSizeStr = `${app.renderer.width}x${app.renderer.height}`;
+
+  const total = Math.max(1, Math.round(duration * fps));
+  const dt = 1 / fps;
+
+  const ext = fmt === 'mp4' ? 'mp4' : 'webm';
+  const sess = await window.ba.startAnimVideo({
+    w: app.renderer.width,
+    h: app.renderer.height,
+    fps,
+    duration,
+    ext,
+    defaultName: `${currentLobby}_idle_${duration}s_${recSizeStr}.${ext}`,
+    audioFile: withAudio && bgmOn ? (BGM_MAP[currentLobby] || null) : null,
+  });
+  if (!sess || sess.canceled) { await cleanupAnimExport(); return; }
+  if (sess.error) { await cleanupAnimExport(); showErr(`匯出啟動失敗: ${sess.error}`); return; }
+
+  app.ticker.stop();
+  animPrevAutoUpdate = spine.autoUpdate;
+  spine.autoUpdate = false;
+  spine.state.timeScale = 1;
+
+  showRecBadge();
+  recDur.textContent = fmtClock(duration);
+  log(`動畫匯出開始: ${duration}s ${recSizeStr} ${fps}fps ${ext} frames=${total}`);
+
+  const vw = app.renderer.width, vh = app.renderer.height;
+  const need = vw * vh * 4;
+  if (!animPixels || animPixels.length !== need) animPixels = new Uint8Array(need);
+  if (!animScratchCanvas) animScratchCanvas = document.createElement('canvas');
+  const scratch = animScratchCanvas;
+  if (scratch.width !== vw || scratch.height !== vh) { scratch.width = vw; scratch.height = vh; }
+  const c2 = scratch.getContext('2d');
+
+  for (let i = 0; i < total; i++) {
+    if (animAbort) break;
+    spine.update(dt);
+    try {
+      app.render();
+      const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl');
+      gl.readPixels(0, 0, vw, vh, gl.RGBA, gl.UNSIGNED_BYTE, animPixels);
+      const img = new ImageData(new Uint8ClampedArray(animPixels.buffer, 0, need), vw, vh);
+      c2.setTransform(1, 0, 0, 1, 0, 0);
+      c2.translate(0, vh);
+      c2.scale(1, -1);
+      c2.putImageData(img, 0, 0);
+      c2.setTransform(1, 0, 0, 1, 0, 0);
+      const blob = await new Promise((r) => scratch.toBlob(r, 'image/webp', 90));
+      if (blob && blob.size) window.ba.animFrame(await blob.arrayBuffer());
+    } catch (e) {
+      console.error('[anim] 幀處理失敗', e);
+      animAbort = true;
+    }
+    recTime.textContent = fmtClock((i + 1) / fps);
+    recDur.textContent = `${i + 1}/${total}`;
+    if (i % 15 === 0) await nextFrame();
+  }
+
+  let res = null;
+  if (animAbort) { window.ba.abortAnimVideo(); }
+  else {
+    try { res = await window.ba.finishAnimVideo(); } catch (e) { res = { error: e.message }; }
+  }
+
+  await cleanupAnimExport();
+  if (res?.path) { log(`動畫匯出完成: ${res.path}`); showToast('動畫已儲存'); }
+  else if (animAbort) log('動畫匯出已取消');
+  else showErr(`動畫匯出失敗: ${res?.error || '未知錯誤'}`);
+}
+
+function stopAnimExport(abort = false) {
+  animAbort = true;
+  if (abort) log('動畫匯出取消中…');
+}
+
+async function cleanupAnimExport() {
+  animActive = false;
+  exporting = false;
+  hideRecBadge();
+  try { app.ticker.start(); } catch {}
+  if (spine) spine.autoUpdate = animPrevAutoUpdate;
+  await restoreRendererState();
+  scheduleAutonomy();
+}
 
 // ---- asset loading ----
 async function fetchRetry(url, retries = 4) {
@@ -1371,13 +2034,20 @@ function toggleSidebar(force) {
 }
 
 function selectLobby(key) {
+  if (exporting) return;
   if (key === currentLobby) { toggleSidebar(false); return; }
   toggleSidebar(false);
   fadeIn().then(() => loadLobby(key));
 }
 
 async function loadScene(entry) {
-  if (scene) { scene.destroy(); scene = null; }
+  let oldSceneTextures = new Set();
+  if (scene) {
+    oldSceneTextures = collectTextures(scene);
+    scene.destroy();
+    scene = null;
+  }
+  destroyTextures(oldSceneTextures);
   const s = entry?.scene;
   if (!s) return;
   try {
@@ -1390,18 +2060,73 @@ async function loadScene(entry) {
     log(`場景: ${currentLobby} (${anims[0].name})`);
   } catch (e) {
     console.warn('[lobby] 場景載入失敗，略過', e);
-    if (scene) { scene.destroy(); scene = null; }
+    if (scene) { destroyTextures(collectTextures(scene)); scene.destroy(); scene = null; }
   }
 }
 
+// 收集顯示物件樹上的 texture（含 children / spine attachmentCacheData）
+function collectTextures(obj) {
+  const set = new Set();
+  const stack = [obj];
+  while (stack.length) {
+    const c = stack.pop();
+    if (!c) continue;
+    if (c.texture && !c.texture.destroyed) set.add(c.texture);
+    if (c.attachmentCacheData) {
+      for (const row of c.attachmentCacheData) {
+        if (!row) continue;
+        for (const cd of Object.values(row)) {
+          if (cd && cd.texture && !cd.texture.destroyed) set.add(cd.texture);
+        }
+      }
+    }
+    if (c.children) for (const ch of c.children) stack.push(ch);
+  }
+  return set;
+}
+// 銷毀舊 spine/scene 的 texture，釋放 GPU 記憶體
+function destroyTextures(set) {
+  for (const t of set) {
+    try { if (!t.destroyed) t.destroy(true); } catch { /* ignore */ }
+  }
+}
+
+// 切換 lobby 時卸載上一隻的 assets（含 scene），避免 texture 記憶體無限累積
+function unloadLobbyAssets(lobbyName) {
+  if (!lobbyName) return;
+  const entry = LOBBY_INDEX[lobbyName];
+  if (!entry || typeof entry !== 'object') return;
+  const urls = [];
+  const push = (rel, base) => { if (rel) urls.push(base + rel.replace(/^\.\//, '')); };
+  const charBase = `assets/spine/${lobbyName}/`;
+  push(entry.skel, charBase);
+  push(entry.atlas, charBase);
+  for (const p of entry.png || []) push(p, charBase);
+  if (entry.scene) {
+    const sceneBase = `assets/scene/${lobbyName}/`;
+    push(entry.scene.skel, sceneBase);
+    push(entry.scene.atlas, sceneBase);
+    for (const p of entry.scene.png || []) push(p, sceneBase);
+  }
+  for (const u of urls) { try { Assets.unload(u); } catch {} }
+}
+
 async function loadLobby(name) {
+  if (exporting) return;
+  const oldLobby = currentLobby;
+  let oldTextures = new Set();
   if (spine) {
+    oldTextures = collectTextures(spine);
     spine.state.clearListeners?.();
     spine.destroy();
     spine = null;
   }
+  unloadLobbyAssets(oldLobby);
+  destroyTextures(oldTextures);
   clearTimers();
   state.busy = null;
+  state.blockInteractionOnPlay = false;
+  state.blockList = [];
   state.introBlock = false;
   patting = false;
   headAnchorBone = null;
@@ -1474,7 +2199,7 @@ function fadeOut() {
 }
 
 function switchLobby(dir) {
-  if (!ORDER.length || loadingEl.classList.contains('show')) return;
+  if (exporting || !ORDER.length || loadingEl.classList.contains('show')) return;
   const i = ORDER.indexOf(currentLobby);
   const next = ORDER[(i + dir + ORDER.length) % ORDER.length];
   if (next === currentLobby) return;
@@ -1526,6 +2251,7 @@ function isHeadRegion(sx, sy) {
 //                         Touch_Eye anchor bones the Pat/Look animations key.
 // No drag / zoom / pan.
 function onPointerDown(e) {
+  if (exporting) return;
   ensureAudio();
   userActiveAt = performance.now();
   if (bgmOn && !bgmAudio) setBgm(BGM_MAP[currentLobby]);
@@ -1595,6 +2321,11 @@ async function init() {
   LOBBY_INDEX = idx;
   ORDER = Object.keys(idx);
   try {
+    CHAT_ANCHORS = await fetchRetry('assets/data/lobby_chat_anchors.json').then(r => r.json());
+  } catch (e) {
+    console.warn('[lobby] 對話錨點資料載入失敗，使用預設位置', e);
+  }
+  try {
     const sr = await fetchRetry('assets/data/lobby_voice_schedule.json');
     SCHEDULE = await sr.json();
   } catch (e) {
@@ -1605,6 +2336,7 @@ async function init() {
   } catch (e) {
     console.warn('[lobby] 語音索引載入失敗', e);
   }
+  await loadSubtitles();
   try {
     const br = await fetchRetry('assets/data/lobby_bgm_mapping.csv');
     const txt = await br.text();
@@ -1628,7 +2360,7 @@ async function init() {
   let resizeTimer = null;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => { if (spine && fitted) fitScene(); }, 80);
+    resizeTimer = setTimeout(() => { if (spine && fitted) fitScene(); positionChat(); }, 80);
   });
   // input
   canvas.addEventListener('pointerdown', onPointerDown);
@@ -1666,6 +2398,33 @@ async function init() {
   });
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && sidePanel.classList.contains('open')) toggleSidebar(false);
+  });
+
+  // ---- video export UI ----
+  btnExport.addEventListener('click', openExportPanel);
+  expCancel.addEventListener('click', closeExportPanel);
+  expStart.addEventListener('click', () => { closeExportPanel(); if (exportMode === 'anim') startAnimExport(); else startExport(); });
+  recStop.addEventListener('click', () => { if (animActive) stopAnimExport(true); else stopExport(); });
+  for (const id of ['expMode', 'expDur', 'expRes', 'expFps', 'expFmt']) {
+    const box = document.getElementById(id);
+    box.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      for (const sib of box.children) sib.classList.remove('on');
+      b.classList.add('on');
+    });
+  }
+  const modeLabel = () => {
+    const m = segVal('expMode') || 'anim';
+    exportMode = m === 'rec' ? 'rec' : 'anim';
+    const isAnim = exportMode === 'anim';
+    expModeLabel.textContent = isAnim ? '逐幀編碼：固定 fps，不依賴即時錄影' : '畫面錄製：即時進行，含語音';
+    expAudioRow.style.display = isAnim ? 'none' : '';
+  };
+  document.getElementById('expMode').addEventListener('click', () => { setTimeout(modeLabel, 0); });
+  modeLabel();
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && exportPanel.classList.contains('open')) closeExportPanel();
   });
   // fullscreen toggle (button + F11 / F)
   const updateFullBtn = () => {
