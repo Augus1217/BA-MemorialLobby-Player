@@ -1,5 +1,5 @@
-import { Application, Assets, Texture, Sprite, MeshSimple } from 'pixi.js';
-import { Spine } from '@esotericsoftware/spine-pixi-v8';
+import { Application, Assets, Texture, Sprite, MeshSimple, BlurFilter } from 'pixi.js';
+import { Spine, ScaleTimeline } from '@esotericsoftware/spine-pixi-v8';
 
 window.addEventListener('error', (e) => console.error('[renderer][uncaught]', e.message, e.filename, e.lineno));
 window.addEventListener('unhandledrejection', (e) => console.error('[renderer][unhandled]', e.reason));
@@ -14,6 +14,7 @@ const loadingEl = document.getElementById('loading');
 const loadingText = document.getElementById('loadingText');
 const errEl = document.getElementById('err');
 const fadeEl = document.getElementById('fade');
+const whiteFlashEl = document.getElementById('whiteflash');
 const btnPrev = document.getElementById('btnPrev');
 const btnNext = document.getElementById('btnNext');
 const btnBgm = document.getElementById('btnBgm');
@@ -30,9 +31,15 @@ const exportPanel = document.getElementById('exportPanel');
 const expChar = document.getElementById('expChar');
 const expStart = document.getElementById('expStart');
 const expCancel = document.getElementById('expCancel');
-const expAudio = document.getElementById('expAudio');
-const expAudioRow = document.getElementById('expAudioRow');
-const expModeLabel = document.getElementById('expModeLabel');
+const expBgm = document.getElementById('expBgm');
+const expVoice = document.getElementById('expVoice');
+const expDialog = document.getElementById('expDialog');
+const expDialogCk = document.getElementById('expDialogCk');
+const expTalkRow = document.getElementById('expTalkRow');
+const expTalkSel = document.getElementById('expTalkSel');
+const expCustomRow = document.getElementById('expCustomRow');
+const expCustomW = document.getElementById('expCustomW');
+const expCustomH = document.getElementById('expCustomH');
 const recBadge = document.getElementById('recBadge');
 const recTime = document.getElementById('recTime');
 const recDur = document.getElementById('recDur');
@@ -74,13 +81,13 @@ function showErr(msg) {
 const log = (s) => console.log('[lobby]', s);
 
 // ---- state ----
-let spine = null;          // character skeleton
-let scene = null;          // room overlay skeleton (when available)
-let currentLobby = null;
-let LOBBY_INDEX = {};
-let SCHEDULE = null;
-let BGM_MAP = {};
-let ORDER = [];
+ let spine = null;          // character skeleton
+ let scene = null;          // room overlay skeleton (when available)
+ let currentLobby = null;
+ let LOBBY_INDEX = {};
+ let SCHEDULE = null;
+ let BGM_MAP = {};
+ let ORDER = [];
 
 // kivo.wiki 光線修復: 所有角色的 top light slot 改為 Screen 混色
 // (對照 kivo 修復版 skel: CH0070_home top_light blendMode = 3)
@@ -240,14 +247,66 @@ async function probeVoiceLength(name) {
 
 // Drive the mouth bones from live voice amplitude (on top of the baked _M lip sync),
 // and the eye bones from the cursor (eyes follow cursor).
+//
+// Many characters have a CHAINED mouth rig (e.g. Midori: Mouth -> Mouth2 -> ...
+// -> Mouth7 -> F_Mouth_11 — 7 levels deep). Applying `scaleY *= boost` to every
+// bone in such a chain compounds through the parenting (child inherits an already
+// boosted scaleY, then multiplies again), exponentially inflating the mouth.
+// To stay within the baked _M animation shape only the ROOT bone of each mouth
+// sub-tree (the one with no mouth-named ancestor) gets the boost; all descendants
+// inherit the boost naturally via the parent's world transform.
+//
+// Second hazard: for rigs whose root mouth bone has NO ScaleTimeline in any
+// animation (e.g. CH0288 — only the child mouth_XXXX bones are animated), the
+// baked animation never resets the root bone's scaleY between frames. A plain
+// `scaleY *= boost` then accumulates (1.35^60 ≈ 66M after 1s of loud audio),
+// blowing the mouth up. For such bones we must REBASE from the setup value each
+// frame (`setupY * boost`) instead of compounding. Whether a bone is safe to
+// compound is judged dynamically against the CURRENTLY PLAYING tracks (the Idle
+// loop on track 0 + the Talk/Look/Pat clip on track 1), because coverage varies
+// per animation (some Talk clips scale the root bone, others don't).
 function setupLipHook(target) {
-  const bones = target.state.data.skeletonData.bones;
+  const skeletonData = target.state.data.skeletonData;
+  const bones = skeletonData.bones;
+  const mouthRe = /mouth/i;
   const indices = [];
+  // Per-animation set of bone indices that have a ScaleTimeline, so the
+  // per-frame check is a cheap lookup instead of re-scanning timelines.
+  const animScale = new Map();  // Animation -> Set<boneIndex>
+  for (const anim of skeletonData.animations) {
+    const set = new Set();
+    for (const tl of anim.timelines) {
+      if (tl instanceof ScaleTimeline) set.add(tl.boneIndex);
+    }
+    if (set.size) animScale.set(anim, set);
+  }
   for (let i = 0; i < bones.length; i++) {
-    if (/mouth/i.test(bones[i].name)) indices.push(i);
+    if (!mouthRe.test(bones[i].name)) continue;
+    // Walk up ancestors; if any is also a "mouth" bone, this is a child — skip it.
+    let ancestor = bones[i].parent;
+    let isRoot = true;
+    while (ancestor) {
+      if (mouthRe.test(ancestor.name)) { isRoot = false; break; }
+      ancestor = ancestor.parent;
+    }
+    if (isRoot) indices.push(i);
   }
   target._mouthIndices = indices;
+  target._mouthAnimScale = animScale;
   target.beforeUpdateWorldTransforms = (self) => {
+    // Bones whose scaleY the animation state rewrites this frame (all tracks,
+    // including the mixing-out clip). These are reset before we multiply, so
+    // compounding is safe; the rest must be rebased every frame.
+    const resetSet = new Set();
+    const tracks = self.state.tracks;
+    for (let t = 0; t < tracks.length; t++) {
+      let e = tracks[t];
+      while (e) {
+        const set = e.animation && self._mouthAnimScale.get(e.animation);
+        if (set) for (const i of set) resetSet.add(i);
+        e = e.mixingFrom;
+      }
+    }
     if (lipActive && lipAnalyser && self._mouthIndices.length) {
       lipAnalyser.getByteTimeDomainData(lipBuf);
       let sum = 0;
@@ -257,7 +316,19 @@ function setupLipHook(target) {
       }
       const rms = Math.sqrt(sum / lipAnalyser.fftSize) / 128;
       const boost = 1 + Math.min(1, rms * 6) * 0.35;
-      for (const i of self._mouthIndices) self.skeleton.bones[i].scaleY *= boost;
+      for (const i of self._mouthIndices) {
+        const b = self.skeleton.bones[i];
+        if (resetSet.has(i)) b.scaleY *= boost;         // animation resets it every frame
+        else b.scaleY = b.data.scaleY * boost;          // never touched by animation — rebase
+      }
+    } else {
+      // No voice: bones that the animation does NOT rewrite must return to their
+      // setup scaleY or they'd stay frozen at the last boosted value.
+      for (const i of self._mouthIndices) {
+        if (resetSet.has(i)) continue;
+        const b = self.skeleton.bones[i];
+        if (b.scaleY !== b.data.scaleY) b.scaleY = b.data.scaleY;
+      }
     }
     applyEyeFollow(self);
   };
@@ -519,6 +590,7 @@ function onAnimationEvent(_entry, ev) {
   // (Reading ev.data.name alone made every line fire a bogus playVoice("Talk")
   // against the non-existent talk.ogg, erroring instantly and cutting the whole
   // talk animation short.) lowercase id + voiceFolder -> /assets/voice/<Folder>/<id>.ogg.
+  if (animActive) return;   // 逐幀匯出自行驅動語音/嘴型/對話框（非即時，時間軸驅動）
   if (!ev || !ev.data) return;
   const voiceId = (ev.stringValue || ev.data.stringValue || ev.data.name || '').trim();
   if (!voiceId) return;
@@ -575,9 +647,21 @@ function toggleBgm() {
   if (!bgmOn && bgmAudio) {
     bgmAudio.pause();
   } else if (bgmOn) {
-    setBgm(BGM_MAP[currentLobby]);
+    setBgm(bgmForLobby(currentLobby));
   }
   log(`BGM: ${bgmOn ? '開' : '關'}`);
+}
+
+// BGM 對照以角色核心名建檔（如 Airi_home），但 currentLobby 可能是資源複製版
+// （Airi0_home）。用 lobbyGroupInfo 的核心名 + 大小寫不敏感去比對。
+function bgmForLobby(name) {
+  if (!name || !BGM_MAP) return null;
+  if (BGM_MAP[name]) return BGM_MAP[name];
+  const core = lobbyGroupInfo(name).core;
+  if (!core) return null;
+  const want = core + '_home';
+  const hit = Object.keys(BGM_MAP).find(k => k.toLowerCase() === want.toLowerCase() || k.toLowerCase() === core);
+  return hit ? BGM_MAP[hit] : null;
 }
 
 // ---- behavior (mimics the in-game spine playback model) ----
@@ -622,6 +706,22 @@ function animNames() {
 }
 function has(name) { return spine && animNames().includes(name); }
 function hasAny(prefix) { return animNames().some(n => n.startsWith(prefix)); }
+// Pick the looping idle animation from the actual skeleton. Some lobbies name
+// it Idle_01 / S2_01, others (e.g. Fuuka: "bub") use an unrelated name — never
+// assume the name exists (a missing clip would throw in setAnimation). Placeholder
+// zero-length clips like "Dummy" fire `complete` every frame, which would clear
+// the intro lock instantly, so they are never used as the idle loop.
+function resolveIdleClip() {
+  if (!spine) return 'Idle_01';
+  const names = animNames();
+  for (const n of ['S2_01', 'Idle_01']) if (names.includes(n)) return n;
+  const byPattern = names.find(n => /^idle/i.test(n) || /^s\d/i.test(n));
+  if (byPattern) return byPattern;
+  const usable = names.filter(n => !/^(start|talk|look|pat|dummy|smok)/i.test(n));
+  if (usable.length) return usable[0];
+  const start = names.find(n => /^start/i.test(n));
+  return start || names[0] || 'Idle_01';
+}
 
 function after(ms, fn) {
   const id = setTimeout(fn, ms);
@@ -858,11 +958,7 @@ function endPat() {
 
 function scheduleAutonomy() {
   clearTimeout(state.autonomy);
-  state.autonomy = setTimeout(() => {
-    if (!spine || state.busy || state.introBlock || exporting) { scheduleAutonomy(); return; }
-    if (Math.random() < 0.5 && hasAny('Talk_')) playTalk();
-    else scheduleAutonomy();
-  }, rand(7000, 15000));
+  state.autonomy = null;
 }
 
 // ---- idle clip switching (reversed PortraitSpineCharacter.set_ClipToPlayOnIdle) ----
@@ -881,16 +977,181 @@ function loadIdleClip(entry) {
   if (isMemorial && !has(idleClip)) idleClip = 'Idle_01'; // fallback
 }
 
+// ---- memorial intro white flash (rebuilt 1:1 from the game Timeline) ----
+// Per-character curves are extracted from every spinelobbies bundle's
+// `<char>_Timeline` -> "Animation Track (1)" infinite clip `Recorded` and shipped
+// as `assets/data/flash_curves.json`. Each lobby drives its own exposure /
+// white-sprite / depth-of-field curves; the template below (Airi) is only a
+// fallback when the data file fails to load. The white screen is driven by:
+//   * Volume.weight -> ColorAdjustments postExposure 5.5  (PPPV_Lobby_Airi_C)
+//   * SpriteRenderer.m_Color.a -> 4x4 pure-white sprite  (FX_White_01_F_01)
+//   * Volume.weight -> DepthOfField gaussian blur         (PPPV_Lobby_Airi_D)
+// Unity stores the streamed curve as cubic coefficients applied from each key
+// to the next: v = d + dx*(c + dx*(b + dx*a)), dx = t - key.t.
+const FALLBACK_FLASH_KEYS = {
+  // ColorAdjustments exposure volume weight
+  exposure: [
+    { t: 0, a: 9.9432, b: -7.1023, c: 0, d: 1 },            // 1 -> 0.5 @0.4s
+    { t: 0.4, a: 1.0602, b: -0.4638, c: -0.9091, d: 0.5 },  // 0.5 -> 0 @1.1s
+    { t: 1.1, a: 0, b: 0, c: 0, d: 0 },
+    { t: 15.4, a: -53.9997, b: 26.9999, c: 0, d: 0 },       // 0 -> 1 @15.733s
+    { t: 15.7333333, a: 0, b: 0, c: 0, d: 1 },
+    { t: 15.9, a: 29.618, b: -16.1727, c: 0, d: 1 },        // 1 -> 0.3 @16.233s
+    { t: 16.2333333, a: -0.2152, b: 0.8403, c: -0.9091, d: 0.3 },
+    { t: 17, a: 0, b: 0, c: 0, d: 0 },
+  ],
+  // white sprite alpha (opening overlay only)
+  sprite: [
+    { t: 0, a: 843.7498, b: -168.75, c: 0, d: 1 },          // 1 -> 0 @0.133s
+    { t: 0.1333333, a: 0, b: 0, c: 0, d: 0 },
+  ],
+  // DepthOfField volume weight (subtle focus-snap on the flashes)
+  dof: [
+    { t: 0, a: 0.432, b: -1.08, c: 0, d: 1 },               // 1 -> 0 @1.667s
+    { t: 1.6666667, a: 0, b: 0, c: 0, d: 0 },
+    { t: 15.8666667, a: -54002.4727, b: 2700.0825, c: 0, d: 0 }, // 0 -> 1 @15.9s
+    { t: 15.9, a: 7.8729, b: -7.4792, c: 0, d: 1 },
+    { t: 16.5333333, a: 0, b: 0, c: 0, d: 0 },
+  ],
+};
+
+// Evaluate a Unity streamed cubic at time t (seconds). Holds the last value.
+function cubicAt(keys, t) {
+  if (!keys || !keys.length) return 0;
+  if (t <= keys[0].t) return keys[0].d;
+  for (let i = 0; i < keys.length - 1; i++) {
+    const k = keys[i], n = keys[i + 1];
+    if (t <= n.t) {
+      const dx = t - k.t;
+      return k.d + dx * (k.c + dx * (k.b + dx * k.a));
+    }
+  }
+  return keys[keys.length - 1].d;
+}
+
+// Per-character flash table (loaded from assets/data/flash_curves.json).
+let FLASH_TABLE = null;
+function normalizeFlashKeys(list) {
+  if (!list) return undefined;
+  return list.map(k => ({ t: k[0], a: k[1], b: k[2], c: k[3], d: k[4] }));
+}
+function normalizeFlashTable(raw) {
+  const out = {};
+  for (const [name, entry] of Object.entries(raw || {})) {
+    const e = {};
+    for (const n of ['exposure', 'sprite', 'dof']) e[n] = normalizeFlashKeys(entry[n]);
+    if (e.exposure || e.sprite || e.dof) out[name.toLowerCase()] = e;
+  }
+  return out;
+}
+// Curves for the current lobby. null when the intro has no flash (the table is
+// authoritative — a few non-standard lobbies are intentionally excluded rather
+// than force-fitting the shared template); FALLBACK only if the file never loaded.
+function flashCurves() {
+  const t = FLASH_TABLE;
+  if (t && currentLobby) return t[currentLobby.toLowerCase()] || null;
+  return t === null ? FALLBACK_FLASH_KEYS : null;
+}
+
+// Net screen whiteness (0..1): the exposure volume and the white sprite both
+// white-out the frame, so take their max (Unity post-process + sprite overlay).
+function whiteFlashAlpha(t) {
+  if (t < 0) return 0;
+  const c = flashCurves();
+  if (!c) return 0;
+  return clamp(Math.max(cubicAt(c.sprite, t), cubicAt(c.exposure, t)), 0, 1);
+}
+
+// Current intro timeline time, or -1 when the memorial intro is not playing
+// (idle loop / after skip / interactions) — the flash only exists in the intro.
+// The flash window is the PlayableDirector timeline, which is often LONGER than
+// the skeleton's Start_Idle_01 clip (Fuuka/Momoi: ~2s spine intro but flashes up
+// to 6-9s). So drive the flash from a pure virtual clock armed at intro start and
+// advanced by real/frame time — NEVER from spine trackTime (which loops / fades /
+// switches clips and is not the game's timeline clock).
+let introVirtual = false;    // virtual intro clock armed
+let introVirtualTime = 0;
+let introWindowEnd = 0;      // flash window length for the current lobby (0 = no flash)
+let introClockStart = -1;    // performance.now() when armed (live wall-clock source)
+function introFlashWindow() {
+  const c = flashCurves();
+  if (!c) return 0;
+  let mx = 0;
+  for (const k of ['exposure', 'sprite', 'dof']) {
+    const arr = c[k];
+    if (Array.isArray(arr)) for (const key of arr) {
+      if (!key) continue;
+      const t = Array.isArray(key) ? key[0] : key.t;
+      if (t > mx) mx = t;
+    }
+  }
+  return mx;
+}
+function startIntroClock() {
+  introWindowEnd = introFlashWindow();
+  introVirtual = introWindowEnd > 0;
+  introVirtualTime = 0;
+  introClockStart = performance.now();
+}
+// Export (animActive) drives the clock by frame time via advanceIntroClock(dt);
+// live view drives it by wall-clock time — independent of the app ticker, so a
+// render hiccup can never freeze the flash.
+function advanceIntroClock(dt) {
+  if (introVirtual && dt > 0) introVirtualTime += dt;
+}
+
+function introFlashTime() {
+  if (!introWindowEnd) return -1;
+  if (!animActive && introVirtual && introClockStart >= 0) introVirtualTime = (performance.now() - introClockStart) / 1000;
+  return introVirtualTime < introWindowEnd ? introVirtualTime : -1;
+}
+
+let lastFlashAlpha = -1;
+let lastFlashTick = null;   // debug: last (t, alpha) seen inside tickWhiteFlash
+// DepthOfField gaussian blur (Volume.weight -> PPPV_Lobby_Airi_D, gaussianMaxRadius=1.5).
+// Attached to the whole stage only while the intro flash blur is active; a zero
+// strength filter would still force an offscreen render pass every frame, so it is
+// added/removed rather than kept at 0.
+const flashBlur = new BlurFilter({ strength: 0, quality: 3 });
+let flashBlurOn = false;
+// Drive the #whiteflash DOM overlay (live view) + keep it in sync each frame.
+function tickWhiteFlash() {
+  const t = introFlashTime();
+  const alpha = whiteFlashAlpha(t);
+  lastFlashTick = { t, alpha };
+  if (alpha !== lastFlashAlpha) {
+    lastFlashAlpha = alpha;
+    whiteFlashEl.style.opacity = alpha > 0 ? String(alpha) : '0';
+  }
+  const c = flashCurves();
+  const dof = (c && t >= 0) ? cubicAt(c.dof, t) : 0;
+  const on = dof > 0.01;
+  if (on !== flashBlurOn) {
+    flashBlurOn = on;
+    app.stage.filters = on ? [flashBlur] : null;
+  }
+  if (on) flashBlur.strength = clamp(dof * 1.5, 0, 1.5);   // 1.5 = game gaussianMaxRadius
+}
+function resetWhiteFlash() {
+  lastFlashAlpha = -1;
+  whiteFlashEl.style.opacity = '0';
+  if (flashBlurOn) {
+    flashBlurOn = false;
+    app.stage.filters = null;
+  }
+}
+
 function playStart() {
   if (!spine) return;
   const introName = 'Start_Idle_01';
   const hasStart = has(introName);
-  if (!idleClip) idleClip = has('S2_01') ? 'S2_01' : 'Idle_01';
+  if (!idleClip) idleClip = resolveIdleClip();
   if (hasStart) {
     // Memorial intro timeline (PlayableDirector) occupies the screen and locks
     // interaction until it finishes (matching UILobby memory lobby flow). Track 0
     // completion of the intro clears the lock (see onTrackComplete).
     state.introBlock = true;
+    startIntroClock();
     spine.state.setAnimation(0, introName, false);
     spine.state.addAnimation(0, idleClip, true, 0);
   } else {
@@ -906,6 +1167,8 @@ function playStart() {
 function memoryLobbySkip() {
   if (!spine) return;
   state.introBlock = false;
+  introVirtual = false;
+  introWindowEnd = 0;
   spine.state.setAnimation(0, idleClip || 'Idle_01', true);
   log('skip to idle');
 }
@@ -935,6 +1198,16 @@ window.ba_debug = {
     if (!spine || !b) return null;
     const g = spine.toGlobal({ x: b.worldX, y: b.worldY });
     return { x: g.x, y: g.y, scale: spine.scale.x, radius: HEAD_PAT_RADIUS * spine.scale.x };
+  },
+  spineInfo: () => {
+    if (!spine) return null;
+    const cur = spine.state.getCurrent(0);
+    return {
+      cur: cur ? cur.animation.name : null,
+      dur: cur ? cur.animation.duration : null,
+      anims: animNames(),
+      idleClip,
+    };
   },
   look: {
     radius: () => LOOK_RADIUS_UNITS,
@@ -973,7 +1246,58 @@ window.ba_debug = {
   },
   setTimeScale: (v) => { if (spine) spine.state.timeScale = v; },
   setSlotBlend: (name, m) => { const s = spine?.skeleton?.findSlot(name); if (s) s.data.blendMode = m; },
+  flash: {
+    alphaAt: (t) => whiteFlashAlpha(t),
+    curveAt: (name, t) => cubicAt((flashCurves() || {})[name], t),
+    introTime: () => introFlashTime(),
+    windowEnd: () => introWindowEnd,
+    virtual: () => (introVirtual ? introVirtualTime : null),
+    lastTick: () => lastFlashTick,
+    elOpacity: () => lastFlashAlpha,
+    blurOn: () => flashBlurOn,
+    blurStrength: () => flashBlur.strength,
+    defaultMix: () => (spine ? spine.state.data.defaultMix : null),
+    lobbyCurves: () => (flashCurves() || null),
+    tableLoaded: () => !!FLASH_TABLE,
+  },
   dbgRenderer: () => ({ type: app.renderer.type, w: app.canvas.width, h: app.canvas.height, spineVisible: spine ? spine.visible : null }),
+  patchRender: () => {
+    const tb = app.renderer.texture.bind.bind(app.renderer.texture);
+    app.renderer.texture.bind = (source, ...rest) => {
+      try { return tb(source, ...rest); } catch (e) {
+        window.__badSrc = { uid: source && source.uid, label: source && (source.label || source.label2), styleNull: source ? source.style === null : 'null', destroyed: source ? source.destroyed : 'na', w: source && source.width, h: source && source.height };
+        throw e;
+      }
+    };
+    const orig = app.renderer.render.bind(app.renderer);
+    app.renderer.render = (...a) => {
+      try { return orig(...a); } catch (e) {
+        window.__renderErr = { msg: String(e && e.message), stack: (e && e.stack || '').split('\n').slice(0, 3).join('|') };
+        const bad = [];
+        const walk = (c) => {
+          if (!c) return;
+          if (c.texture) bad.push({ type: c.constructor?.name, hasSource: !!c.texture.source, sd: c.texture.source ? c.texture.source.destroyed : 'na', styleNull: c.texture.source ? c.texture.source.style === null : 'na' });
+          if (c.filters) bad.push({ filters: c.filters.map(f => f.constructor?.name) });
+          if (c.children) for (const ch of c.children) walk(ch);
+        };
+        walk(app.stage);
+        window.__renderBad = bad;
+        throw e;
+      }
+    };
+    return 'patched';
+  },
+  scanStage: () => {
+    const bad = [];
+    const walk = (c) => {
+      if (!c) return;
+      if (c.texture && c.texture.source === null) bad.push({ type: c.constructor?.name || '?', tex: 'null-source' });
+      if (c.texture && c.texture.source && c.texture.source.destroyed) bad.push({ type: c.constructor?.name || '?', tex: 'destroyed-source' });
+      if (c.children) for (const ch of c.children) walk(ch);
+    };
+    walk(app.stage);
+    return bad;
+  },
   extractProbe: async () => {
     try {
       const w = app.renderer.width, h = app.renderer.height;
@@ -1486,40 +1810,34 @@ window.ba_debug = {
     spineScale: spine ? +spine.scale.x.toFixed(4) : null,
     cameraTargetY,
   }),
-  dbgExport: () => ({ exporting, recorder: recorder ? recorder.state : null, chunks: recChunks.length }),
+  dbgExport: () => ({ exporting, animActive, animAbort, exportingDlg: !!exportBalloonActive }),
   anim: {
     start: () => startAnimExport(),
     stop: () => stopAnimExport(true),
     active: () => animActive,
     dbg: () => ({ animActive, animAbort, exporting, tickerStarted: app.ticker.started, autoUpdate: spine ? spine.autoUpdate : null }),
   },
-  exp: {
-    start: () => startExport(),
-    stop: () => stopExport(),
-    lobby: () => currentLobby,
-    duration: () => recordingDuration,
-  },
 };
 
-// ---- 影片匯出 ----
-// 用 canvas.captureStream() + MediaRecorder 錄製 pixi canvas（DOM 覆蓋層不會入鏡），
-// 語音與 BGM 透過 WebAudio MediaStreamDestination 混合成單一音軌。
+// ---- 動畫匯出 ----
+// 逐幀編碼：暫停 app.ticker 與 spine 的 autoUpdate，每幀以固定 dt=1/fps 手動推進
+// 動畫並 renderer.extract 讀出畫面，把 WebP 幀串流進 main 的 ffmpeg 編碼，產出
+// 精確 fps / 精確時長的 MP4 / WebM。支援三種動畫：Idle（loop，可選時長）、
+// Start_Idle（一次）、Talk（Idle 底 + 指定 Talk clip 一次）。
+// 語音不即時播放：依 lobby_voice_schedule.json 用 OfflineAudioContext 預混成 PCM
+// 給 ffmpeg；對話框是 DOM 疊層（readPixels 拍不到），由時間軸驅動直接畫進 canvas。
 let exporting = false;
-let recorder = null;
-let recChunks = [];
-let recTimer = null;
-let recStopTimer = null;
-let recElapsedStart = 0;
-let recAudioOffs = [];     // 錄製結束時要斷開的 WebAudio 節點
 let recRestore = null;     // renderer 原狀態（resize 復原用）
-let recExt = 'mp4';
 let recSizeStr = '';
-let exportMode = 'anim';   // 'anim' | 'rec'
 let animActive = false;
 let animAbort = false;
 let animPrevAutoUpdate = true;
 let animPixels = null;        // 重複使用的 readPixels 緩衝
 let animScratchCanvas = null; // 重複使用的幀編碼 canvas
+let animFlipCanvas = null;   // readPixels 翻正用的暫存 canvas
+let exportBalloonActive = false;
+let balloonImg = null;
+let balloonImg2 = null;
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(r));
 
@@ -1534,232 +1852,342 @@ function segVal(id) {
   if (!on) return null;
   if (on.dataset.v !== undefined) return on.dataset.v;
   if (on.dataset.w !== undefined) return on.dataset.w;
+  if (on.dataset.r !== undefined) return on.dataset.r;
+  if (on.dataset.k !== undefined) return on.dataset.k;
   return on.dataset.fmt;
 }
 
-function pickMime(fmt) {
-  if (fmt === 'mp4' && MediaRecorder.isTypeSupported('video/mp4')) return { mime: 'video/mp4', ext: 'mp4' };
-  const cands = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
-  const mime = cands.find((m) => MediaRecorder.isTypeSupported(m)) || '';
-  return { mime, ext: 'webm' };
-}
+function exportClipType() { return segVal('expClip') || 'idle'; }
 
 function openExportPanel() {
   if (!spine) { showToast('尚未載入角色'); return; }
   expChar.textContent = prettyName(currentLobby);
+  const talks = animNames().filter(n => n.startsWith('Talk_') && n.endsWith('_M')).sort();
+  expTalkSel.innerHTML = '';
+  for (const t of talks) {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = t;
+    expTalkSel.appendChild(opt);
+  }
+  expTalkSel.disabled = talks.length === 0;
+  updateClipUI();
+  updateResUI();
   exportPanel.classList.add('open');
 }
 function closeExportPanel() { exportPanel.classList.remove('open'); }
 
-function showRecBadge() {
+function showRecBadge(duration) {
+  recTime.textContent = '0:00';
+  recDur.textContent = fmtClock(duration);
   recBadge.classList.add('show');
-  recDur.textContent = fmtClock(recordingDuration);
 }
 function hideRecBadge() { recBadge.classList.remove('show'); }
 
-let recordingDuration = 10;
-function updateRecBadge() {
-  recTime.textContent = fmtClock((performance.now() - recElapsedStart) / 1000);
+// 解析度：目前視窗 / 目前螢幕 / kivo 適應 / 自訂（輸出四捨五入到偶數，H.264 yuv420p）
+async function resolveExportSize() {
+  const mode = segVal('expRes') || 'win';
+  if (mode === 'win') return { w: app.renderer.width, h: app.renderer.height };
+  if (mode === 'screen') {
+    try {
+      const s = await window.ba.screenSize();
+      if (s && s.width && s.height) return { w: Math.round(s.width) & ~1, h: Math.round(s.height) & ~1 };
+    } catch (e) { console.warn('[anim] 讀取螢幕尺寸失敗', e); }
+    return { w: app.renderer.width, h: app.renderer.height };
+  }
+  if (mode === 'custom') {
+    const w = clamp(Math.round(+expCustomW.value || 0), 64, 7680);
+    const h = clamp(Math.round(+expCustomH.value || 0), 64, 4320);
+    if (!w || !h) return { w: app.renderer.width, h: app.renderer.height };
+    return { w: w & ~1, h: h & ~1 };
+  }
+  const s = await kivoFitSize();
+  return s && s.w && s.h ? { w: s.w & ~1, h: s.h & ~1 } : { w: app.renderer.width, h: app.renderer.height };
 }
 
-function tryCreateRecorder(stream, opts) {
-  try { return new MediaRecorder(stream, opts); } catch (e) {
-    console.warn('[export] MediaRecorder 建立失敗', e);
+// kivo.wiki spine 檢視器的「適應」尺寸。反混淆 kivo bundle 後解出的兩個 fit 函式
+// （_0xe87989 的 contain、_0x5e2800 的 zoom clamp）都屬於圖片裁切器
+// （naturalWidth/naturalHeight），spine 檢視器本身沒有專屬的尺寸公式；
+// 因此映射為「視窗原生 backing store」= innerWidth×devicePixelRatio，
+// 與 kivo fill 的 charScale = vw/3000 邏輯一致。
+async function kivoFitSize() {
+  try {
+    const dpr = window.devicePixelRatio || 1;
+    return { w: Math.round(window.innerWidth * dpr), h: Math.round(window.innerHeight * dpr) };
+  } catch (e) { return null; }
+}
+
+// ---- 語音時間軸 ----
+// 從 lobby_voice_schedule.json 把指定動畫的語音事件展開成 {start, end, voiceId, text,
+// dtype, lang}，end = 事件時間 + 實際語音長度（probeVoiceLength 有快取）。
+async function buildVoiceTimeline(animName, duration) {
+  const schAnim = SCHEDULE?.lobbies?.[currentLobby]?.animations?.[animName];
+  const lines = schAnim?.voice || [];
+  const out = [];
+  for (const l of lines) {
+    if (!l || typeof l.name !== 'string') continue;
+    const lower = l.name.toLowerCase();
+    if (voiceSkip.has(lower)) continue;
+    if (validVoices && !validVoices.has(lower)) continue;
+    const len = await probeVoiceLength(l.name);
+    out.push({
+      start: l.t,
+      end: Math.min(duration, l.t + len),
+      voiceId: l.name,
+      text: subtitleFor(l.name),
+      dtype: dialogTypeFor(l.name),
+      lang: subtitleLang(l.name),
+    });
+  }
+  out.sort((a, b) => a.start - b.start);
+  return out;
+}
+
+// OfflineAudioContext 把語音混成一條 s16le PCM（不含 BGM — 動畫匯出不放 BGM，
+// BGM 只有「匯出 BGM」會輸出原檔）。來源多為單聲道，接進立體 dest 會置中。
+async function mixVoicePcm(timeline, duration) {
+  if (!timeline || !timeline.length) return null;
+  const sr = 44100;
+  const total = Math.max(1, Math.ceil(duration * sr));
+  let offline;
+  try {
+    offline = new OfflineAudioContext(2, total, sr);
+  } catch (e) {
+    console.warn('[anim] OfflineAudioContext 不可用，匯出無語音', e);
     return null;
   }
+  for (const e of timeline) {
+    if (e.start >= duration || !currentLobbyVoiceFolder) continue;
+    try {
+      const buf = await fetchRetry(`assets/voice/${currentLobbyVoiceFolder}/${e.voiceId.toLowerCase()}.ogg`).then(r => r.arrayBuffer());
+      const ab = await offline.decodeAudioData(buf);
+      const src = offline.createBufferSource();
+      src.buffer = ab;
+      src.connect(offline.destination);
+      src.start(Math.max(0, e.start));
+    } catch (err) {
+      console.warn('[anim] 語音混音失敗', e.voiceId, err);
+    }
+  }
+  const rendered = await offline.startRendering();
+  const n = rendered.length;
+  const L = rendered.getChannelData(0);
+  const R = rendered.numberOfChannels > 1 ? rendered.getChannelData(1) : L;
+  const out = new Int16Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    let l = L[i], r = R[i];
+    l = l < -1 ? -1 : l > 1 ? 1 : l;
+    r = r < -1 ? -1 : r > 1 ? 1 : r;
+    out[i * 2] = l < 0 ? l * 0x8000 : l * 0x7fff;
+    out[i * 2 + 1] = r < 0 ? r * 0x8000 : r * 0x7fff;
+  }
+  return { pcm: new Uint8Array(out.buffer), sampleRate: sr, channels: 2 };
 }
 
-async function startExport() {
-  if (!spine || exporting) return;
-  const duration = Math.max(1, +segVal('expDur') || 10);
-  const w = +segVal('expRes') || 0;          // 0 = 目前視窗
-  const fps = Math.min(60, Math.max(10, +segVal('expFps') || 30));
-  const fmt = segVal('expFmt') || 'mp4';
-  const withAudio = expAudio.checked;
-  recordingDuration = duration;
-
-  let { mime, ext } = pickMime(fmt);
-  recExt = ext;
-  recSizeStr = `${app.renderer.width}x${app.renderer.height}`;
-
-  exporting = true;
-  document.body.classList.add('recording');
-  memoryLobbySkip();          // 強制回到 Idle 循環，匯出內容穩定
-  clearTimers();
-  scheduleAutonomy();         // 匯出期間只會重排、不隨機說話
-
-  recRestore = { resizeTo: app.renderer.resizeTo, w: app.renderer.width, h: app.renderer.height };
-
-  // 自訂解析度（16:9）：暫時停用 resizeTo、resize renderer、canvas CSS 填滿視窗
-  if (w > 0) {
-    const h = Math.round((w * 9) / 16);
-    try {
-      app.renderer.resizeTo = null;
-      app.renderer.resize(w, h);
-      app.canvas.style.width = '100%';
-      app.canvas.style.height = '100%';
-      await nextFrame();
-      fitScene();
-      recSizeStr = `${app.renderer.width}x${app.renderer.height}`;
-    } catch (e) {
-      console.warn('[export] resize 失敗，改用視窗解析度', e);
-      restoreRendererState();
+// ---- 對話框繪進 canvas ----
+// readPixels 只拍得到 WebGL canvas，DOM 對話框不會入鏡；這裡用與 #chatDialog 相同
+// 的 CSS 規則（9-slice Lobby_balloon/2.png、padding、min-height、字體/行高/間距、
+// positionChat 錨點 + flip）把氣泡直接畫上輸出畫布。
+function balloonFont(lang) {
+  if (lang === 'ja' || lang === 'jp') return `'BA MPlus1p','M PLUS 1p','Noto Sans JP','Noto Sans TC',sans-serif`;
+  if (lang === 'en') return `'BA NotoSans','Noto Sans','Segoe UI',sans-serif`;
+  return `'BA NotoSansTC','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif`;
+}
+function wrapCanvasText(ctx, text, maxW) {
+  const lines = [];
+  for (const raw of String(text).split('\n')) {
+    if (raw === '') { lines.push(''); continue; }
+    let line = '';
+    for (const ch of raw) {
+      const test = line + ch;
+      if (line && ctx.measureText(test).width > maxW) { lines.push(line); line = ch; }
+      else line = test;
     }
+    lines.push(line);
   }
-
-  // 音訊圖（語音走 lipAnalyser，BGM 用 captureStream 餵進 WebAudio 混音）
-  let audioTrack = null;
-  recAudioOffs = [];
-  try {
-    const ctx = ensureAudio();
-    const dest = ctx.createMediaStreamDestination();
-    if (withAudio) {
-      if (lipAnalyser) { lipAnalyser.connect(dest); recAudioOffs.push(() => lipAnalyser.disconnect(dest)); }
-      if (bgmOn && bgmAudio) {
-        const bs = ctx.createMediaStreamSource(bgmAudio.captureStream());
-        bs.connect(dest);
-        recAudioOffs.push(() => bs.disconnect());
-      }
+  return lines;
+}
+function loadBalloonImages() {
+  return new Promise((res) => {
+    if (!balloonImg) {
+      balloonImg = new Image();
+      balloonImg.src = 'assets/ui/Lobby_balloon.png';
+      balloonImg2 = new Image();
+      balloonImg2.src = 'assets/ui/Lobby_balloon2.png';
     }
-    audioTrack = dest.stream.getAudioTracks()[0];
-  } catch (e) {
-    console.warn('[export] 音訊圖建立失敗，改為無音軌', e);
-  }
-
-  const vstream = app.canvas.captureStream(fps);
-  const tracks = [vstream.getVideoTracks()[0]];
-  if (withAudio && audioTrack) tracks.push(audioTrack);
-  const combined = new MediaStream(tracks);
-
-  recChunks = [];
-  recorder = tryCreateRecorder(combined, {
-    mimeType: mime,
-    videoBitsPerSecond: 12_000_000,
-    audioBitsPerSecond: 160_000,
+    const ok = () => balloonImg.complete && balloonImg2.complete;
+    if (ok()) return res(true);
+    const done = () => (ok() ? res(true) : res(false));
+    balloonImg.onload = done;
+    balloonImg2.onload = done;
+    setTimeout(() => res(ok()), 3000);
   });
-  if (!recorder) {
-    // MP4 開錄失敗（編碼器不可用）→ 退回 WebM
-    if (fmt === 'mp4' && MediaRecorder.isTypeSupported('video/webm')) {
-      const fb = pickMime('webm');
-      mime = fb.mime; ext = fb.ext; recExt = fb.ext;
-      recorder = tryCreateRecorder(combined, { mimeType: mime, videoBitsPerSecond: 12_000_000, audioBitsPerSecond: 160_000 });
-    }
-  }
-  if (!recorder) {
-    exporting = false;
-    document.body.classList.remove('recording');
-    restoreRendererState();
-    hideRecBadge();
-    showErr('此系統不支援 MediaRecorder，無法匯出');
-    return;
-  }
-
-  recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
-  recorder.onerror = (e) => {
-    console.error('[export] recorder error', e.error || e);
-    stopExport();
+}
+function drawNineSlice(c2, img, boxX, boxY, bw, bh, bs, brd, flip) {
+  const [t, r, b, l] = brd;
+  const sw = img.naturalWidth, sh = img.naturalHeight;
+  const mw = sw - l - r, mh = sh - t - b;
+  const tl = l * bs, tr = r * bs, tt = t * bs, tb = b * bs;
+  const slice = (sx, sy, sw2, sh2, dx, dy, dw, dh) => {
+    if (dw <= 0 || dh <= 0 || sw2 <= 0 || sh2 <= 0) return;
+    c2.drawImage(img, sx, sy, sw2, sh2, dx, dy, dw, dh);
   };
-  try { recorder.start(300); } catch (e) {
-    console.error('[export] recorder.start 失敗', e);
-    exporting = false;
-    document.body.classList.remove('recording');
-    restoreRendererState();
-    hideRecBadge();
-    showErr(`錄製啟動失敗: ${e.message}`);
-    return;
+  c2.save();
+  if (flip) {
+    c2.translate(boxX + bw / 2, boxY + bh / 2);
+    if (flip & 1) c2.scale(-1, 1);
+    if (flip & 2) c2.scale(1, -1);
+    c2.translate(-(boxX + bw / 2), -(boxY + bh / 2));
   }
-
-  showRecBadge();
-  recElapsedStart = performance.now();
-  recTimer = setInterval(updateRecBadge, 250);
-  recStopTimer = setTimeout(() => stopExport(), duration * 1000);
-  log(`匯出開始: ${duration}s ${recordingSizeName()} ${fps}fps ${ext} audio=${withAudio}`);
+  slice(0, 0, l, t, boxX, boxY, tl, tt);
+  slice(sw - r, 0, r, t, boxX + bw - tr, boxY, tr, tt);
+  slice(0, sh - b, l, b, boxX, boxY + bh - tb, tl, tb);
+  slice(sw - r, sh - b, r, b, boxX + bw - tr, boxY + bh - tb, tr, tb);
+  slice(l, 0, mw, t, boxX + tl, boxY, bw - tl - tr, tt);
+  slice(l, sh - b, mw, b, boxX + tl, boxY + bh - tb, bw - tl - tr, tb);
+  slice(0, t, l, mh, boxX, boxY + tt, tl, bh - tt - tb);
+  slice(sw - r, t, r, mh, boxX + bw - tr, boxY + tt, tr, bh - tt - tb);
+  slice(l, t, mw, mh, boxX + tl, boxY + tt, bw - tl - tr, bh - tt - tb);
+  c2.restore();
+}
+// 畫一幀白閃（mirror of #whiteflash, drawn into the export canvas like the
+// balloon — readPixels 拍不到 DOM 疊層）。在氣泡之前畫：遊戲的 post-processing
+// 作用於相機畫面，NGUI 對話框在它之上。
+function drawExportWhiteFlash(c2, vw, vh, alpha) {
+  if (alpha <= 0) return;
+  c2.save();
+  c2.globalAlpha = clamp(alpha, 0, 1);
+  c2.fillStyle = '#fff';
+  c2.fillRect(0, 0, vw, vh);
+  c2.restore();
 }
 
-function recordingSizeName() {
-  return recSizeStr || `${app.renderer.width}x${app.renderer.height}`;
+// 畫一幀氣泡。layout 完全對應 #chatDialog CSS + positionChat()（以輸出寬度為 vw）。
+function drawExportBalloon(c2, vw, vh, line) {  if (!balloonImg || !balloonImg2) return;
+  const bs = vw / 3840;
+  const isThink = line.dtype === 'Think';
+  const img = isThink ? balloonImg2 : balloonImg;
+  const padL = (isThink ? 130 : 79) * bs, padR = (isThink ? 50 : 59) * bs;
+  const padT = (isThink ? 43 : 45) * bs, padB = (isThink ? 55 : 44) * bs;
+  const minH = (isThink ? 222 : 213) * bs;
+  const maxW = 740 * bs;
+  const fontSize = 52 * bs, lineH = 62 * bs, ls = -2 * bs;
+  const fam = balloonFont(line.lang || '');
+  const prevLs = c2.letterSpacing;
+  c2.font = `${fontSize}px ${fam}`;
+  c2.letterSpacing = ls + 'px';
+  const lines = wrapCanvasText(c2, line.text || '', maxW);
+  let maxLineW = 0;
+  for (const l of lines) { const w = c2.measureText(l).width; if (w > maxLineW) maxLineW = w; }
+  c2.letterSpacing = prevLs;
+
+  const textH = lines.length * lineH;
+  const bw = Math.ceil(maxLineW) + padL + padR;
+  const bh = Math.max(minH, Math.ceil(textH) + padT + padB);
+
+  const a = CHAT_ANCHORS[currentLobby] || { tx: 0, ty: 0, skY: -962 };
+  let tx = a.tx, ty = a.ty;
+  if (isThink) { tx += (a.thinkOffsetX || 0); ty += (a.thinkOffsetY || 0); }
+  const flip = a.flip || 0;
+  const skUp = -a.skY;
+  const g = spine ? spine.toGlobal({ x: 0, y: 0 }) : { x: vw / 2, y: vh };
+  let x = g.x + tx * bs;
+  if (flip & 1) x = g.x - tx * bs - bw;
+  let y = g.y - (skUp + ty) * bs - bh;
+  const maxX = vw - bw - 6, maxY = vh - bh - 6;
+  if (x < 6) x = 6;
+  if (x > maxX) x = maxX;
+  if (y < 6) y = 6;
+  if (y > maxY) y = maxY;
+
+  drawNineSlice(c2, img, x, y, bw, bh, bs, isThink ? [85, 50, 55, 130] : [84, 50, 60, 80], flip);
+
+  const contentH = bh - padT - padB;
+  const textTop = padT + (contentH - textH) / 2;
+  c2.save();
+  c2.font = `${fontSize}px ${fam}`;
+  c2.letterSpacing = ls + 'px';
+  c2.fillStyle = '#3E444A';
+  c2.textBaseline = 'top';
+  c2.textAlign = 'left';
+  for (let i = 0; i < lines.length; i++) c2.fillText(lines[i], x + padL, y + textTop + i * lineH);
+  c2.restore();
+  c2.letterSpacing = '0px';
 }
 
-async function restoreRendererState() {
-  if (!recRestore) return;
-  try {
-    app.renderer.resizeTo = recRestore.resizeTo;
-    app.renderer.resize(recRestore.w, recRestore.h);
-    app.canvas.style.width = '';
-    app.canvas.style.height = '';
-    await nextFrame();
-    fitScene();
-  } catch (e) {
-    console.warn('[export] 復原 renderer 失敗', e);
-  }
-  recRestore = null;
-}
-
-async function stopExport() {
-  if (!exporting) return;
-  exporting = false;
-  clearTimeout(recStopTimer);
-  clearInterval(recTimer);
-  hideRecBadge();
-
-  const isRec = recorder && recorder.state !== 'inactive';
-  let blob = null;
-  if (isRec) {
-    blob = await new Promise((res) => {
-      recorder.onstop = () => res(new Blob(recChunks, { type: recorder.mimeType }));
-      try { recorder.stop(); } catch (e) { res(null); }
-    });
-    try { for (const t of recorder.stream?.getTracks() || []) t.stop(); } catch { /* ignore */ }
-  }
-  for (const off of recAudioOffs) { try { off(); } catch { /* ignore */ } }
-  recAudioOffs = [];
-  recorder = null;
-  recChunks = [];
-
-  document.body.classList.remove('recording');
-  await restoreRendererState();
-  scheduleAutonomy();
-
-  if (blob && blob.size > 0) {
-    const fileBase = currentLobby || 'lobby';
-    const defaultName = `${fileBase}_${recordingDuration}s_${recordingSizeName()}.${recExt}`;
-    try {
-      const res = await window.ba.saveVideo({ data: await blob.arrayBuffer(), defaultName, ext: recExt });
-      if (res?.canceled) log('匯出已取消');
-      else if (res?.path) { log(`匯出完成: ${res.path}`); showToast('影片已儲存'); }
-      else log('匯出無結果');
-    } catch (e) {
-      showErr(`儲存失敗: ${e.message}`);
-    }
-  } else {
-    showErr('錄製失敗（無資料）');
-  }
-}
-
-// ---- 逐幀動畫匯出 ----
-// 不依賴即時錄影：暫停 app.ticker 與 spine 的 autoUpdate，每幀以固定 dt=1/fps
-// 手動推進動畫並 renderer.extract 讀出畫面，把 WebP 幀串流進 main 的 ffmpeg 編碼，
-// 產出精確 fps / 精確時長的 MP4 / WebM。
+// ---- 逐幀動畫匯出主流程 ----
 async function startAnimExport() {
   if (!spine || animActive || exporting) return;
-  const duration = Math.max(1, +segVal('expDur') || 10);
-  const w = +segVal('expRes') || 0;
+  const clipType = exportClipType();
   const fps = Math.min(60, Math.max(10, +segVal('expFps') || 30));
   const fmt = segVal('expFmt') || 'mp4';
-  const withAudio = expAudio.checked;
-  recordingDuration = duration;
+  const withVoice = expVoice.checked;
+  const withDialog = expDialog.checked;
+
+  let animName, track1 = null, track2 = null;
+  if (clipType === 'talk') {
+    const m = expTalkSel.value;
+    if (!m || !has(m)) { showErr('此角色沒有可用的 Talk clip'); return; }
+    animName = m;
+    track1 = m;
+    const a2 = m.replace(/_M$/, '_A');
+    track2 = has(a2) ? a2 : null;
+  } else if (clipType === 'start') {
+    if (!has('Start_Idle_01')) { showErr('此角色沒有 Start_Idle_01'); return; }
+    animName = 'Start_Idle_01';
+  } else {
+    animName = idleClip || 'Idle_01';
+  }
+  const clipDur = has(animName) ? (spine.state.data.skeletonData.findAnimation(animName)?.duration || 10) : 10;
+  const duration = clipDur;
 
   exporting = true;
   animActive = true;
   animAbort = false;
 
-  memoryLobbySkip();          // 固定 Idle 循環
+  // 先停 ticker / autoUpdate：後續 await（語音混音、儲存對話框）期間動畫不能推進
+  app.ticker.stop();
+  animPrevAutoUpdate = spine.autoUpdate;
+  spine.autoUpdate = false;
+  spine.state.timeScale = 1;
+
+  memoryLobbySkip();          // 先固定 Idle 底
   clearTimers();
-  scheduleAutonomy();         // 匯出期間不隨機說話
+  scheduleAutonomy();         // 取消隨機說話
+
+  // setAnimation 一律會 crossfade（mix，本資料 0.2s = SkeletonData.defaultMix）。若直接開始輸出，
+  // 片頭幾幀會混入舊動畫 pose，影片頭尾對不上（loop 播放會有明顯接縫）。
+  // 先把 track0 的 transition 跑完、倒帶到 loop 起點，頭部即為乾淨的 Idle pose。
+  const _t0 = spine.state.getCurrent(0);
+  if (_t0) {
+    const _settle = (_t0.mixDuration || 0) + 0.05;
+    if (_settle > 0) spine.update(_settle);
+    const _cur = spine.state.getCurrent(0);
+    if (_cur && _cur.animation === _t0.animation) {
+      _cur.trackTime = 0;
+      spine.update(0);
+    }
+  }
+
+  if (clipType === 'talk') {
+    spine.state.setAnimation(1, track1, false);
+    if (track2) spine.state.setAnimation(2, track2, false);
+    else spine.state.setEmptyAnimation(2, 0.3);
+  } else if (clipType === 'start') {
+    spine.state.setEmptyAnimation(1, 0.3);
+    spine.state.setEmptyAnimation(2, 0.3);
+    spine.state.setAnimation(0, 'Start_Idle_01', false);
+    startIntroClock();
+  } else {
+    restTracks();             // idle：清掉可能殘留的 talk/摸頭 track
+  }
+
+  const timeline = (clipType === 'idle' || !withVoice) ? [] : await buildVoiceTimeline(animName, duration);
+  const audio = timeline.length ? await mixVoicePcm(timeline, duration) : null;
 
   recRestore = { resizeTo: app.renderer.resizeTo, w: app.renderer.width, h: app.renderer.height };
-  if (w > 0) {
-    const h = Math.round((w * 9) / 16);
+  const { w, h } = await resolveExportSize();
+  if (w !== app.renderer.width || h !== app.renderer.height) {
     try {
       app.renderer.resizeTo = null;
       app.renderer.resize(w, h);
@@ -1774,28 +2202,41 @@ async function startAnimExport() {
 
   const total = Math.max(1, Math.round(duration * fps));
   const dt = 1 / fps;
-
   const ext = fmt === 'mp4' ? 'mp4' : 'webm';
+  const clipTag = clipType === 'idle' ? 'idle' : clipType === 'start' ? 'start' : 'talk';
   const sess = await window.ba.startAnimVideo({
     w: app.renderer.width,
     h: app.renderer.height,
     fps,
     duration,
     ext,
-    defaultName: `${currentLobby}_idle_${duration}s_${recSizeStr}.${ext}`,
-    audioFile: withAudio && bgmOn ? (BGM_MAP[currentLobby] || null) : null,
+    defaultName: `${currentLobby}_${clipTag}_${Math.round(duration)}s_${recSizeStr}.${ext}`,
+    audioPcm: audio ? audio.pcm : null,
+    sampleRate: audio ? audio.sampleRate : 44100,
+    channels: audio ? audio.channels : 2,
   });
   if (!sess || sess.canceled) { await cleanupAnimExport(); return; }
   if (sess.error) { await cleanupAnimExport(); showErr(`匯出啟動失敗: ${sess.error}`); return; }
 
-  app.ticker.stop();
-  animPrevAutoUpdate = spine.autoUpdate;
-  spine.autoUpdate = false;
-  spine.state.timeScale = 1;
+  document.body.classList.add('recording');
 
-  showRecBadge();
-  recDur.textContent = fmtClock(duration);
-  log(`動畫匯出開始: ${duration}s ${recSizeStr} ${fps}fps ${ext} frames=${total}`);
+  let balloonReady = false;
+  if (withDialog && timeline.length) {
+    try {
+      await document.fonts.ready;
+      await Promise.all([
+        document.fonts.load('52px "BA NotoSansTC"'),
+        document.fonts.load('52px "BA MPlus1p"'),
+        document.fonts.load('52px "BA NotoSans"'),
+      ]);
+      balloonReady = await loadBalloonImages();
+    } catch (e) {
+      console.warn('[anim] 對話框資源預載失敗', e);
+    }
+  }
+
+  showRecBadge(duration);
+  log(`動畫匯出開始: ${clipType} ${duration}s ${recSizeStr} ${fps}fps ${ext} frames=${total} voice=${timeline.length}`);
 
   const vw = app.renderer.width, vh = app.renderer.height;
   const need = vw * vh * 4;
@@ -1804,27 +2245,51 @@ async function startAnimExport() {
   const scratch = animScratchCanvas;
   if (scratch.width !== vw || scratch.height !== vh) { scratch.width = vw; scratch.height = vh; }
   const c2 = scratch.getContext('2d');
+  c2.imageSmoothingEnabled = true;
+  c2.imageSmoothingQuality = 'high';
+  // readPixels 的內容是 bottom-up（第一列在最底下）。putImageData 會忽略
+  // canvas transform，所以以前那組 translate/scale 沒生效、影片是上下顛倒的。
+  // 先把原始資料放進 flip canvas，再用 drawImage（會套用 transform）翻正。
+  if (!animFlipCanvas) animFlipCanvas = document.createElement('canvas');
+  const flip = animFlipCanvas;
+  if (flip.width !== vw || flip.height !== vh) { flip.width = vw; flip.height = vh; }
+  const f2 = flip.getContext('2d');
 
+  let tlIdx = 0;
   for (let i = 0; i < total; i++) {
     if (animAbort) break;
+    const T = i / fps;
     spine.update(dt);
+    advanceIntroClock(dt);
     try {
       app.render();
       const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl');
       gl.readPixels(0, 0, vw, vh, gl.RGBA, gl.UNSIGNED_BYTE, animPixels);
       const img = new ImageData(new Uint8ClampedArray(animPixels.buffer, 0, need), vw, vh);
+      f2.putImageData(img, 0, 0);
       c2.setTransform(1, 0, 0, 1, 0, 0);
       c2.translate(0, vh);
       c2.scale(1, -1);
-      c2.putImageData(img, 0, 0);
+      c2.drawImage(flip, 0, 0, vw, vh);
       c2.setTransform(1, 0, 0, 1, 0, 0);
+
+      while (tlIdx < timeline.length && timeline[tlIdx].start <= T) tlIdx++;
+      let active = null;
+      if (tlIdx > 0) { const prev = timeline[tlIdx - 1]; if (prev.end > T) active = prev; }
+      lipActive = !!active;
+      const flashA = whiteFlashAlpha(introFlashTime());
+      drawExportWhiteFlash(c2, vw, vh, flashA);
+      tickWhiteFlash();
+      exportBalloonActive = !!(balloonReady && active && active.text);
+      if (exportBalloonActive) drawExportBalloon(c2, vw, vh, active);
+
       const blob = await new Promise((r) => scratch.toBlob(r, 'image/webp', 90));
       if (blob && blob.size) window.ba.animFrame(await blob.arrayBuffer());
     } catch (e) {
       console.error('[anim] 幀處理失敗', e);
       animAbort = true;
     }
-    recTime.textContent = fmtClock((i + 1) / fps);
+    recTime.textContent = fmtClock(T);
     recDur.textContent = `${i + 1}/${total}`;
     if (i % 15 === 0) await nextFrame();
   }
@@ -1849,11 +2314,70 @@ function stopAnimExport(abort = false) {
 async function cleanupAnimExport() {
   animActive = false;
   exporting = false;
+  lipActive = false;
+  exportBalloonActive = false;
   hideRecBadge();
+  document.body.classList.remove('recording');
   try { app.ticker.start(); } catch {}
-  if (spine) spine.autoUpdate = animPrevAutoUpdate;
+  if (spine) {
+    spine.autoUpdate = animPrevAutoUpdate;
+    restTracks();              // 清掉匯出用的 track1/track2 殘留
+    memoryLobbySkip();         // 回到 Idle 循環
+  }
   await restoreRendererState();
   scheduleAutonomy();
+}
+
+async function restoreRendererState() {
+  if (!recRestore) return;
+  try {
+    app.renderer.resizeTo = recRestore.resizeTo;
+    app.renderer.resize(recRestore.w, recRestore.h);
+    app.canvas.style.width = '';
+    app.canvas.style.height = '';
+    await nextFrame();
+    fitScene();
+  } catch (e) {
+    console.warn('[anim] 復原 renderer 失敗', e);
+  }
+  recRestore = null;
+}
+
+// ---- 匯出 BGM（原檔複製，不做混音）----
+async function exportBgm() {
+  const file = bgmForLobby(currentLobby);
+  if (!file) { showErr('此角色沒有對應 BGM'); return; }
+  try {
+    const res = await window.ba.exportBgm({ filename: file, defaultName: file });
+    if (res?.canceled) log('BGM 匯出已取消');
+    else if (res?.path) { log(`BGM 匯出完成: ${res.path}`); showToast('BGM 已儲存'); }
+    else showErr(`BGM 匯出失敗: ${res?.error || '無結果'}`);
+  } catch (e) {
+    showErr(`BGM 匯出失敗: ${e.message}`);
+  }
+}
+
+function updateClipUI() {
+  const k = exportClipType();
+  const isTalk = k === 'talk';
+  const talks = spine ? animNames().filter(n => n.startsWith('Talk_') && n.endsWith('_M')).sort() : [];
+  expTalkRow.style.display = isTalk ? '' : 'none';
+  const canVoice = k !== 'idle';
+  expDialogCk.classList.toggle('dis', !canVoice);
+  if (!canVoice) expDialog.checked = false;
+  for (const b of document.querySelectorAll('#expClip button')) {
+    const bb = b.dataset.k;
+    const dis = (bb === 'start' && !has('Start_Idle_01')) || (bb === 'talk' && talks.length === 0);
+    b.classList.toggle('dis', dis);
+    if (dis && b.classList.contains('on')) {
+      b.classList.remove('on');
+      document.querySelector('#expClip button[data-k="idle"]').classList.add('on');
+    }
+  }
+}
+function updateResUI() {
+  const m = segVal('expRes') || 'win';
+  expCustomRow.style.display = m === 'custom' ? '' : 'none';
 }
 
 // ---- asset loading ----
@@ -1871,6 +2395,44 @@ async function fetchRetry(url, retries = 4) {
 
 function prettyName(name) {
   return name.replace(/_home$/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// ---- lobby grouping (same character -> one sidebar group) ----
+// lobby_index.json keys come from resource-bundle names, so one character can
+// appear several times: official costume variants (_swimsuit/_newyear/_ridingsuit/
+// _casual), the Abydos "multi" lobbies (Lobby*_multi / UILobbySpecial2), _Teen
+// packs, and plain resource copies (Airi0_home, *_home_GL) that duplicate the
+// main lobby and should be hidden from the picker.
+function lobbyGroupInfo(key) {
+  const low = key.toLowerCase();
+  let rest = low;
+  let isDup = false;
+  const labels = [];
+  // Outer suffixes (strip repeatedly so e.g. Izumi_swimsuit_home_Teen resolves).
+  while (true) {
+    let changed = false;
+    if (rest.endsWith('_home_gl')) { rest = rest.slice(0, -'_home_gl'.length); isDup = true; changed = true; }
+    else if (rest.endsWith('_home')) { rest = rest.slice(0, -'_home'.length); changed = true; }
+    else if (rest.endsWith('_gl')) { rest = rest.slice(0, -'_gl'.length); isDup = true; changed = true; }
+    else if (rest.endsWith('_multi')) { rest = rest.slice(0, -'_multi'.length); labels.push('多人'); changed = true; }
+    else if (rest.endsWith('_teen')) { rest = rest.slice(0, -'_teen'.length); labels.push('Teen'); changed = true; }
+    if (!changed) break;
+  }
+  if (rest.startsWith('lobby')) rest = rest.slice(5);
+  // Inner costume suffixes (sit between the name and "_home").
+  for (const [suf, label] of [['_swimsuit', '泳裝'], ['_newyear', '新年'], ['_ridingsuit', '騎行服'], ['_casual', '便服']]) {
+    if (rest.endsWith(suf)) { rest = rest.slice(0, -suf.length); labels.push(label); }
+  }
+  labels.reverse();
+  // Airi0_home duplicates Airi_home -> treat the trailing 0 as a duplicate copy.
+  if (rest.endsWith('0') && LOBBY_INDEX) {
+    const target = rest.slice(0, -1) + '_home';
+    if (Object.keys(LOBBY_INDEX).some(k => k.toLowerCase() === target)) {
+      rest = rest.slice(0, -1);
+      isDup = true;
+    }
+  }
+  return { core: rest, labels, isDup };
 }
 
 // ---- student display names (students_data.csv, keyed by file_id) ----
@@ -1973,19 +2535,38 @@ function studentDisplay(rec) {
 function buildSidebarGroups() {
   const groups = new Map();
   for (const key of ORDER) {
-    const rec = studentForLobby(key);
-    const display = studentDisplay(rec) || prettyName(key);
-    if (!groups.has(display)) groups.set(display, { display, rec, children: [] });
-    groups.get(display).children.push({ key, variant: prettyName(key) });
+    const info = lobbyGroupInfo(key);
+    if (info.isDup) continue;                 // resource copies (Airi0_home, *_home_GL)
+    if (!groups.has(info.core)) groups.set(info.core, { core: info.core, display: null, rec: null, children: [] });
+    groups.get(info.core).children.push({ key, info });
+  }
+  for (const g of groups.values()) {
+    // main variant first, then the rest in index order
+    g.children.sort((a, b) => {
+      const am = a.info.labels.length === 0 ? 0 : 1;
+      const bm = b.info.labels.length === 0 ? 0 : 1;
+      if (am !== bm) return am - bm;
+      return ORDER.indexOf(a.key) - ORDER.indexOf(b.key);
+    });
+    // group display name comes from the main variant (if any), else the first child
+    const mainChild = g.children.find(c => c.info.labels.length === 0) || g.children[0];
+    const rec = studentForLobby(mainChild.key);
+    g.rec = rec;
+    g.display = studentDisplay(rec) || prettyName(mainChild.key);
   }
   return [...groups.values()].sort((a, b) => a.display.localeCompare(b.display, 'zh-Hant'));
+}
+
+function variantText(g, c) {
+  if (c.info.labels.length === 0) return g.display;
+  return c.info.labels.join(' ');
 }
 
 function groupMatches(g, q) {
   if (!q) return true;
   if (g.display.toLowerCase().includes(q)) return true;
   if (g.rec && SIDEBAR_FIELDS.some(f => g.rec[f] && g.rec[f].toLowerCase().includes(q))) return true;
-  return g.children.some(c => c.key.toLowerCase().includes(q));
+  return g.children.some(c => c.key.toLowerCase().includes(q) || variantText(g, c).toLowerCase().includes(q));
 }
 
 function renderSidebar() {
@@ -1998,22 +2579,14 @@ function renderSidebar() {
       || (g.rec && SIDEBAR_FIELDS.some(f => g.rec[f] && g.rec[f].toLowerCase().includes(q)));
     const kids = nameMatch
       ? g.children
-      : g.children.filter(c => c.key.toLowerCase().includes(q));
+      : g.children.filter(c => c.key.toLowerCase().includes(q) || variantText(g, c).toLowerCase().includes(q));
     if (!kids.length) continue;
     shown += kids.length;
-    const head = document.createElement('div');
-    head.className = 'sb-group-head';
-    head.textContent = g.display;
-    const cnt = document.createElement('span');
-    cnt.className = 'cnt';
-    cnt.textContent = String(kids.length);
-    head.appendChild(cnt);
-    sbList.appendChild(head);
     for (const c of kids) {
       const b = document.createElement('button');
       b.className = 'sb-item';
       b.dataset.key = c.key;
-      b.textContent = c.variant;
+      b.textContent = variantText(g, c);
       if (c.key === currentLobby) b.classList.add('cur');
       sbList.appendChild(b);
     }
@@ -2041,13 +2614,6 @@ function selectLobby(key) {
 }
 
 async function loadScene(entry) {
-  let oldSceneTextures = new Set();
-  if (scene) {
-    oldSceneTextures = collectTextures(scene);
-    scene.destroy();
-    scene = null;
-  }
-  destroyTextures(oldSceneTextures);
   const s = entry?.scene;
   if (!s) return;
   try {
@@ -2121,13 +2687,25 @@ async function loadLobby(name) {
     spine.destroy();
     spine = null;
   }
+  // Tear down the old scene BEFORE unloading its assets: Assets.unload destroys
+  // the atlas Textures, and rendering a still-mounted scene whose textures were
+  // just destroyed throws inside pixi's texture system on every frame (which in
+  // turn kills the app ticker and the white-flash clock).
+  if (scene) {
+    for (const t of collectTextures(scene)) oldTextures.add(t);
+    scene.destroy();
+    scene = null;
+  }
   unloadLobbyAssets(oldLobby);
   destroyTextures(oldTextures);
   clearTimers();
+  resetWhiteFlash();
   state.busy = null;
   state.blockInteractionOnPlay = false;
   state.blockList = [];
   state.introBlock = false;
+  introVirtual = false;
+  introWindowEnd = 0;
   patting = false;
   headAnchorBone = null;
 
@@ -2151,7 +2729,7 @@ async function loadLobby(name) {
     for (const m of sch?.missingMedia || []) voiceSkip.add(m);
     validVoices = new Set((VOICE_INDEX[sch?.characterId] || []).map(f => f.toLowerCase().replace(/\.ogg$/, '')));
     spine.state.addListener({ event: onAnimationEvent, complete: onTrackComplete });
-    spine.state.data.defaultMix = 0.25;
+    spine.state.data.defaultMix = 0.2;
     setupLipHook(spine);
     setupEyes();
     app.stage.addChild(spine);
@@ -2166,7 +2744,8 @@ async function loadLobby(name) {
   app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 2));
   fitted = false;
   // frame on the Idle pose (mesh geometry only exists after a render), then play the intro
-  spine.state.setAnimation(0, 'Idle_01', true);
+  idleClip = resolveIdleClip();
+  spine.state.setAnimation(0, idleClip, true);
   let frames = 0;
   const waitFit = () => {
     if (++frames < 3) requestAnimationFrame(waitFit);
@@ -2177,7 +2756,7 @@ async function loadLobby(name) {
     }
   };
   requestAnimationFrame(waitFit);
-  setBgm(BGM_MAP[name]);
+  setBgm(bgmForLobby(name));
   renderStudentName(name);
   subNameEl.textContent = 'MEMORIAL LOBBY';
   scheduleAutonomy();
@@ -2200,8 +2779,10 @@ function fadeOut() {
 
 function switchLobby(dir) {
   if (exporting || !ORDER.length || loadingEl.classList.contains('show')) return;
-  const i = ORDER.indexOf(currentLobby);
-  const next = ORDER[(i + dir + ORDER.length) % ORDER.length];
+  const order = ORDER.filter(k => !lobbyGroupInfo(k).isDup);   // skip resource copies
+  if (!order.length) return;
+  const i = Math.max(0, order.indexOf(currentLobby));
+  const next = order[(i + dir + order.length) % order.length];
   if (next === currentLobby) return;
   fadeIn().then(() => loadLobby(next));
 }
@@ -2254,7 +2835,7 @@ function onPointerDown(e) {
   if (exporting) return;
   ensureAudio();
   userActiveAt = performance.now();
-  if (bgmOn && !bgmAudio) setBgm(BGM_MAP[currentLobby]);
+  if (bgmOn && !bgmAudio) setBgm(bgmForLobby(currentLobby));
   if (e.pointerType === 'touch') e.preventDefault();
   downTime = performance.now();
   downPos = { x: e.clientX, y: e.clientY };
@@ -2336,6 +2917,11 @@ async function init() {
   } catch (e) {
     console.warn('[lobby] 語音索引載入失敗', e);
   }
+  try {
+    FLASH_TABLE = normalizeFlashTable(await fetchRetry('assets/data/flash_curves.json').then(r => r.json()));
+  } catch (e) {
+    console.warn('[lobby] 白色閃爍曲線資料載入失敗，使用內建模板', e);
+  }
   await loadSubtitles();
   try {
     const br = await fetchRetry('assets/data/lobby_bgm_mapping.csv');
@@ -2353,6 +2939,7 @@ async function init() {
   // camera smoothing
   app.ticker.add(() => {
     if (spine && fitted) applyCamera(CAMERA.weight);
+    tickWhiteFlash();
   });
   // Re-fit on window resize (resizeTo resizes the canvas, but charScale/sceneScale
   // are only recomputed in fitScene — re-run it so the layout doesn't go stale
@@ -2403,26 +2990,21 @@ async function init() {
   // ---- video export UI ----
   btnExport.addEventListener('click', openExportPanel);
   expCancel.addEventListener('click', closeExportPanel);
-  expStart.addEventListener('click', () => { closeExportPanel(); if (exportMode === 'anim') startAnimExport(); else startExport(); });
-  recStop.addEventListener('click', () => { if (animActive) stopAnimExport(true); else stopExport(); });
-  for (const id of ['expMode', 'expDur', 'expRes', 'expFps', 'expFmt']) {
+  expStart.addEventListener('click', () => { closeExportPanel(); startAnimExport(); });
+  expBgm.addEventListener('click', () => { closeExportPanel(); exportBgm(); });
+  recStop.addEventListener('click', () => { if (animActive) stopAnimExport(true); });
+  for (const id of ['expClip', 'expRes', 'expFps', 'expFmt']) {
     const box = document.getElementById(id);
     box.addEventListener('click', (e) => {
       const b = e.target.closest('button');
-      if (!b) return;
+      if (!b || b.classList.contains('dis')) return;
       for (const sib of box.children) sib.classList.remove('on');
       b.classList.add('on');
+      if (id === 'expClip') updateClipUI();
+      if (id === 'expRes') updateResUI();
     });
   }
-  const modeLabel = () => {
-    const m = segVal('expMode') || 'anim';
-    exportMode = m === 'rec' ? 'rec' : 'anim';
-    const isAnim = exportMode === 'anim';
-    expModeLabel.textContent = isAnim ? '逐幀編碼：固定 fps，不依賴即時錄影' : '畫面錄製：即時進行，含語音';
-    expAudioRow.style.display = isAnim ? 'none' : '';
-  };
-  document.getElementById('expMode').addEventListener('click', () => { setTimeout(modeLabel, 0); });
-  modeLabel();
+  expTalkSel.addEventListener('change', () => {});
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && exportPanel.classList.contains('open')) closeExportPanel();
   });

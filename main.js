@@ -1,7 +1,8 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 const DEV_URL = 'http://127.0.0.1:5173';
 let win = null;
@@ -97,6 +98,7 @@ ipcMain.handle('lobby-list', async () => {
 let animProc = null;
 let animQueued = Promise.resolve();
 let animOutPath = null;
+let animAudioTmp = null;
 
 function writeAnim(buf) {
   if (!animProc || !animProc.stdin.writable) return;
@@ -106,7 +108,7 @@ function writeAnim(buf) {
 }
 
 ipcMain.handle('anim-start', async (event, payload) => {
-  const { w = 1280, h = 720, fps = 30, duration = 10, ext = 'mp4', defaultName = 'lobby.mp4', audioFile = null } = payload || {};
+  const { w = 1280, h = 720, fps = 30, duration = 10, ext = 'mp4', defaultName = 'lobby.mp4', audioPcm = null, sampleRate = 44100, channels = 2 } = payload || {};
   try {
     let outPath;
     const autoDir = process.env.EXPORT_DIR;
@@ -125,16 +127,24 @@ ipcMain.handle('anim-start', async (event, payload) => {
       outPath = filePath;
     }
 
+    const hasAudio = audioPcm && audioPcm.byteLength > 0;
+    let audioTmp = null;
+    if (hasAudio) {
+      // 音訊（renderer 預混的 s16le PCM）寫成暫存檔再餵 ffmpeg：
+      // 直接 pipe 時 s16le demuxer 可能因 read() 邊界不齊（非 4 的倍數）報
+      // "Invalid PCM packet" 而中止整個編碼，暫存檔可避免。
+      audioTmp = path.join(os.tmpdir(), `ba_anim_${Date.now()}_${Math.random().toString(36).slice(2)}.pcm`);
+      fs.writeFileSync(audioTmp, Buffer.from(new Uint8Array(audioPcm)));
+    }
+    animAudioTmp = audioTmp;
     const vargs = ['-y', '-f', 'image2pipe', '-framerate', String(fps), '-i', 'pipe:'];
-    const audioPath = audioFile ? path.join(__dirname, 'assets', 'bgm', audioFile) : null;
-    const hasAudio = audioPath && fs.existsSync(audioPath);
-    if (hasAudio) vargs.push('-i', audioPath);
+    if (hasAudio) vargs.push('-f', 's16le', '-ar', String(sampleRate), '-ac', String(channels), '-i', audioTmp);
     vargs.push('-map', '0:v');
     if (hasAudio) vargs.push('-map', '1:a');
     if (ext === 'webm') {
-      vargs.push('-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '30', '-pix_fmt', 'yuv420p', '-c:a', 'libopus', '-b:a', '160k', '-shortest', outPath);
+      vargs.push('-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '30', '-pix_fmt', 'yuv420p', '-c:a', 'libopus', '-b:a', '160k', '-t', String(duration), outPath);
     } else {
-      vargs.push('-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', outPath);
+      vargs.push('-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-t', String(duration), '-movflags', '+faststart', outPath);
     }
 
     animOutPath = outPath;
@@ -158,9 +168,11 @@ ipcMain.on('anim-frame', (event, buf) => {
 ipcMain.handle('anim-finish', async () => {
   if (!animProc) return { error: '沒有進行中的動畫匯出' };
   const proc = animProc;
+  const tmp = animAudioTmp;
   try { await animQueued; proc.stdin.end(); } catch (e) { proc.stdin.destroy(); }
   const code = await new Promise((res) => proc.on('exit', (c) => res(c)));
-  animProc = null;
+  if (proc === animProc) animProc = null;
+  if (tmp) { try { fs.unlinkSync(tmp); } catch {} animAudioTmp = null; }
   if (code !== 0) return { error: `ffmpeg 結束碼 ${code}` };
   const p = animOutPath;
   animOutPath = null;
@@ -169,29 +181,36 @@ ipcMain.handle('anim-finish', async () => {
 
 ipcMain.on('anim-abort', () => {
   if (animProc) { try { animProc.stdin.destroy(); } catch {} try { animProc.kill('SIGKILL'); } catch {} animProc = null; }
+  if (animAudioTmp) { try { fs.unlinkSync(animAudioTmp); } catch {} animAudioTmp = null; }
 });
 
-ipcMain.handle('save-video', async (event, payload) => {
-  const { data, defaultName, ext } = payload || {};
-  if (!data || !defaultName) return { canceled: true };
-  const buf = Buffer.from(new Uint8Array(data));
+ipcMain.handle('bgm-export', async (event, payload) => {
+  const { filename, defaultName } = payload || {};
+  if (!filename) return { canceled: true };
+  const src = path.join(__dirname, 'assets', 'bgm', filename);
+  if (!fs.existsSync(src)) return { error: 'BGM 檔案不存在' };
   const autoDir = process.env.EXPORT_DIR;
   if (autoDir) {
-    const filePath = path.join(autoDir, defaultName);
-    fs.writeFileSync(filePath, buf);
-    return { path: filePath };
+    const dst = path.join(autoDir, defaultName || filename);
+    fs.copyFileSync(src, dst);
+    return { path: dst };
   }
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
-    title: '匯出影片',
-    defaultPath: defaultName,
+    title: '匯出 BGM',
+    defaultPath: defaultName || filename,
     filters: [
-      { name: ext === 'webm' ? 'WebM 影片' : 'MP4 影片', extensions: [ext || 'mp4'] },
+      { name: 'OGG 音訊', extensions: ['ogg'] },
       { name: '所有檔案', extensions: ['*'] },
     ],
   });
   if (canceled || !filePath) return { canceled: true };
-  fs.writeFileSync(filePath, buf);
+  fs.copyFileSync(src, filePath);
   return { path: filePath };
+});
+
+ipcMain.handle('screen-size', async () => {
+  const d = screen.getPrimaryDisplay();
+  return { width: d.size.width, height: d.size.height, scaleFactor: d.scaleFactor };
 });
 
 app.whenReady().then(async () => {

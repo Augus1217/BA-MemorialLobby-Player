@@ -22,9 +22,14 @@
       src: url('assets/fonts/BA-NotoSans-Regular.ttf') format('truetype');
       font-weight: 400; font-style: normal;
     }
-    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #05060d; font-family: "Segoe UI", system-ui, sans-serif; }
+    /* BA PC mouse cursor (PCIcon_MousePoint extracted from game bundles), hotspot at arrow tip */
+    html, body {
+      margin: 0; padding: 0; height: 100%; overflow: hidden;
+      background: #05060d; font-family: "Segoe UI", system-ui, sans-serif;
+      cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), auto;
+    }
     #app { position: fixed; inset: 0; }
-    #app canvas { touch-action: none; }
+    #app canvas { touch-action: none; cursor: inherit; }
 
     /* cinematic vignette + soft top shading (non-interactive) */
     #fx {
@@ -32,6 +37,16 @@
       background:
         radial-gradient(ellipse at 50% 46%, transparent 55%, rgba(2,3,10,.55) 100%),
         linear-gradient(rgba(0,0,0,.28), transparent 18%, transparent 82%, rgba(0,0,0,.32));
+    }
+
+    /* memorial intro white-flash overlay — rebuilt 1:1 from the game Timeline
+       (Recorded clip: Volume.weight -> ColorAdjustments postExposure 5.5 +
+       pure-white sprite alpha). opacity is driven per-frame by renderer/app.js;
+       sits above the camera vignette but below the dialog/HUD (NGUI UI in-game
+       renders above the post-processing). */
+    #whiteflash {
+      position: fixed; inset: 0; z-index: 6; background: #fff;
+      opacity: 0; pointer-events: none; will-change: opacity;
     }
 
     /* fade overlay for load / lobby switch */
@@ -72,7 +87,7 @@
     .btn {
       background: rgba(10,12,26,.42); color: #e8ecff; border: 1px solid rgba(255,255,255,.14);
       border-radius: 50%; width: 40px; height: 40px; font-size: 17px; line-height: 1;
-      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; display: flex; align-items: center; justify-content: center;
       transition: background .25s, border-color .25s, opacity .25s;
       backdrop-filter: blur(6px);
     }
@@ -128,7 +143,7 @@
     .sb-item {
       display: block; width: 100%; text-align: left; background: transparent;
       border: none; color: #dfe4ff; font-size: 13px; padding: 7px 10px;
-      border-radius: 6px; cursor: pointer;
+      border-radius: 6px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer;
     }
     .sb-item:hover { background: rgba(60,70,140,.35); }
     .sb-item.cur { background: rgba(80,95,180,.45); color: #fff; }
@@ -150,16 +165,29 @@
     .segs { display: flex; gap: 4px; }
     .segs button {
       background: rgba(255,255,255,.07); color: #cfd6ff; border: 1px solid rgba(255,255,255,.12);
-      border-radius: 6px; padding: 5px 11px; font-size: 12px; cursor: pointer; transition: background .2s;
+      border-radius: 6px; padding: 5px 11px; font-size: 12px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; transition: background .2s;
     }
     .segs button:hover { background: rgba(255,255,255,.13); }
     .segs button.on { background: rgba(120,140,255,.35); border-color: rgba(169,182,255,.7); color: #fff; }
-    .ck { font-size: 12px; color: #cfd6ff; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .segs button.dis { opacity: .35; pointer-events: none; }
+    #expTalkSel {
+      background: rgba(255,255,255,.07); color: #e8ecff; border: 1px solid rgba(255,255,255,.14);
+      border-radius: 6px; padding: 5px 10px; font-size: 12px; max-width: 220px;
+      cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer;
+    }
+    #expTalkSel:disabled { opacity: .35; }
+    #expCustomRow input {
+      width: 84px; background: rgba(255,255,255,.07); color: #e8ecff;
+      border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 5px 8px; font-size: 12px;
+    }
+    #expCustomRow input::-webkit-outer-spin-button, #expCustomRow input::-webkit-inner-spin-button { -webkit-appearance: none; }
+    .ck { font-size: 12px; color: #cfd6ff; display: flex; align-items: center; gap: 6px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; }
     .ck input { accent-color: #8fa0ff; }
+    .ck.dis { opacity: .35; pointer-events: none; }
     .panel-btns { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
     .btnTxt {
       background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); color: #e8ecff;
-      border-radius: 8px; padding: 8px 16px; font-size: 13px; cursor: pointer; transition: background .2s;
+      border-radius: 8px; padding: 8px 16px; font-size: 13px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; transition: background .2s;
     }
     .btnTxt:hover { background: rgba(255,255,255,.15); }
     .btnTxt.primary { background: rgba(120,140,255,.4); border-color: rgba(169,182,255,.7); }
@@ -178,7 +206,7 @@
     .rec-sep { color: rgba(255,255,255,.5); }
     #recBadge button {
       background: rgba(255,255,255,.18); border: none; color: #fff; border-radius: 6px;
-      width: 24px; height: 24px; cursor: pointer; font-size: 12px; line-height: 1;
+      width: 24px; height: 24px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; font-size: 12px; line-height: 1;
     }
     #recBadge button:hover { background: rgba(255,255,255,.3); }
 
@@ -264,7 +292,40 @@
     /* recording: keep the window as clean as the captured canvas */
     body.recording #hud, body.recording #fx, body.recording #btnStudents,
     body.recording #sidePanel, body.recording #exportPanel, body.recording #chatDialog { display: none !important; }
+
+    /* BA PC cursor, scaled to the window via the same vw/3840 design scale used
+       for the chat balloon. CSS cursors can't scale a url(), so this inline
+       script regenerates the image into a data-URL and sets these vars. */
+    :root {
+      --cur-img: url('assets/ui/PCIcon_MousePoint.png');
+      --cur-hx: 2; --cur-hy: 2;
+    }
   </style>
+  <script>
+    // Scale the BA cursor image with the window (3840-wide design reference).
+    function updateCursor() {
+      const img = updateCursor._img;
+      if (!img || !img.complete) return;
+      const scale = Math.max(0.45, window.innerWidth / 3840);
+      const size = Math.max(16, Math.round(64 * scale));
+      const c = updateCursor._canvas || (updateCursor._canvas = document.createElement('canvas'));
+      c.width = size; c.height = size;
+      const ctx = c.getContext('2d');
+      ctx.clearRect(0, 0, size, size);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, size, size);
+      const st = document.documentElement.style;
+      st.setProperty('--cur-img', `url("${c.toDataURL('image/png')}")`);
+      const hs = Math.max(1, Math.round(2 * size / 64));   // hotspot scales with the image
+      st.setProperty('--cur-hx', String(hs));
+      st.setProperty('--cur-hy', String(hs));
+    }
+    updateCursor._img = new Image();
+    updateCursor._img.onload = updateCursor;
+    updateCursor._img.src = 'assets/ui/PCIcon_MousePoint.png';
+    window.addEventListener('resize', updateCursor);
+  </script>
 </head>
 <body>
   <div id="app"></div>
@@ -297,6 +358,7 @@
   </div>
 
   <div id="loading"><div class="spin"></div><span id="loadingText">載入中</span></div>
+  <div id="whiteflash"></div>
   <div id="fade"></div>
   <div id="err"></div>
   <div id="toast"></div>
@@ -308,23 +370,26 @@
   </div>
 
   <div id="exportPanel">
-    <div class="panel-title">匯出影片 <span id="expChar"></span></div>
-    <div class="panel-row"><span class="lbl">模式</span>
-      <div class="segs" id="expMode">
-        <button data-m="rec">錄影</button><button data-m="anim" class="on">動畫</button>
+    <div class="panel-title">匯出動畫 <span id="expChar"></span></div>
+    <div class="panel-row"><span class="lbl">動畫</span>
+      <div class="segs" id="expClip">
+        <button data-k="start">Start_Idle</button><button data-k="idle" class="on">Idle</button><button data-k="talk">Talk</button>
       </div>
     </div>
-    <div class="panel-row"><span class="lbl" id="expModeLabel" style="width:100%"></span></div>
-    <div class="panel-row"><span class="lbl">時長</span>
-      <div class="segs" id="expDur">
-        <button data-v="5">5s</button><button data-v="10" class="on">10s</button>
-        <button data-v="30">30s</button><button data-v="60">60s</button>
-      </div>
+    <div class="panel-row" id="expTalkRow" style="display:none">
+      <span class="lbl">Talk clip</span>
+      <select id="expTalkSel"></select>
     </div>
     <div class="panel-row"><span class="lbl">解析度</span>
       <div class="segs" id="expRes">
-        <button data-w="0" class="on">視窗</button><button data-w="1280">1280×720</button><button data-w="1920">1920×1080</button>
+        <button data-r="win" class="on">目前視窗</button><button data-r="screen">目前螢幕</button><button data-r="kivo">kivo 適應</button><button data-r="custom">自訂</button>
       </div>
+    </div>
+    <div class="panel-row" id="expCustomRow" style="display:none">
+      <span class="lbl">自訂</span>
+      <input type="number" id="expCustomW" min="64" max="7680" value="1920" />
+      <span class="lbl">×</span>
+      <input type="number" id="expCustomH" min="64" max="4320" value="1080" />
     </div>
     <div class="panel-row"><span class="lbl">幀率</span>
       <div class="segs" id="expFps">
@@ -336,10 +401,12 @@
         <button data-fmt="mp4" class="on">MP4</button><button data-fmt="webm">WebM</button>
       </div>
     </div>
-    <div class="panel-row" id="expAudioRow">
-      <label class="ck"><input type="checkbox" id="expAudio" checked /> 包含 BGM 與語音</label>
+    <div class="panel-row" id="expVoiceRow">
+      <label class="ck"><input type="checkbox" id="expVoice" checked /> 包含語音</label>
+      <label class="ck" id="expDialogCk"><input type="checkbox" id="expDialog" /> 包含對話框</label>
     </div>
     <div class="panel-btns">
+      <button id="expBgm" class="btnTxt">匯出 BGM</button>
       <button id="expCancel" class="btnTxt">取消</button>
       <button id="expStart" class="btnTxt primary">開始匯出</button>
     </div>
