@@ -1,4 +1,4 @@
-import { Application, Assets, Texture, Sprite, MeshSimple, BlurFilter } from 'pixi.js';
+import { Application, Assets, Texture, Sprite, MeshSimple, BlurFilter, Cache } from 'pixi.js';
 import { Spine, ScaleTimeline } from '@esotericsoftware/spine-pixi-v8';
 
 window.addEventListener('error', (e) => console.error('[renderer][uncaught]', e.message, e.filename, e.lineno));
@@ -1207,7 +1207,57 @@ window.ba_debug = {
       dur: cur ? cur.animation.duration : null,
       anims: animNames(),
       idleClip,
+      slots: spine.skeleton.slots.map(s => s.data.name),
     };
+  },
+  sceneInfo: () => {
+    if (!scene) return null;
+    const cur = scene.state.getCurrent(0);
+    return {
+      cur: cur ? cur.animation.name : null,
+      dur: cur ? cur.animation.duration : null,
+      anims: scene.state.data.skeletonData.animations.map(a => a.name),
+      slots: scene.skeleton.slots.map(s => s.data.name),
+      visible: scene.visible,
+    };
+  },
+  texUids: () => {
+    const collect = (obj) => {
+      if (!obj) return [];
+      const out = [];
+      if (obj.attachmentCacheData) {
+        for (const row of obj.attachmentCacheData) {
+          if (!row) continue;
+          for (const cd of Object.values(row)) {
+            if (cd && cd.texture) out.push({ uid: cd.texture.uid, srcUid: cd.texture.source ? cd.texture.source.uid : null, destroyed: cd.texture.source ? cd.texture.source.destroyed : 'no-src' });
+          }
+        }
+      }
+      return out;
+    };
+    return { spine: collect(spine), scene: collect(scene) };
+  },
+  scanAttachments: () => {
+    const report = (obj, label) => {
+      if (!obj) return { label, bad: [], count: 0 };
+      const bad = [];
+      let count = 0;
+      if (obj.attachmentCacheData) {
+        for (const row of obj.attachmentCacheData) {
+          if (!row) continue;
+          for (const [name, cd] of Object.entries(row)) {
+            if (!cd || !cd.texture) continue;
+            count++;
+            const src = cd.texture.source;
+            if (!src || src.destroyed || src.style === null) {
+              bad.push({ name, uid: cd.texture.uid, srcUid: src ? src.uid : null, destroyed: src ? src.destroyed : 'no-src', styleNull: src ? src.style === null : 'n/a' });
+            }
+          }
+        }
+      }
+      return { label, bad, count };
+    };
+    return { spine: report(spine, 'spine'), scene: report(scene, 'scene') };
   },
   look: {
     radius: () => LOOK_RADIUS_UNITS,
@@ -1261,6 +1311,49 @@ window.ba_debug = {
     tableLoaded: () => !!FLASH_TABLE,
   },
   dbgRenderer: () => ({ type: app.renderer.type, w: app.canvas.width, h: app.canvas.height, spineVisible: spine ? spine.visible : null }),
+  pixelSum: () => {
+    try {
+      app.render();
+      const pixels = app.renderer.extract.pixels(app.stage);
+      let sum = 0;
+      for (let i = 0; i < pixels.length; i += 4) sum += pixels[i] + pixels[i+1] + pixels[i+2];
+      return { w: app.renderer.width, h: app.renderer.height, sum, px: pixels.length / 4 };
+    } catch (e) { return { err: String(e) }; }
+  },
+  swapStageChildren: () => {
+    if (app.stage.children.length >= 2) {
+      const c0 = app.stage.children[0];
+      const c1 = app.stage.children[1];
+      app.stage.setChildIndex(c0, 1);
+      app.stage.setChildIndex(c1, 0);
+      return 'swapped';
+    }
+    return 'not-enough-children';
+  },
+  pixelStats: () => {
+    try {
+      app.render();
+      const c = app.renderer.extract.canvas(app.stage);
+      const ctx = c.getContext('2d');
+      const d = ctx.getImageData(0, 0, c.width, c.height).data;
+      let nonBlack = 0, bright = 0, colored = 0, rSum = 0, gSum = 0, bSum = 0;
+      const px = c.width * c.height;
+      for (let i = 0; i < d.length; i += 4) {
+        const r = d[i], g = d[i+1], b = d[i+2], a = d[i+3];
+        if (r + g + b > 30) nonBlack++;
+        if (r > 100 && g > 100 && b > 100) bright++;
+        if (Math.max(r,g,b) - Math.min(r,g,b) > 40) colored++;
+        rSum += r; gSum += g; bSum += b;
+      }
+      return {
+        w: c.width, h: c.height,
+        nonBlackPct: (nonBlack / px * 100).toFixed(1),
+        brightPct: (bright / px * 100).toFixed(1),
+        coloredPct: (colored / px * 100).toFixed(1),
+        avgRGB: [Math.round(rSum/px), Math.round(gSum/px), Math.round(bSum/px)],
+      };
+    } catch (e) { return { err: String(e) }; }
+  },
   patchRender: () => {
     const tb = app.renderer.texture.bind.bind(app.renderer.texture);
     app.renderer.texture.bind = (source, ...rest) => {
@@ -1311,6 +1404,11 @@ window.ba_debug = {
     }
   },
   dbgLobby: () => currentLobby,
+  stageOrder: () => app.stage.children.map((c, i) => {
+    let b = null;
+    try { const bb = c.getBounds(); b = { x: Math.round(bb.x), y: Math.round(bb.y), w: Math.round(bb.width), h: Math.round(bb.height) }; } catch {}
+    return { i, type: c.constructor?.name, label: c.label || null, slots: c.skeleton ? c.skeleton.slots.length : null, bounds: b };
+  }),
   selectLobby: (key) => selectLobby(key),
   showProbe: (text) => showChat('TEST', text),
   dbgSpineTree: () => {
@@ -2675,6 +2773,19 @@ function unloadLobbyAssets(lobbyName) {
     for (const p of entry.scene.png || []) push(p, sceneBase);
   }
   for (const u of urls) { try { Assets.unload(u); } catch {} }
+  // 清除 Spine.from 的全域 skeletonData cache：Assets.unload 會銷毀 atlas texture，
+  // 但 Spine.from 的 Cache（key = `${skeleton}-${atlas}-${scale}`）仍保留舊 skeletonData，
+  // 下次載入同一角色會復用已銷毀 texture 的 attachment，導致 render 每幀拋錯。
+  const spineCacheKeys = [];
+  const charSkel = `assets/spine/${lobbyName}/${entry.skel}`;
+  const charAtlas = `assets/spine/${lobbyName}/${entry.atlas}`;
+  if (entry.skel && entry.atlas) spineCacheKeys.push(`${charSkel}-${charAtlas}-1`);
+  if (entry.scene && entry.scene.skel && entry.scene.atlas) {
+    const sceneSkel = `assets/scene/${lobbyName}/${entry.scene.skel}`;
+    const sceneAtlas = `assets/scene/${lobbyName}/${entry.scene.atlas}`;
+    spineCacheKeys.push(`${sceneSkel}-${sceneAtlas}-1`);
+  }
+  for (const k of spineCacheKeys) { try { if (Cache.has(k)) Cache.remove(k); } catch {} }
 }
 
 async function loadLobby(name) {
@@ -2741,7 +2852,7 @@ async function loadLobby(name) {
   }
 
   await loadScene(entry);
-  app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 2));
+  app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 1));
   fitted = false;
   // frame on the Idle pose (mesh geometry only exists after a render), then play the intro
   idleClip = resolveIdleClip();
