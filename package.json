@@ -4,16 +4,61 @@
   "description": "Blue Archive Memorial Lobby viewer (Electron + Pixi v8 + spine 4.2)",
   "main": "main.js",
   "scripts": {
+    "dev": "electron .",
     "start": "electron .",
-    "copy-assets": "python3 scripts/copy_assets.py"
+    "build:renderer": "vite build",
+    "build": "vite build",
+    "build:linux": "vite build && electron-builder --linux",
+    "build:win": "vite build && electron-builder --win",
+    "build:mac": "vite build && electron-builder --mac",
+    "copy-assets": "python3 scripts/copy_assets.py",
+    "update-assets": "python3 scripts/build_assets.py"
+  },
+  "build": {
+    "appId": "com.ba.memorial-lobby",
+    "productName": "BA Memorial Lobby",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "main.js",
+      "preload.js",
+      "package.json",
+      "index.prod.html"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Game"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "license": "MIT",
   "devDependencies": {
     "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
     "vite": "^8.2.0"
   },
   "dependencies": {
     "@esotericsoftware/spine-pixi-v8": "^4.2.119",
-    "pixi.js": "^8.19.0"
+    "pixi.js": "^8.19.0",
+    "tar": "^7.5.22"
   }
 }

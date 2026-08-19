@@ -1,5 +1,6 @@
 import { Application, Assets, Texture, Sprite, MeshSimple, BlurFilter, Cache } from 'pixi.js';
 import { Spine, ScaleTimeline } from '@esotericsoftware/spine-pixi-v8';
+import { Vector2 } from '@esotericsoftware/spine-core';
 
 window.addEventListener('error', (e) => console.error('[renderer][uncaught]', e.message, e.filename, e.lineno));
 window.addEventListener('unhandledrejection', (e) => console.error('[renderer][unhandled]', e.reason));
@@ -12,6 +13,9 @@ const charNameEl = document.getElementById('charName');
 const subNameEl = document.getElementById('subName');
 const loadingEl = document.getElementById('loading');
 const loadingText = document.getElementById('loadingText');
+const introEl = document.getElementById('intro');
+const introVideoEl = document.getElementById('introVideo');
+const introSkipEl = document.getElementById('introSkip');
 const errEl = document.getElementById('err');
 const fadeEl = document.getElementById('fade');
 const whiteFlashEl = document.getElementById('whiteflash');
@@ -81,13 +85,21 @@ function showErr(msg) {
 const log = (s) => console.log('[lobby]', s);
 
 // ---- state ----
- let spine = null;          // character skeleton
- let scene = null;          // room overlay skeleton (when available)
+  let spine = null;          // character skeleton
+   let scene = null;          // room overlay skeleton (when available)
+   let bg = null;             // lobby background skeleton (Akari_bg / Yuzu_bg)
+   let sceneIndependent = false;   // scene 骨架 ≠ 角色骨架（獨立背景，需另行定位）
+  let sceneBoundsMaxY = 0;   // scene 內容的世界座標最大 Y（供底部對齊）
+  let sceneBoundsCenterY = 0; // scene 內容的世界座標中心 Y（供置中對齊）
+  let bgCenterX = 0, bgCenterY = 0;   // bg 內容的世界座標中心
+  let sceneCenterX = 0;               // scene 內容的世界座標中心 X
+  let sceneStabTimer = null; // (unused)
  let currentLobby = null;
  let LOBBY_INDEX = {};
  let SCHEDULE = null;
  let BGM_MAP = {};
  let ORDER = [];
+ let STUDENT_ICONS = {};
 
 // kivo.wiki 光線修復: 所有角色的 top light slot 改為 Screen 混色
 // (對照 kivo 修復版 skel: CH0070_home top_light blendMode = 3)
@@ -103,6 +115,7 @@ const CAMERA = { maxScale: 4, weight: 0.5 };
 let cam = { x: 0, y: 0, scale: 1 };
 let charScale = 1;
 let sceneScale = 1;
+let sceneXTarget = 0;        // 場景內容水平置中目標（stabilize 依動畫表演空間校正）
 let sceneBiasY = 0;
 let fitted = false;
 let cameraTargetY = 0;     // 相機線骨架（Camera_Pos/Root/All_Layer）的 setup-pose 世界 Y
@@ -130,16 +143,82 @@ function boneWorldY(bone) {
   for (let b = bone; b; b = b.parent) y += b.data.y;
   return y;
 }
+// 以骨架 region/mesh 附著物（attachment）的世界頂點量測實際繪製範圍，
+// 排除 setup bounds 中未繪製的空白區域，避免 fit 基準偏移。
+// （不依賴 extract.canvas，其座標基準會受 scale/position 影響而失真）
+function contentWorldBounds(obj) {
+  try {
+    const sk = obj.skeleton;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const errs = [];
+    for (const slot of sk.slots) {
+      const att = slot.getAttachment();
+      if (!att) continue;
+      if (typeof att.computeWorldVertices !== 'function') { errs.push(`no fns: ${slot.data.name}`); continue; }
+      try {
+        const len = (att.worldVerticesLength || 8);
+        const arr = new Float32Array(Math.max(len, 8));
+        if (att.type === 2) att.computeWorldVertices(slot, 0, len, arr, 0, 2);   // mesh
+        else att.computeWorldVertices(slot, arr, 0, 2);                          // region 等
+        for (let i = 0; i < len; i += 2) {
+          const x = arr[i], y = arr[i + 1];
+          if (!isFinite(x) || !isFinite(y)) continue;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      } catch (e) { errs.push(`${slot.data.name}: ${e.message}`); }
+    }
+    if (!isFinite(minX) || maxX <= minX) return { err: errs.slice(0, 4).join(' | ') || 'no content' };
+    return { minX, minY, maxX, maxY, errs: errs.slice(0, 2) };
+  } catch { return null; }
+}
+
 function fitScene() {
   const vw = app.renderer.width, vh = app.renderer.height;
 
-  if (scene) {
-    const b = scene.getBounds();
-    if (b && b.maxX > b.minX) {
-      sceneScale = Math.max(vw / (b.maxX - b.minX), vh / (b.maxY - b.minY));
+  const fitObj = bg || scene;
+  let ox = 0, oy = 0, ow = 0, oh = 0;
+  if (fitObj) {
+    if (bg) {
+      // 背景以實際渲染內容為準（貼圖內容 ≠ setup bounds，後者含大量空白）
+      try {
+        const cb = contentWorldBounds(bg);
+        if (cb && cb.maxX > cb.minX && cb.maxY > cb.minY) {
+          ox = cb.minX; oy = cb.minY; ow = cb.maxX - cb.minX; oh = cb.maxY - cb.minY;
+        }
+      } catch {}
     }
+    if (!(ow > 0 && oh > 0)) {
+      const off = new Vector2(), size = new Vector2();
+      try { fitObj.skeleton.getBounds(off, size); } catch { /* fall through to getBounds */ }
+      if (size.x > 0 && size.y > 0) {
+        ox = off.x; oy = off.y; ow = size.x; oh = size.y;
+      } else {
+        const b = fitObj.getBounds();
+        if (b && b.maxX > b.minX) { ox = b.minX; oy = b.minY; ow = b.maxX - b.minX; oh = b.maxY - b.minY; }
+      }
+    }
+  }
+  if (ow > 0 && oh > 0) {
+    sceneScale = Math.max(vw / ow, vh / oh);
+    sceneBoundsMaxY = oy + oh;
+    sceneBoundsCenterY = oy + oh / 2;
+    sceneXTarget = vw / 2 - (ox + ow / 2) * sceneScale;
   } else {
     sceneScale = 1;
+    sceneXTarget = vw / 2;
+  }
+  if (bg) {
+    const off = new Vector2(), size = new Vector2();
+    try { bg.skeleton.getBounds(off, size); } catch {}
+    if (size.x > 0 && size.y > 0) { bgCenterX = off.x + size.x / 2; bgCenterY = off.y + size.y / 2; }
+  }
+  if (scene) {
+    const off = new Vector2(), size = new Vector2();
+    try { scene.skeleton.getBounds(off, size); } catch {}
+    if (size.x > 0 && size.y > 0) sceneCenterX = off.x + size.x / 2;
   }
 
   if (spine) {
@@ -163,13 +242,33 @@ function applyCamera(w) {
   const k = clamp(w, 0, 1);
   const vw = app.renderer.width, vh = app.renderer.height;
 
-  if (scene) {
-    scene.scale.set(
-      scene.scale.x + (sceneScale * cam.scale - scene.scale.x) * k,
-      scene.scale.y + (sceneScale * cam.scale - scene.scale.y) * k,
-    );
-    scene.x += (vw / 2 - cam.x - scene.x) * k;
-    scene.y += (vh * 0.5 + sceneBiasY - cam.y - scene.y) * k;
+  if (bg || scene) {
+    const setTransform = (obj, tx, ty) => {
+      obj.scale.set(
+        obj.scale.x + (sceneScale * cam.scale - obj.scale.x) * k,
+        obj.scale.y + (sceneScale * cam.scale - obj.scale.y) * k,
+      );
+      obj.x += (tx - cam.x - obj.x) * k;
+      obj.y += (ty - cam.y - obj.y) * k;
+    };
+    const s = sceneScale * cam.scale;
+    if (bg) {
+      // 背景填滿視窗：內容中心對齊視窗中心
+      setTransform(bg, sceneXTarget, vh * 0.5 - bgCenterY * s);
+    }
+    if (scene) {
+      if (bg) {
+        // 前景場景與背景同世界座標系：相對背景中心偏移
+        setTransform(scene, sceneXTarget + (sceneCenterX - bgCenterX) * s, vh * 0.5 + (sceneBoundsCenterY - bgCenterY) * s);
+      } else {
+        // 獨立場景（背景骨架 ≠ 角色骨架）：內容中心對齊視窗中心，避免被推到視窗外；
+        // 同骨架場景（場景即角色，如 Fuuka/Momoi/Wakamo）沿用「相機線」定位。
+        const sceneYTarget = sceneIndependent
+          ? vh * 0.5 - sceneBoundsCenterY * s
+          : vh * 0.5 + sceneBiasY;
+        setTransform(scene, sceneXTarget, sceneYTarget);
+      }
+    }
   }
   if (spine) {
     const targetS = charScale * cam.scale;
@@ -529,7 +628,7 @@ function speakerName() {
 function playVoice(voiceId) {
   voiceCalls++;
   const name = voiceId.toLowerCase();
-  const base = `assets/voice/${currentLobbyVoiceFolder}/${name}.ogg`;
+  const base = assetUrl(`assets/voice/${currentLobbyVoiceFolder}/${name}.ogg`);
   const audio = new Audio(base);
   const ctx = ensureAudio();
   if (ctx) {
@@ -592,8 +691,10 @@ function onAnimationEvent(_entry, ev) {
   // talk animation short.) lowercase id + voiceFolder -> /assets/voice/<Folder>/<id>.ogg.
   if (animActive) return;   // 逐幀匯出自行驅動語音/嘴型/對話框（非即時，時間軸驅動）
   if (!ev || !ev.data) return;
-  const voiceId = (ev.stringValue || ev.data.stringValue || ev.data.name || '').trim();
+  let voiceId = (ev.stringValue || ev.data.stringValue || ev.data.name || '').trim();
   if (!voiceId) return;
+  // Strip path-like prefixes some JP skeletons use (e.g. "Sound/CH0344_…", "sound/…", "Talk/…").
+  voiceId = voiceId.replace(/^[A-Za-z]+\//, '');
   // VERIFIED: Media stores files by lowercase id (e.g. airi_memoriallobby_1_1.ogg)
   // and missingMedia records that FILENAME. Compare against the lower id, exactly
   // the key playVoice() uses, so the two known-missing files are actually skipped.
@@ -634,7 +735,7 @@ function setBgm(filename) {
     bgmAudio = null;
   }
   if (!bgmOn || !filename) return;
-  const audio = new Audio(`assets/bgm/${filename}`);
+  const audio = new Audio(assetUrl(`assets/bgm/${filename}`));
   audio.loop = true;
   audio.volume = 0.42;
   audio.play().catch(() => {});
@@ -1040,7 +1141,8 @@ function normalizeFlashTable(raw) {
   for (const [name, entry] of Object.entries(raw || {})) {
     const e = {};
     for (const n of ['exposure', 'sprite', 'dof']) e[n] = normalizeFlashKeys(entry[n]);
-    if (e.exposure || e.sprite || e.dof) out[name.toLowerCase()] = e;
+    if (entry.body_start != null) e.bodyStart = entry.body_start;
+    if (e.exposure || e.sprite || e.dof || e.bodyStart) out[name.toLowerCase()] = e;
   }
   return out;
 }
@@ -1092,6 +1194,19 @@ function startIntroClock() {
   introVirtual = introWindowEnd > 0;
   introVirtualTime = 0;
   introClockStart = performance.now();
+}
+// Timeline body-spine start time for the current lobby (0 = the timeline starts
+// the body at t=0). Extracted from each spinelobbies bundle's `<char>_Timeline`
+// "Spine Animation State Track (1)" first clip start: Akari_home starts its body
+// at 3.0s (the Akari_Scene spine + opening flash run 0->5s first), so its intro
+// clip plays 3.0 -> 13.3333s and the Idle hand-off lands at 13.3333s.
+function introBodyStart() {
+  const t = FLASH_TABLE;
+  if (t && currentLobby) {
+    const e = t[currentLobby.toLowerCase()];
+    if (e && e.bodyStart) return e.bodyStart;
+  }
+  return 0;
 }
 // Export (animActive) drives the clock by frame time via advanceIntroClock(dt);
 // live view drives it by wall-clock time — independent of the app ticker, so a
@@ -1152,7 +1267,12 @@ function playStart() {
     // completion of the intro clears the lock (see onTrackComplete).
     state.introBlock = true;
     startIntroClock();
-    spine.state.setAnimation(0, introName, false);
+    const introEntry = spine.state.setAnimation(0, introName, false);
+    // Hold track 0 in the setup pose for the Timeline's body start delay (Akari:
+    // 3.0s — the Akari_Scene spine + opening flash run first), so the intro clip
+    // runs bodyStart -> bodyStart+10.3333s and the Idle hand-off lands at
+    // 13.3333s exactly like the PlayableDirector.
+    introEntry.delay = introBodyStart();
     spine.state.addAnimation(0, idleClip, true, 0);
   } else {
     spine.state.setAnimation(0, idleClip, true);
@@ -1170,6 +1290,7 @@ function memoryLobbySkip() {
   introVirtual = false;
   introWindowEnd = 0;
   spine.state.setAnimation(0, idleClip || 'Idle_01', true);
+  startRailLoop();
   log('skip to idle');
 }
 
@@ -1199,6 +1320,15 @@ window.ba_debug = {
     const g = spine.toGlobal({ x: b.worldX, y: b.worldY });
     return { x: g.x, y: g.y, scale: spine.scale.x, radius: HEAD_PAT_RADIUS * spine.scale.x };
   },
+  railPos: () => {
+    if (!spine) return null;
+    const b = spine.skeleton.findBone('rail_left');
+    const t3 = spine.state.getCurrent(3);
+    return b ? {
+      x: Math.round(b.worldX), y: Math.round(b.worldY),
+      t3: t3 ? t3.animation.name : null,
+    } : null;
+  },
   spineInfo: () => {
     if (!spine) return null;
     const cur = spine.state.getCurrent(0);
@@ -1219,6 +1349,231 @@ window.ba_debug = {
       anims: scene.state.data.skeletonData.animations.map(a => a.name),
       slots: scene.skeleton.slots.map(s => s.data.name),
       visible: scene.visible,
+    };
+  },
+  sceneBoundsNow: () => {
+    if (!scene) return null;
+    try {
+      const b = scene.getBounds();
+      return { x: Math.round(b.minX), y: Math.round(b.minY), w: Math.round(b.maxX - b.minX), h: Math.round(b.maxY - b.minY) };
+    } catch (e) { return { err: e.message }; }
+  },
+  skeletonInfo: () => {
+    const dump = (obj) => {
+      if (!obj) return null;
+      const data = obj.skeleton ? obj.skeleton.data : obj.skeletonData;
+      if (!data) return null;
+      const attach = {};
+      for (const skin of data.skins || []) {
+        if (!skin || !skin.attachments) continue;
+        for (const [slotName, atts] of Object.entries(skin.attachments)) {
+          attach[slotName] = (attach[slotName] || 0) + Object.keys(atts || {}).length;
+        }
+      }
+      return {
+        bones: (data.bones || []).map(b => b.name),
+        slots: (data.slots || []).map(s => s.name),
+        skins: (data.skins || []).map(s => s.name),
+        animations: (data.animations || []).map(a => a.name),
+        attachments: attach,
+      };
+    };
+    return { scene: dump(scene), bg: dump(bg), spine: dump(spine) };
+  },
+  spineBoundsNow: () => {
+    if (!spine) return null;
+    try {
+      const b = spine.getBounds();
+      return { x: Math.round(b.minX), y: Math.round(b.minY), w: Math.round(b.maxX - b.minX), h: Math.round(b.maxY - b.minY) };
+    } catch (e) { return { err: e.message }; }
+  },
+  sceneViewport: () => {
+    if (!scene) return { err: 'no scene' };
+    try {
+      const b = scene.getBounds();
+      const sk = scene.skeleton;
+      const off = new Vector2(), size = new Vector2();
+      let setup = null;
+      try { sk.getBounds(off, size); setup = { x: Math.round(off.x), y: Math.round(off.y), w: Math.round(size.x), h: Math.round(size.y) }; } catch (e) { setup = { err: e.message }; }
+      return {
+        vw: app.canvas.width, vh: app.canvas.height,
+        scenePos: [Math.round(scene.x), Math.round(scene.y)],
+        sceneScale: scene.scale.x.toFixed(3),
+        sceneGlobal: { x: Math.round(b.minX), y: Math.round(b.minY), w: Math.round(b.maxX - b.minX), h: Math.round(b.maxY - b.minY) },
+        setup,
+        sceneVisible: !(b.maxX <= 0 || b.maxY <= 0 || b.minX >= app.canvas.width || b.minY >= app.canvas.height),
+      };
+    } catch (e) { return { err: e.message }; }
+  },
+  bgViewport: () => {
+    if (!bg) return { err: 'no bg' };
+    try {
+      const cb = contentWorldBounds(bg);
+      const b = bg.getBounds();
+      const sk = bg.skeleton;
+      const off = new Vector2(), size = new Vector2();
+      let setup = null;
+      try { sk.getBounds(off, size); setup = { x: Math.round(off.x), y: Math.round(off.y), w: Math.round(size.x), h: Math.round(size.y) }; } catch (e) { setup = { err: e.message }; }
+      return {
+        vw: app.canvas.width, vh: app.canvas.height,
+        bgPos: [Math.round(bg.x), Math.round(bg.y)],
+        bgScale: bg.scale.x.toFixed(3),
+        bgGlobal: { x: Math.round(b.minX), y: Math.round(b.minY), w: Math.round(b.maxX - b.minX), h: Math.round(b.maxY - b.minY) },
+        setup,
+        content: (() => { try { const cb = contentWorldBounds(bg); if (!cb) return null; if (cb.err) return { err: cb.err }; return { x: Math.round(cb.minX), y: Math.round(cb.minY), w: Math.round(cb.maxX - cb.minX), h: Math.round(cb.maxY - cb.minY), cxs: Math.round((cb.minX + cb.maxX) / 2), cys: Math.round((cb.minY + cb.maxY) / 2) }; } catch (e) { return { err: e.message }; } })(),
+        bgVisible: !(b.maxX <= 0 || b.maxY <= 0 || b.minX >= app.canvas.width || b.minY >= app.canvas.height),
+      };
+    } catch (e) { return { err: e.message }; }
+  },
+  fitState: () => ({
+    sceneScale, sceneXTarget, sceneBoundsCenterY, bgCenterX, bgCenterY, sceneCenterX,
+    camW: (typeof CAMERA !== 'undefined') && CAMERA ? CAMERA.weight : null,
+    spine: spine ? { x: Math.round(spine.x), y: Math.round(spine.y), s: +spine.scale.x.toFixed(3) } : null,
+    scene: scene ? { x: Math.round(scene.x), y: Math.round(scene.y), s: +scene.scale.x.toFixed(3) } : null,
+    bg: bg ? { x: Math.round(bg.x), y: Math.round(bg.y), s: +bg.scale.x.toFixed(3) } : null,
+  }),
+  gridView: (cols = 20, rows = 9) => {
+    try {
+      app.render();
+      const w = app.canvas.width, h = app.canvas.height;
+      if (!w || !h) return { err: 'no view' };
+      const gl = app.renderer.gl;
+      const buf = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      const ramp = ' .:-=+*#%@';
+      const out = [];
+      const px = (x, y) => { const i = ((h - 1 - y) * w + x) * 4; return [buf[i], buf[i + 1], buf[i + 2]]; };
+      for (let r = 0; r < rows; r++) {
+        const y0 = Math.floor(r * h / rows), y1 = Math.floor((r + 1) * h / rows);
+        let line = '';
+        for (let c = 0; c < cols; c++) {
+          const x0 = Math.floor(c * w / cols), x1 = Math.floor((c + 1) * w / cols);
+          let R = 0, G = 0, B = 0, n = 0, col = 0;
+          for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+            const [pr, pg, pb] = px(x, y);
+            R += pr; G += pg; B += pb; n++;
+            if (Math.abs(pr - pg) > 24 || Math.abs(pg - pb) > 24) col++;
+          }
+          const br = (R + G + B) / 3 / n / 255;
+          const ch = ramp[Math.min(9, Math.floor(br * 10))];
+          line += (col / n > 0.3 ? 'C' : ' ') + ch + ' ';
+        }
+        out.push(line);
+      }
+      return { grid: out, w, h };
+    } catch (e) { return { err: e.message }; }
+  },
+  gridShot: (cols = 20, rows = 9, which = 'stage') => {
+    try {
+      app.render();
+      const obj = which === 'scene' ? scene : which === 'spine' ? spine : which === 'bg' ? bg : app.stage;
+      if (!obj) return { err: 'no ' + which };
+      const cv = app.renderer.extract.canvas(obj);
+      if (!cv.width || !cv.height) return { err: 'empty' };
+      const ctx = cv.getContext('2d');
+      const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+      const ramp = ' .:-=+*#%@';
+      const out = [];
+      for (let r = 0; r < rows; r++) {
+        const y0 = Math.floor(r * cv.height / rows), y1 = Math.floor((r + 1) * cv.height / rows);
+        let line = '';
+        for (let c = 0; c < cols; c++) {
+          const x0 = Math.floor(c * cv.width / cols), x1 = Math.floor((c + 1) * cv.width / cols);
+          let R = 0, G = 0, B = 0, n = 0, col = 0;
+          for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+            const i = (y * cv.width + x) * 4;
+            R += d[i]; G += d[i + 1]; B += d[i + 2]; n++;
+            if (Math.abs(d[i] - d[i + 1]) > 24 || Math.abs(d[i + 1] - d[i + 2]) > 24) col++;
+          }
+          const br = (R + G + B) / 3 / n / 255;
+          const ch = ramp[Math.min(9, Math.floor(br * 10))];
+          line += (col / n > 0.3 ? 'C' : ' ') + ch + ' ';
+        }
+        out.push(line);
+      }
+      return { grid: out, w: cv.width, h: cv.height };
+    } catch (e) { return { err: e.message }; }
+  },
+  shotStats: (which = 'stage') => {
+    try {
+      app.render();
+      const obj = which === 'scene' ? scene : which === 'spine' ? spine : which === 'bg' ? bg : app.stage;
+      if (!obj) return { err: 'no ' + which };
+      const cv = app.renderer.extract.canvas(obj);
+      if (!cv.width || !cv.height) return { err: 'empty' };
+      const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+      const n = cv.width * cv.height;
+      let nonBlack = 0, colorful = 0, bright = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        if (r > 8 || g > 8 || b > 8) nonBlack++;
+        if (Math.abs(r - g) > 24 || Math.abs(g - b) > 24) colorful++;
+        if ((r + g + b) / 3 > 180) bright++;
+      }
+      return {
+        w: cv.width, h: cv.height,
+        nonBlack: (nonBlack / n * 100).toFixed(1),
+        colorful: (colorful / n * 100).toFixed(1),
+        bright: (bright / n * 100).toFixed(1),
+      };
+    } catch (e) { return { err: e.message }; }
+  },
+  stageShot: (maxW = 900) => {
+    try {
+      app.render();
+      const cv = app.renderer.extract.canvas(app.stage);
+      if (!cv.width || !cv.height) return { err: 'empty canvas' };
+      const s = maxW / cv.width;
+      const t = document.createElement('canvas');
+      t.width = maxW;
+      t.height = Math.round(cv.height * s);
+      const c = t.getContext('2d');
+      c.drawImage(cv, 0, 0, t.width, t.height);
+      return { w: t.width, h: t.height, b64: t.toDataURL('image/jpeg', 0.85).split(',')[1] };
+    } catch (e) { return { err: e.message }; }
+  },
+  sceneShot: (maxW = 900) => {
+    if (!scene) return { err: 'no scene' };
+    try {
+      app.render();
+      const cv = app.renderer.extract.canvas(scene);
+      if (!cv.width || !cv.height) return { err: 'empty scene canvas' };
+      const s = maxW / cv.width;
+      const t = document.createElement('canvas');
+      t.width = maxW;
+      t.height = Math.round(cv.height * s);
+      const c = t.getContext('2d');
+      c.drawImage(cv, 0, 0, t.width, t.height);
+      return { w: t.width, h: t.height, b64: t.toDataURL('image/jpeg', 0.85).split(',')[1] };
+    } catch (e) { return { err: e.message }; }
+  },
+  sceneDetail: () => {
+    if (!scene) return null;
+    const cur = scene.state.getCurrent(0);
+    let bounds = null;
+    try {
+      const b = scene.getBounds();
+      bounds = { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.maxX - b.minX), h: Math.round(b.maxY - b.minY), empty: !(b.maxX > b.minX && b.maxY > b.minY) };
+    } catch (e) { bounds = { err: e.message }; }
+    const slots = [];
+    for (const s of scene.skeleton.slots) {
+      slots.push({ name: s.data.name, att: s.attachment ? s.attachment.name : null, blend: s.data.blendMode });
+    }
+    return {
+      cur: cur ? cur.animation.name : null,
+      dur: cur ? cur.animation.duration : null,
+      time: cur ? cur.time : null,
+      loop: cur ? cur.loop : null,
+      timeScale: scene.state.timeScale,
+      anims: scene.state.data.skeletonData.animations.map(a => a.name),
+      visible: scene.visible,
+      alpha: scene.alpha,
+      scale: [scene.scale.x, scene.scale.y],
+      pos: [scene.x, scene.y],
+      bounds,
+      skin: scene.skeleton.skin ? scene.skeleton.skin.name : null,
+      slots: slots.slice(0, 16),
+      slotCount: scene.skeleton.slots.length,
     };
   },
   texUids: () => {
@@ -2024,17 +2379,19 @@ async function buildVoiceTimeline(animName, duration) {
   const out = [];
   for (const l of lines) {
     if (!l || typeof l.name !== 'string') continue;
-    const lower = l.name.toLowerCase();
+    // Strip path-like prefixes (Sound/, Talk/, etc.) consistent with onAnimationEvent.
+    const raw = l.name.replace(/^[A-Za-z]+\//, '');
+    const lower = raw.toLowerCase();
     if (voiceSkip.has(lower)) continue;
     if (validVoices && !validVoices.has(lower)) continue;
-    const len = await probeVoiceLength(l.name);
+    const len = await probeVoiceLength(raw);
     out.push({
       start: l.t,
       end: Math.min(duration, l.t + len),
-      voiceId: l.name,
-      text: subtitleFor(l.name),
-      dtype: dialogTypeFor(l.name),
-      lang: subtitleLang(l.name),
+      voiceId: raw,
+      text: subtitleFor(raw),
+      dtype: dialogTypeFor(raw),
+      lang: subtitleLang(raw),
     });
   }
   out.sort((a, b) => a.start - b.start);
@@ -2109,9 +2466,9 @@ function loadBalloonImages() {
   return new Promise((res) => {
     if (!balloonImg) {
       balloonImg = new Image();
-      balloonImg.src = 'assets/ui/Lobby_balloon.png';
+      balloonImg.src = assetUrl('assets/ui/Lobby_balloon.png');
       balloonImg2 = new Image();
-      balloonImg2.src = 'assets/ui/Lobby_balloon2.png';
+      balloonImg2.src = assetUrl('assets/ui/Lobby_balloon2.png');
     }
     const ok = () => balloonImg.complete && balloonImg2.complete;
     if (ok()) return res(true);
@@ -2479,10 +2836,16 @@ function updateResUI() {
 }
 
 // ---- asset loading ----
+const IS_ELECTRON = location.protocol === 'file:';
+function assetUrl(p) {
+  return IS_ELECTRON ? 'app://' + p : p;
+}
+
 async function fetchRetry(url, retries = 4) {
+  const fullUrl = url.startsWith('assets/') ? assetUrl(url) : url;
   for (let i = 0; ; i++) {
     try {
-      const r = await fetch(url);
+      const r = await fetch(fullUrl);
       if (r.ok) return r;
     } catch (e) {
       if (i >= retries - 1) throw e;
@@ -2684,7 +3047,15 @@ function renderSidebar() {
       const b = document.createElement('button');
       b.className = 'sb-item';
       b.dataset.key = c.key;
-      b.textContent = variantText(g, c);
+      const ico = STUDENT_ICONS[c.info.core];
+      if (ico) {
+        const img = document.createElement('img');
+        img.className = 'sb-ico';
+        img.src = assetUrl(`assets/students/${ico}`);
+        img.alt = '';
+        b.appendChild(img);
+      }
+      b.appendChild(document.createTextNode(variantText(g, c)));
       if (c.key === currentLobby) b.classList.add('cur');
       sbList.appendChild(b);
     }
@@ -2713,18 +3084,32 @@ function selectLobby(key) {
 
 async function loadScene(entry) {
   const s = entry?.scene;
-  if (!s) return;
+  const b = entry?.bg;
+  if (!s && !b) return;
   try {
-    await Assets.load(`assets/scene/${currentLobby}/${s.skel}`);
-    await Assets.load(`assets/scene/${currentLobby}/${s.atlas}`);
-    scene = Spine.from({ skeleton: `assets/scene/${currentLobby}/${s.skel}`, atlas: `assets/scene/${currentLobby}/${s.atlas}` });
-    app.stage.addChildAt(scene, 0);
-    const anims = scene.state.data.skeletonData.animations;
-    scene.state.setAnimation(0, anims[0].name, true);
-    log(`場景: ${currentLobby} (${anims[0].name})`);
+    const loadOne = async (res) => {
+      if (!res || !res.skel || !res.atlas) return null;
+      const base = `assets/scene/${currentLobby}/`;
+      const skel = assetUrl(base + res.skel), atlas = assetUrl(base + res.atlas);
+      await Assets.load(skel);
+      await Assets.load(atlas);
+      const obj = Spine.from({ skeleton: skel, atlas });
+      for (const slot of obj.skeleton.slots) {
+        if (isTopLightSlot(slot.data.name)) slot.data.blendMode = 3;
+      }
+      const anims = obj.state.data.skeletonData.animations;
+      obj.state.setAnimation(0, anims[0].name, true);
+      return obj;
+    };
+    scene = await loadOne(s);
+    bg = await loadOne(b);
+    if (scene) app.stage.addChildAt(scene, 0);
+    if (bg) app.stage.addChildAt(bg, 0);   // bg 插到最底（scene/spine 之上層）
+    if (scene || bg) log(`場景: ${currentLobby}`);
   } catch (e) {
     console.warn('[lobby] 場景載入失敗，略過', e);
     if (scene) { destroyTextures(collectTextures(scene)); scene.destroy(); scene = null; }
+    if (bg) { destroyTextures(collectTextures(bg)); bg.destroy(); bg = null; }
   }
 }
 
@@ -2761,7 +3146,7 @@ function unloadLobbyAssets(lobbyName) {
   const entry = LOBBY_INDEX[lobbyName];
   if (!entry || typeof entry !== 'object') return;
   const urls = [];
-  const push = (rel, base) => { if (rel) urls.push(base + rel.replace(/^\.\//, '')); };
+  const push = (rel, base) => { if (rel) urls.push(assetUrl(base + rel.replace(/^\.\//, ''))); };
   const charBase = `assets/spine/${lobbyName}/`;
   push(entry.skel, charBase);
   push(entry.atlas, charBase);
@@ -2772,24 +3157,36 @@ function unloadLobbyAssets(lobbyName) {
     push(entry.scene.atlas, sceneBase);
     for (const p of entry.scene.png || []) push(p, sceneBase);
   }
+  if (entry.bg) {
+    const bgBase = `assets/scene/${lobbyName}/`;
+    push(entry.bg.skel, bgBase);
+    push(entry.bg.atlas, bgBase);
+    for (const p of entry.bg.png || []) push(p, bgBase);
+  }
   for (const u of urls) { try { Assets.unload(u); } catch {} }
   // 清除 Spine.from 的全域 skeletonData cache：Assets.unload 會銷毀 atlas texture，
   // 但 Spine.from 的 Cache（key = `${skeleton}-${atlas}-${scale}`）仍保留舊 skeletonData，
   // 下次載入同一角色會復用已銷毀 texture 的 attachment，導致 render 每幀拋錯。
   const spineCacheKeys = [];
-  const charSkel = `assets/spine/${lobbyName}/${entry.skel}`;
-  const charAtlas = `assets/spine/${lobbyName}/${entry.atlas}`;
+  const charSkel = assetUrl(`assets/spine/${lobbyName}/${entry.skel}`);
+  const charAtlas = assetUrl(`assets/spine/${lobbyName}/${entry.atlas}`);
   if (entry.skel && entry.atlas) spineCacheKeys.push(`${charSkel}-${charAtlas}-1`);
   if (entry.scene && entry.scene.skel && entry.scene.atlas) {
-    const sceneSkel = `assets/scene/${lobbyName}/${entry.scene.skel}`;
-    const sceneAtlas = `assets/scene/${lobbyName}/${entry.scene.atlas}`;
+    const sceneSkel = assetUrl(`assets/scene/${lobbyName}/${entry.scene.skel}`);
+    const sceneAtlas = assetUrl(`assets/scene/${lobbyName}/${entry.scene.atlas}`);
     spineCacheKeys.push(`${sceneSkel}-${sceneAtlas}-1`);
+  }
+  if (entry.bg && entry.bg.skel && entry.bg.atlas) {
+    const bgSkel = assetUrl(`assets/scene/${lobbyName}/${entry.bg.skel}`);
+    const bgAtlas = assetUrl(`assets/scene/${lobbyName}/${entry.bg.atlas}`);
+    spineCacheKeys.push(`${bgSkel}-${bgAtlas}-1`);
   }
   for (const k of spineCacheKeys) { try { if (Cache.has(k)) Cache.remove(k); } catch {} }
 }
 
 async function loadLobby(name) {
   if (exporting) return;
+  clearTimeout(sceneStabTimer);
   const oldLobby = currentLobby;
   let oldTextures = new Set();
   if (spine) {
@@ -2806,6 +3203,11 @@ async function loadLobby(name) {
     for (const t of collectTextures(scene)) oldTextures.add(t);
     scene.destroy();
     scene = null;
+  }
+  if (bg) {
+    for (const t of collectTextures(bg)) oldTextures.add(t);
+    bg.destroy();
+    bg = null;
   }
   unloadLobbyAssets(oldLobby);
   destroyTextures(oldTextures);
@@ -2827,7 +3229,7 @@ async function loadLobby(name) {
   loadingText.textContent = `載入 ${prettyName(name)}`;
   try {
     const charAssets = entry.skel && entry.atlas
-      ? [`assets/spine/${name}/${entry.skel}`, `assets/spine/${name}/${entry.atlas}`]
+      ? [assetUrl(`assets/spine/${name}/${entry.skel}`), assetUrl(`assets/spine/${name}/${entry.atlas}`)]
       : [];
     await Promise.all(charAssets.map(a => Assets.load(a)));
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
@@ -2852,6 +3254,7 @@ async function loadLobby(name) {
   }
 
   await loadScene(entry);
+  sceneIndependent = !!(entry.bg) || !!(entry.scene && entry.scene.skel && entry.scene.skel !== entry.skel);
   app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 1));
   fitted = false;
   // frame on the Idle pose (mesh geometry only exists after a render), then play the intro
@@ -2902,11 +3305,23 @@ function switchLobby(dir) {
 function onTrackComplete(entry) {
   // Intro (Start_Idle_01) finished on track 0 -> release the interaction lock so
   // the player can tap/pat; track 0 now loops the idle clip.
-  if (entry.trackIndex === 0 && state.introBlock) state.introBlock = false;
+  if (entry.trackIndex === 0 && state.introBlock) {
+    state.introBlock = false;
+    startRailLoop();
+  }
   if (entry.trackIndex === 1 && !state.busy) {
     if (state.busy === 'talk') return; // handled by timer
     restTracks();
   }
+}
+
+// Sushi rail conveyor loop. The game's Akari lobby ships Sushi_01_R (a
+// rail_left/rail_right translate loop) on a dedicated track so the conveyor
+// keeps moving while Idle. Added in a post-launch update (not in the original
+// 2024-11-18 bundle but present in newer game versions).
+function startRailLoop() {
+  if (!spine || !has('Sushi_01_R')) return;
+  spine.state.setAnimation(3, 'Sushi_01_R', true);
 }
 
 // Head anchor for the Pat-vs-Look hold region test. Every lobby skeleton ships a
@@ -2994,8 +3409,143 @@ function onPointerUp(e) {
   downTime = 0;
 }
 
+// ---- 開場標題影片：title.mp4（畫面）+ pv-a.ogg（音軌）----
+// 資源由 main 的 intro-media handler 準備（從 APK 解包目錄複製到 assets/intro），
+// 此處播放並等待結束／使用者跳過，之後才載入第一個 lobby。
+function playIntro() {
+  return new Promise(async (resolve) => {
+    let finished = false;
+    let guard = null;
+    const cleanup = () => {
+      introVideoEl.removeEventListener('ended', finish);
+      introVideoEl.removeEventListener('error', finish);
+      introSkipEl.removeEventListener('click', finish);
+      introVideoEl.removeEventListener('click', finish);
+      document.removeEventListener('keydown', onIntroKey);
+    };
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(guard);
+      cleanup();
+      introEl.classList.remove('show');
+      introVideoEl.pause();
+      try { introVideoEl.removeAttribute('src'); introVideoEl.load(); } catch {}
+      resolve();
+    };
+    const onIntroKey = (e) => {
+      if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); finish(); }
+    };
+    try {
+      const media = window.ba && window.ba.introMedia ? await window.ba.introMedia() : null;
+      if (!media || !media.video) { resolve(); return; }
+      introVideoEl.src = media.video;
+      let audio = null;
+      if (media.audio) {
+        audio = new Audio(media.audio);
+        audio.play().catch(() => {});
+      }
+      introEl.classList.add('show');
+      introVideoEl.addEventListener('ended', finish);
+      introVideoEl.addEventListener('error', finish);
+      introSkipEl.addEventListener('click', finish);
+      introVideoEl.addEventListener('click', finish);
+      document.addEventListener('keydown', onIntroKey);
+      await introVideoEl.play().catch(() => {});
+      guard = setTimeout(finish, 60000);
+    } catch (e) {
+      log(`intro err: ${e.message}`);
+      resolve();
+    }
+  });
+}
+
 // ---- init ----
+async function showAssetDownload(assetInfo) {
+  const overlay = document.getElementById('assetOverlay');
+  const status = document.getElementById('assetStatus');
+  const progress = document.getElementById('assetProgress');
+  const fill = document.getElementById('assetProgressFill');
+  const pctText = document.getElementById('assetProgressText');
+  const detail = document.getElementById('assetDetail');
+  const btn = document.getElementById('assetBtn');
+
+  overlay.classList.remove('hidden');
+  progress.style.display = 'none';
+  btn.style.display = 'none';
+
+  if (assetInfo.hasAssets && assetInfo.remoteVersion) {
+    status.textContent = `發現新版本 v${assetInfo.remoteVersion}（目前 v${assetInfo.localVersion || '無'}）`;
+    detail.textContent = '將更新以下資源：' + Object.keys(assetInfo.packages).join('、');
+  } else if (!assetInfo.hasAssets) {
+    const pkgNames = assetInfo.packages ? Object.keys(assetInfo.packages) : [];
+    const totalGB = assetInfo.packages
+      ? (Object.values(assetInfo.packages).reduce((s, p) => s + (p.size || 0), 0) / 1073741824).toFixed(1)
+      : '?';
+    status.textContent = '首次使用需下載遊戲資源';
+    detail.textContent = `${pkgNames.length} 個套件（約 ${totalGB} GB）：` + pkgNames.join('、');
+  } else {
+    status.textContent = '資源已是最新';
+    btn.style.display = 'none';
+    await new Promise(r => setTimeout(r, 1200));
+    overlay.classList.add('hidden');
+    return;
+  }
+
+  btn.textContent = assetInfo.hasAssets ? '更新資源' : '開始下載';
+  btn.style.display = 'inline-block';
+
+  return new Promise((resolve) => {
+    btn.onclick = async () => {
+      btn.style.display = 'none';
+      progress.style.display = 'block';
+      fill.style.width = '0%';
+      pctText.textContent = '0%';
+
+      window.ba.onDownloadProgress?.((p) => {
+        if (p.status === 'downloading') {
+          status.textContent = `下載 ${p.package} (${p.index + 1}/${p.total})`;
+          fill.style.width = p.percent + '%';
+          pctText.textContent = p.percent + '%';
+          if (p.total) detail.textContent = `${(p.downloaded / 1048576).toFixed(0)} MB / ${(p.total / 1048576).toFixed(0)} MB`;
+        } else if (p.status === 'extracting') {
+          status.textContent = `解壓縮 ${p.package}…`;
+          detail.textContent = '';
+        } else if (p.status === 'done') {
+          status.textContent = `${p.package} 完成`;
+        } else if (p.status === 'error') {
+          detail.textContent = `⚠ ${p.error}`;
+        }
+      });
+
+      const version = assetInfo.remoteVersion || '1.0.0';
+      await window.ba.downloadAssets({ version, packages: assetInfo.packages });
+
+      status.textContent = '資源準備完成';
+      fill.style.width = '100%';
+      pctText.textContent = '100%';
+      detail.textContent = '';
+      btn.style.display = 'none';
+      await new Promise(r => setTimeout(r, 800));
+      overlay.classList.add('hidden');
+      resolve();
+    };
+  });
+}
+
 async function init() {
+  // ---- Asset check: show download UI if assets missing ----
+  if (window.ba?.checkAssets) {
+    try {
+      const assetInfo = await window.ba.checkAssets();
+      if (assetInfo.needsDownload) {
+        await showAssetDownload(assetInfo);
+      }
+    } catch (e) {
+      console.warn('[lobby] Asset check failed:', e);
+    }
+  }
+
   await app.init({ resizeTo: window, antialias: true, backgroundColor: 0x05060d, autoDensity: true });
   const canvas = app.canvas;
   document.getElementById('app').appendChild(canvas);
@@ -3012,6 +3562,11 @@ async function init() {
   const idx = await fetchRetry('assets/lobby_index.json').then(r => r.json());
   LOBBY_INDEX = idx;
   ORDER = Object.keys(idx);
+  try {
+    STUDENT_ICONS = await fetchRetry('assets/students/icon_index.json').then(r => r.json());
+  } catch (e) {
+    console.warn('[lobby] 學生頭像索引載入失敗，側欄不顯示縮圖', e);
+  }
   try {
     CHAT_ANCHORS = await fetchRetry('assets/data/lobby_chat_anchors.json').then(r => r.json());
   } catch (e) {
@@ -3046,6 +3601,9 @@ async function init() {
     console.warn('[lobby] BGM 對照載入失敗', e);
   }
   await loadStudents();
+
+  // ---- opening title video (title.mp4 + pv-a.ogg), once at startup ----
+  await playIntro();
 
   // camera smoothing
   app.ticker.add(() => {

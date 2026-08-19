@@ -1,10 +1,15 @@
-const { app, BrowserWindow, ipcMain, dialog, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, protocol, net } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const https = require('https');
+const { pipeline } = require('stream/promises');
+const { createGunzip } = require('zlib');
+const tar = require('tar');
 
 const DEV_URL = 'http://127.0.0.1:5173';
+const isDev = !app.isPackaged;
 let win = null;
 let vite = null;
 
@@ -12,10 +17,25 @@ function findNode() {
   if (process.env.NODE_BIN) return process.env.NODE_BIN;
   try {
     const { execSync } = require('child_process');
-    const p = execSync('command -v node').toString().trim();
-    if (p) return p;
+    if (process.platform === 'win32') {
+      const p = execSync('where node', { stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim().split('\n')[0];
+      if (p) return p;
+    } else {
+      const p = execSync('command -v node').toString().trim();
+      if (p) return p;
+    }
   } catch {}
   return 'node';
+}
+
+function findFfmpeg() {
+  // Check for bundled ffmpeg-static first
+  try {
+    const ffmpegStatic = require('ffmpeg-static');
+    if (ffmpegStatic && fs.existsSync(ffmpegStatic)) return ffmpegStatic;
+  } catch {}
+  // Fallback to system PATH
+  return 'ffmpeg';
 }
 
 function probeDevUrl(timeout = 1000) {
@@ -53,6 +73,12 @@ async function startVite() {
   if (!(await probeDevUrl())) throw new Error('Vite dev server 連線失敗');
 }
 
+function getAssetsDir() {
+  if (isDev) return path.join(__dirname, 'assets');
+  // In packaged app, assets are downloaded to userData (not bundled)
+  return path.join(app.getPath('userData'), 'assets');
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1600,
@@ -63,7 +89,20 @@ function createWindow() {
       contextIsolation: true,
     },
   });
-  win.loadURL(DEV_URL + (process.env.HASH ? '#' + process.env.HASH : ''));
+
+  if (isDev) {
+    win.loadURL(DEV_URL + (process.env.HASH ? '#' + process.env.HASH : ''));
+  } else {
+    // Production: load index.prod.html from project root (Vite-bundled JS in dist/)
+    const prodHtml = path.join(__dirname, 'index.prod.html');
+    if (fs.existsSync(prodHtml)) {
+      win.loadFile(prodHtml, { hash: process.env.HASH || '' });
+    } else {
+      // Fallback: load from dist/
+      win.loadFile(path.join(__dirname, 'dist', 'index.html'), { hash: process.env.HASH || '' });
+    }
+  }
+
   win.webContents.on('console-message', (e, level, message) => {
     console.log('[renderer]', message);
   });
@@ -86,10 +125,58 @@ ipcMain.handle('screenshot', async (event, file) => {
 });
 
 ipcMain.handle('lobby-list', async () => {
-  const dir = path.join(__dirname, 'assets', 'spine');
+  const dir = path.join(getAssetsDir(), 'spine');
   return fs.readdirSync(dir).filter((d) => {
     try { return fs.statSync(path.join(dir, d)).isDirectory(); } catch { return false; }
   });
+});
+
+// 開場影片：已預先轉碼為 H.264，打包在 assets/intro/ 中。
+// dev 模式下若缺少才嘗試從 APK 來源複製 + 轉碼。
+const INTRO_VIDEO_SRC = process.env.INTRO_VIDEO_SRC || '';
+const INTRO_AUDIO_SRC = process.env.INTRO_AUDIO_SRC || '';
+
+function transcodeH264(src, dst) {
+  try {
+    const { spawnSync } = require('child_process');
+    const ffmpeg = findFfmpeg();
+    const r = spawnSync(ffmpeg, ['-y', '-i', src, '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p', dst], { timeout: 120000 });
+    if (r.status === 0 && fs.existsSync(dst)) return true;
+    console.error('[intro] 轉碼失敗', r.stderr && r.stderr.toString().slice(0, 500));
+    return false;
+  } catch (e) {
+    console.error('[intro] ffmpeg 執行失敗', e.message);
+    return false;
+  }
+}
+
+ipcMain.handle('intro-media', async () => {
+  const dstDir = path.join(getAssetsDir(), 'intro');
+  const dstRaw = path.join(dstDir, 'title.mp4');
+  const dstH264 = path.join(dstDir, 'title_h264.mp4');
+  const dstA = path.join(dstDir, 'pv-a.ogg');
+  // In dev mode, try to copy from APK source if available
+  if (isDev && !fs.existsSync(dstRaw) && INTRO_VIDEO_SRC && fs.existsSync(INTRO_VIDEO_SRC)) {
+    try {
+      fs.mkdirSync(dstDir, { recursive: true });
+      fs.copyFileSync(INTRO_VIDEO_SRC, dstRaw);
+    } catch (e) {
+      console.error('[intro] 複製失敗', e.message);
+    }
+  }
+  if (isDev && fs.existsSync(dstRaw) && !fs.existsSync(dstH264)) transcodeH264(dstRaw, dstH264);
+  if (isDev && !fs.existsSync(dstA) && INTRO_AUDIO_SRC && fs.existsSync(INTRO_AUDIO_SRC)) {
+    try {
+      fs.mkdirSync(dstDir, { recursive: true });
+      fs.copyFileSync(INTRO_AUDIO_SRC, dstA);
+    } catch (e) {
+      console.error('[intro] 複製失敗', e.message);
+    }
+  }
+  return {
+    video: fs.existsSync(dstH264) ? (isDev ? '/assets/intro/title_h264.mp4' : 'app://assets/intro/title_h264.mp4') : null,
+    audio: fs.existsSync(dstA) ? (isDev ? '/assets/intro/pv-a.ogg' : 'app://assets/intro/pv-a.ogg') : null,
+  };
 });
 
 // 影片匯出：寫入使用者選的路徑（或 EXPORT_DIR 環境變數指定的目錄，供自動化/批次使用）
@@ -150,7 +237,7 @@ ipcMain.handle('anim-start', async (event, payload) => {
     animOutPath = outPath;
     animQueued = Promise.resolve();
     console.log('[anim] spawn ffmpeg', vargs.join(' '));
-    animProc = spawn('ffmpeg', vargs, { stdio: ['pipe', 'ignore', 'pipe'] });
+    animProc = spawn(findFfmpeg(), vargs, { stdio: ['pipe', 'ignore', 'pipe'] });
     animProc.stderr.on('data', () => {});
     animProc.on('error', (e) => { console.error('[anim] ffmpeg spawn 失敗', e); });
     animProc.on('exit', (c) => { if (c !== 0 && c !== null) console.error('[anim] ffmpeg exit', c); });
@@ -187,7 +274,7 @@ ipcMain.on('anim-abort', () => {
 ipcMain.handle('bgm-export', async (event, payload) => {
   const { filename, defaultName } = payload || {};
   if (!filename) return { canceled: true };
-  const src = path.join(__dirname, 'assets', 'bgm', filename);
+  const src = path.join(getAssetsDir(), 'bgm', filename);
   if (!fs.existsSync(src)) return { error: 'BGM 檔案不存在' };
   const autoDir = process.env.EXPORT_DIR;
   if (autoDir) {
@@ -213,11 +300,170 @@ ipcMain.handle('screen-size', async () => {
   return { width: d.size.width, height: d.size.height, scaleFactor: d.scaleFactor };
 });
 
-app.whenReady().then(async () => {
+// ---------------------------------------------------------------------------
+// Asset download system — check + download + extract tar.gz packages
+// ---------------------------------------------------------------------------
+const ASSETS_VERSION_URL = 'https://github.com/Augus1217/BA-MemorialLobby-Assets/releases/latest/download/assets_version.json';
+const ASSETS_PACKAGES_URL = 'https://github.com/Augus1217/BA-MemorialLobby-Assets/releases/download';
+
+function getAssetsVersionPath() {
+  return path.join(getAssetsDir(), '.version');
+}
+
+function readLocalVersion() {
   try {
-    await startVite();
+    return fs.readFileSync(getAssetsVersionPath(), 'utf-8').trim();
+  } catch { return null; }
+}
+
+function fetchJSON(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'BA-MemorialLobby/1.0' } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return fetchJSON(res.headers.location).then(resolve, reject);
+      }
+      let data = '';
+      res.on('data', (c) => data += c);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error(`JSON parse error: ${e.message}`)); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Timeout')); });
+  });
+}
+
+function downloadFile(url, dest, onProgress) {
+  return new Promise((resolve, reject) => {
+    const doRequest = (u) => {
+      const mod = u.startsWith('https') ? https : require('http');
+      const req = mod.get(u, { headers: { 'User-Agent': 'BA-MemorialLobby/1.0' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return doRequest(res.headers.location);
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          return reject(new Error(`HTTP ${res.statusCode} for ${u}`));
+        }
+        const total = parseInt(res.headers['content-length'] || '0', 10);
+        let downloaded = 0;
+        const ws = fs.createWriteStream(dest);
+        res.on('data', (chunk) => {
+          downloaded += chunk.length;
+          if (onProgress) onProgress(downloaded, total);
+        });
+        res.pipe(ws);
+        ws.on('finish', () => resolve({ size: downloaded }));
+        ws.on('error', reject);
+      });
+      req.on('error', reject);
+      req.setTimeout(300000, () => { req.destroy(); reject(new Error('Download timeout')); });
+    };
+    doRequest(url);
+  });
+}
+
+async function extractTarGz(tarPath, destDir) {
+  await tar.x({ file: tarPath, cwd: destDir, strip: 1 });
+}
+
+ipcMain.handle('check-assets', async () => {
+  const localVersion = readLocalVersion();
+  const assetsDir = getAssetsDir();
+  const hasAssets = fs.existsSync(assetsDir) && fs.existsSync(path.join(assetsDir, 'spine'));
+
+  let remoteVersion = null;
+  try {
+    remoteVersion = await fetchJSON(ASSETS_VERSION_URL);
   } catch (e) {
-    console.error('無法啟動 Vite dev server:', e.message);
+    console.warn('[assets] 無法取得遠端版本:', e.message);
+  }
+
+  return {
+    localVersion,
+    hasAssets,
+    remoteVersion: remoteVersion?.version || null,
+    needsDownload: !hasAssets || (remoteVersion && localVersion !== remoteVersion.version),
+    packages: remoteVersion?.packages || null,
+  };
+});
+
+ipcMain.handle('download-assets', async (event, { version, packages }) => {
+  const assetsDir = getAssetsDir();
+  const tmpDir = path.join(os.tmpdir(), 'ba_download_' + Date.now());
+  fs.mkdirSync(tmpDir, { recursive: true });
+
+  const pkgNames = Object.keys(packages);
+  const results = [];
+
+  for (let i = 0; i < pkgNames.length; i++) {
+    const name = pkgNames[i];
+    const pkg = packages[name];
+    const tarName = `assets-${name}-v${version}.tar.gz`;
+    const tarPath = path.join(tmpDir, tarName);
+    const pkgDir = path.join(assetsDir, name);
+
+    // Send progress to renderer
+    const sendProgress = (p) => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('download-progress', {
+          package: name,
+          index: i,
+          total: pkgNames.length,
+          ...p,
+        });
+      }
+    };
+
+    try {
+      sendProgress({ status: 'downloading', percent: 0 });
+      const url = pkg.url || `${ASSETS_PACKAGES_URL}/v${version}/${tarName}`;
+      await downloadFile(url, tarPath, (dl, total) => {
+        sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, total });
+      });
+
+      sendProgress({ status: 'extracting', percent: 0 });
+      fs.mkdirSync(pkgDir, { recursive: true });
+      await extractTarGz(tarPath, pkgDir);
+      sendProgress({ status: 'done', percent: 100 });
+
+      results.push({ name, ok: true });
+    } catch (e) {
+      console.error(`[assets] ${name} 失敗:`, e.message);
+      sendProgress({ status: 'error', error: e.message });
+      results.push({ name, ok: false, error: e.message });
+    }
+  }
+
+  // Write .version file
+  try {
+    fs.mkdirSync(assetsDir, { recursive: true });
+    fs.writeFileSync(getAssetsVersionPath(), version);
+  } catch {}
+
+  // Cleanup
+  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+
+  return results;
+});
+
+app.whenReady().then(async () => {
+  // Register app:// protocol for serving assets in production
+  if (!isDev) {
+    protocol.handle('app', (request) => {
+      const url = new URL(request.url);
+      const filePath = path.join(getAssetsDir(), decodeURIComponent(url.pathname));
+      return net.fetch('file://' + filePath);
+    });
+  }
+
+  if (isDev) {
+    try {
+      await startVite();
+    } catch (e) {
+      console.error('無法啟動 Vite dev server:', e.message);
+    }
   }
   createWindow();
   app.on('activate', () => {

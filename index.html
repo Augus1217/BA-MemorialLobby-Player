@@ -56,6 +56,25 @@
     }
     #fade.on { opacity: 1; pointer-events: auto; }
 
+    /* opening title video (title.mp4 + pv-a.ogg), played once at startup */
+    #intro {
+      position: fixed; inset: 0; z-index: 80; background: #000;
+      display: none; align-items: center; justify-content: center;
+    }
+    #intro.show { display: flex; }
+    #intro video {
+      width: 100%; height: 100%; object-fit: cover;
+      cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer;
+    }
+    #introSkip {
+      position: absolute; right: 18px; bottom: 18px; z-index: 81;
+      background: rgba(8,10,22,.55); color: #dfe4ff; border: 1px solid rgba(255,255,255,.25);
+      border-radius: 8px; padding: 8px 18px; font-size: 13px; letter-spacing: .12em;
+      cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer;
+      transition: background .25s, border-color .25s;
+    }
+    #introSkip:hover { background: rgba(40,48,96,.7); border-color: rgba(255,255,255,.5); }
+
     #loading {
       position: fixed; inset: 0; z-index: 40; display: none;
       align-items: center; justify-content: center; color: #cfd6ff;
@@ -141,10 +160,11 @@
     .sb-group-head:first-child { padding-top: 6px; }
     .sb-group-head .cnt { color: rgba(200,210,255,.4); font-size: 11px; font-weight: 400; }
     .sb-item {
-      display: block; width: 100%; text-align: left; background: transparent;
-      border: none; color: #dfe4ff; font-size: 13px; padding: 7px 10px;
+      display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent;
+      border: none; color: #dfe4ff; font-size: 13px; padding: 6px 10px;
       border-radius: 6px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer;
     }
+    .sb-ico { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex: none; background: rgba(20,25,60,.6); }
     .sb-item:hover { background: rgba(60,70,140,.35); }
     .sb-item.cur { background: rgba(80,95,180,.45); color: #fff; }
     .sb-empty { color: rgba(210,220,255,.5); font-size: 13px; padding: 22px 8px; text-align: center; }
@@ -293,6 +313,45 @@
     body.recording #hud, body.recording #fx, body.recording #btnStudents,
     body.recording #sidePanel, body.recording #exportPanel, body.recording #chatDialog { display: none !important; }
 
+    /* Asset download overlay */
+    #assetOverlay {
+      position: fixed; inset: 0; z-index: 200; background: rgba(5,6,13,.96);
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    #assetOverlay.hidden { display: none; }
+    #assetPanel {
+      width: 420px; max-width: 90vw; text-align: center; color: #e8ecff;
+    }
+    #assetTitle {
+      font-size: 28px; font-weight: 700; letter-spacing: .12em;
+      margin-bottom: 6px; color: #fff;
+    }
+    #assetSubtitle {
+      font-size: 13px; color: rgba(210,220,255,.6); letter-spacing: .08em;
+      margin-bottom: 28px;
+    }
+    #assetStatus {
+      font-size: 13px; color: #9aa4e0; letter-spacing: .06em;
+      margin-bottom: 14px; min-height: 20px;
+    }
+    #assetProgress { margin-bottom: 10px; }
+    #assetProgressBar {
+      width: 100%; height: 6px; background: rgba(255,255,255,.1);
+      border-radius: 3px; overflow: hidden;
+    }
+    #assetProgressFill {
+      height: 100%; width: 0%; background: linear-gradient(90deg, #6a7aff, #a0b4ff);
+      border-radius: 3px; transition: width .3s ease;
+    }
+    #assetProgressText {
+      font-size: 12px; color: rgba(210,220,255,.5); margin-top: 6px;
+    }
+    #assetDetail {
+      font-size: 12px; color: rgba(210,220,255,.4); margin-bottom: 20px;
+      min-height: 18px;
+    }
+
     /* BA PC cursor, scaled to the window via the same vw/3840 design scale used
        for the chat balloon. CSS cursors can't scale a url(), so this inline
        script regenerates the image into a data-URL and sets these vars. */
@@ -358,6 +417,10 @@
   </div>
 
   <div id="loading"><div class="spin"></div><span id="loadingText">載入中</span></div>
+  <div id="intro">
+    <video id="introVideo" playsinline muted></video>
+    <button id="introSkip">跳過 ▶</button>
+  </div>
   <div id="whiteflash"></div>
   <div id="fade"></div>
   <div id="err"></div>
@@ -416,6 +479,21 @@
     <span class="rec-dot"></span> REC <span id="recTime">0:00</span>
     <span class="rec-sep">/</span> <span id="recDur">0:10</span>
     <button id="recStop" title="停止錄製">■</button>
+  </div>
+
+  <!-- Asset download overlay -->
+  <div id="assetOverlay">
+    <div id="assetPanel">
+      <div id="assetTitle">BA Memorial Lobby</div>
+      <div id="assetSubtitle">首次使用需下載遊戲資源</div>
+      <div id="assetStatus">檢查更新中…</div>
+      <div id="assetProgress">
+        <div id="assetProgressBar"><div id="assetProgressFill"></div></div>
+        <div id="assetProgressText">0%</div>
+      </div>
+      <div id="assetDetail"></div>
+      <button id="assetBtn" class="btnTxt primary" style="display:none">開始下載</button>
+    </div>
   </div>
 
   <script type="module" src="/renderer/app.js"></script>
