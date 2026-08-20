@@ -16,9 +16,9 @@ import sys
 import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC_SPINE = os.environ.get("BA_SRC_SPINE", "/home/augus/BA_Extracted_Full/Assets/_MX/SpineLobbies")
-SRC_MEDIA = os.environ.get("BA_SRC_MEDIA", "/home/augus/Blue-Archive-Asset-Downloader/GL_Extracted/Media")
-SRC_BGM = os.environ.get("BA_SRC_BGM", "/home/augus/Blue-Archive-Asset-Downloader/GL_RawData/Media/Audio/BGM")
+SRC_SPINE = os.environ.get("BA_SRC_SPINE", "/home/augus/JP_Extracted_Full/Assets/_MX/SpineLobbies")
+SRC_MEDIA = os.environ.get("BA_SRC_MEDIA", "/home/augus/JP_Voice_Extracted")
+SRC_BGM = os.environ.get("BA_SRC_BGM", "/home/augus/Blue-Archive-Asset-Downloader/JP_Android_RawData/Media/GameData/Audio/BGM")
 SRC_DATA = os.environ.get("BA_SRC_DATA", "/home/augus/BA_MemorialLobby/data")
 
 DST_SPINE = os.path.join(ROOT, "assets", "spine")
@@ -141,25 +141,34 @@ def gen_manifest():
         for dirpath, _dirs, fnames in os.walk(d):
             for f in fnames:
                 files.append(os.path.join(os.path.relpath(dirpath, d), f))
-        # main skel: any .skel, not a _N LOD copy, not _scene/_bg
+        # main skel: prefer merged .json (may contain merged skeletons),
+        # fallback to .skel. Skip _N LOD copies and _scene/_bg.
+        jsons = sorted(f for f in files
+                       if f.endswith(".json") and not re.search(r"_[1-3]\.json$", f)
+                       and "_scene" not in f and "_bg" not in f
+                       and not f.endswith(("_Atlas.json", "_Material.json", "_SkeletonData.json",
+                                          "Atlas_1.json", "Material_1.json", "SkeletonData_1.json")))
         skels = sorted(f for f in files
                        if f.endswith(".skel") and not re.search(r"_[1-3]\.skel$", f)
                        and "_scene" not in f and "_bg" not in f)
         atlases = sorted(f for f in files
                          if f.endswith(".atlas") and not re.search(r"_[1-3]\.atlas$", f)
                          and "_scene" not in f and "_bg" not in f)
-        if not skels or not atlases:
+        if not atlases:
             continue
         atlas = atlases[0]
-        # prefer the skel sharing the atlas base name (case-insensitive), else first candidate
         atlas_base = os.path.splitext(os.path.basename(atlas))[0].lower()
+        # Prefer merged .json matching atlas name, then .skel, then first candidate
         skel = None
-        for s in skels:
-            if os.path.splitext(os.path.basename(s))[0].lower() == atlas_base:
-                skel = s
+        for pool in (jsons, skels):
+            for s in pool:
+                if os.path.splitext(os.path.basename(s))[0].lower() == atlas_base:
+                    skel = s
+                    break
+            if skel:
                 break
         if not skel:
-            skel = skels[0]
+            skel = (jsons or skels)[0]
         # png pages referenced by the atlas (best-effort: pages listed in the atlas text)
         pages = []
         atxt = os.path.join(d, atlas.replace("\\", os.sep))
