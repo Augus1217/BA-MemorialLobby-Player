@@ -154,9 +154,9 @@ def main():
                 n_data += 1
         print(f"data copied: {n_data} files")
 
-    # 手動素材（ui 氣泡/游標、students 頭像）從 repo manual/ 拷入
+    # 手動素材（intro 影片/音訊、ui 氣泡/游標、students 頭像）從 repo manual/ 拷入
     MANUAL_ROOT = os.environ.get("BA_SRC_MANUAL", os.path.join(ROOT, "manual"))
-    for sub in ("ui", "students"):
+    for sub in ("intro", "ui", "students"):
         src = os.path.join(MANUAL_ROOT, sub)
         dst = os.path.join(ROOT, "assets", sub)
         if not os.path.isdir(src):
