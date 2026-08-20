@@ -365,7 +365,10 @@ function downloadFile(url, dest, onProgress) {
 }
 
 async function extractTarGz(tarPath, destDir) {
-  await tar.x({ file: tarPath, cwd: destDir, strip: 1 });
+  // tar 內容路徑為 "assets/<pkg>/..."（見上游 build_assets.py step_package 的
+  // arcname），剝掉兩層後檔案才會直接落在 destDir（= assets/<pkg>）。
+  // 先前 strip:1 會解成 assets/<pkg>/<pkg>/... 多套一層。
+  await tar.x({ file: tarPath, cwd: destDir, strip: 2 });
 }
 
 ipcMain.handle('check-assets', async () => {

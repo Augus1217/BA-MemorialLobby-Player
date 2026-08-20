@@ -36,7 +36,9 @@ def main():
     os.makedirs(DST_BGM, exist_ok=True)
     os.makedirs(DST_DATA, exist_ok=True)
     n_lobby = 0
-    for name in sorted(os.listdir(SRC_SPINE)):
+    if not os.path.exists(SRC_SPINE):
+        print(f"SRC_SPINE not found: {SRC_SPINE}, skipping spine copy", file=sys.stderr)
+    for name in (sorted(os.listdir(SRC_SPINE)) if os.path.exists(SRC_SPINE) else []):
         if only and name not in only:
             continue
         src = os.path.join(SRC_SPINE, name)
@@ -77,7 +79,9 @@ def main():
 
     # Room/scene overlay skeletons (few lobbies ship one, e.g. Aru_Scene).
     n_scene = 0
-    for name in sorted(os.listdir(SRC_SPINE)):
+    if not os.path.exists(SRC_SPINE):
+        print(f"SRC_SPINE not found for scene, skipping", file=sys.stderr)
+    for name in (sorted(os.listdir(SRC_SPINE)) if os.path.exists(SRC_SPINE) else []):
         if only and name not in only:
             continue
         src_lobby = os.path.join(SRC_SPINE, name)
@@ -104,7 +108,9 @@ def main():
     print(f"scenes copied: {n_scene}")
 
     n_voice = 0
-    for d in sorted(os.listdir(SRC_MEDIA)):
+    if not os.path.exists(SRC_MEDIA):
+        print(f"SRC_MEDIA not found: {SRC_MEDIA}, skipping voice copy", file=sys.stderr)
+    for d in (sorted(os.listdir(SRC_MEDIA)) if os.path.exists(SRC_MEDIA) else []):
         if not d.startswith("JP_"):
             continue
         src = os.path.join(SRC_MEDIA, d)
@@ -113,20 +119,57 @@ def main():
     print(f"voice folders copied: {n_voice}")
 
     n_bgm = 0
-    for f in sorted(os.listdir(SRC_BGM)):
-        if f.startswith("Theme_"):
+    if not os.path.exists(SRC_BGM):
+        print(f"SRC_BGM not found: {SRC_BGM}, skipping bgm copy", file=sys.stderr)
+    # Theme_* 全拷之外，lobby_bgm_mapping.csv 引用的非 Theme 檔
+    # （如 BlueNewWorld_Lobby.ogg）也要拷，否則對應 lobby 靜音。
+    extra_bgm = set()
+    mapping_csv = os.path.join(SRC_DATA, "lobby_bgm_mapping.csv")
+    if os.path.exists(mapping_csv):
+        try:
+            import csv as _csv
+            with open(mapping_csv, newline="", encoding="utf-8", errors="ignore") as fh:
+                for row in _csv.DictReader(fh):
+                    fn = (row.get("bgm_filename") or "").strip()
+                    if fn:
+                        extra_bgm.add(fn)
+        except Exception as e:
+            print(f"lobby_bgm_mapping.csv 讀取失敗({e})，僅拷 Theme_*", file=sys.stderr)
+    for f in (sorted(os.listdir(SRC_BGM)) if os.path.exists(SRC_BGM) else []):
+        if f.startswith("Theme_") or f in extra_bgm:
             shutil.copy2(os.path.join(SRC_BGM, f), os.path.join(DST_BGM, f))
             n_bgm += 1
-    print(f"bgm copied: {n_bgm}")
+    print(f"bgm copied: {n_bgm}" + (f" (mapping 引用 {len(extra_bgm)} 檔)" if extra_bgm else ""))
 
     os.makedirs(DST_DATA, exist_ok=True)
-    for f in ["lobby_voice_schedule.json", "lobby_bgm_mapping.csv",
-              "lobby_camera_config.json", "characters_index.csv",
-              "voice_index.json"]:
-        p = os.path.join(SRC_DATA, f)
-        if os.path.exists(p):
-            shutil.copy2(p, os.path.join(DST_DATA, f))
-    print("data copied")
+    if not os.path.exists(SRC_DATA):
+        print(f"SRC_DATA not found: {SRC_DATA}, skipping data copy", file=sys.stderr)
+    else:
+        # 全量拷貝 data/ 下所有 json/csv（flash_curves.json、lobby_chat_anchors.json、
+        # icon_index.json 等手動維護檔都一併帶上，避免漏包）
+        n_data = 0
+        for f in sorted(os.listdir(SRC_DATA)):
+            if f.endswith((".json", ".csv")):
+                shutil.copy2(os.path.join(SRC_DATA, f), os.path.join(DST_DATA, f))
+                n_data += 1
+        print(f"data copied: {n_data} files")
+
+    # 手動素材（ui 氣泡/游標、students 頭像）從 repo manual/ 拷入
+    MANUAL_ROOT = os.environ.get("BA_SRC_MANUAL", os.path.join(ROOT, "manual"))
+    for sub in ("ui", "students"):
+        src = os.path.join(MANUAL_ROOT, sub)
+        dst = os.path.join(ROOT, "assets", sub)
+        if not os.path.isdir(src):
+            print(f"manual/{sub} not found, skipping", file=sys.stderr)
+            continue
+        os.makedirs(dst, exist_ok=True)
+        n = 0
+        for f in sorted(os.listdir(src)):
+            p = os.path.join(src, f)
+            if os.path.isfile(p):
+                shutil.copy2(p, os.path.join(dst, f))
+                n += 1
+        print(f"manual/{sub} copied: {n} files")
 
 
 def gen_manifest():
@@ -201,9 +244,17 @@ def gen_manifest():
             with open(atxt) as fh:
                 pages = [l.strip() for l in fh.read().splitlines() if l.strip().endswith(".png")]
         idx.setdefault(name, {})["scene"] = {"skel": skel, "atlas": atlas, "png": pages}
-    with open(os.path.join(ROOT, "assets", "lobby_index.json"), "w") as fh:
-        _json.dump(idx, fh, ensure_ascii=False, indent=1)
-    print(f"manifest: {len(idx)} lobbies")
+    # manifest 同時寫到 assets/ 根目錄（開發模式）與 assets/data/
+    # （打包模式：lobby_index.json 必須進 data 包，否則純下載的
+    # Player fetch assets/lobby_index.json 會 404 起不來）
+    out_paths = [
+        os.path.join(ROOT, "assets", "lobby_index.json"),
+        os.path.join(DST_DATA, "lobby_index.json"),
+    ]
+    for p in out_paths:
+        with open(p, "w") as fh:
+            _json.dump(idx, fh, ensure_ascii=False, indent=1)
+    print(f"manifest: {len(idx)} lobbies -> {out_paths}")
 
 
 if __name__ == "__main__":

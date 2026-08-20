@@ -3559,7 +3559,14 @@ async function init() {
     console.warn('[lobby] 鏡頭設定載入失敗，使用預設', e);
   }
 
-  const idx = await fetchRetry('assets/lobby_index.json').then(r => r.json());
+  // 純下載模式：lobby_index.json 在 data 包裡（assets/data/）。
+  // 開發模式：在 assets/ 根目錄。先試 data/ 再 fallback 根目錄。
+  let idx;
+  try {
+    idx = await fetchRetry('assets/data/lobby_index.json').then(r => r.json());
+  } catch (e) {
+    idx = await fetchRetry('assets/lobby_index.json').then(r => r.json());
+  }
   LOBBY_INDEX = idx;
   ORDER = Object.keys(idx);
   try {
