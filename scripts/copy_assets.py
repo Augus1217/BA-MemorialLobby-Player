@@ -239,6 +239,12 @@ def gen_manifest():
                          if f.endswith(".atlas") and not re.search(r"_[1-3]\.atlas$", f))
         if not skels or not atlases:
             continue
+        # Akari 等 lobby 的 scene 目錄可能同時有 _bg（已併入主骨架）與 _scene
+        # （閃白特效）兩組——必須選 _scene，選到 _bg 會讓背景重疊畫兩次。
+        def scene_rank(f):
+            return (1 if "_bg" in f.lower() else 0, f)
+        skels = sorted(skels, key=scene_rank)
+        atlases = sorted(atlases, key=scene_rank)
         atlas = atlases[0]
         atlas_base = os.path.splitext(atlas)[0].lower()
         skel = next((s for s in skels
