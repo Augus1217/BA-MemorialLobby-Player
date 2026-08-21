@@ -331,9 +331,16 @@
       display: flex; align-items: center; gap: 14px;
       z-index: 10;
     }
+    @font-face {
+      font-family: 'BA Font';
+      src: url('assets/loading/font.otf') format('opentype');
+      font-weight: normal;
+      font-style: normal;
+    }
     #loadingText {
-      font-size: 14px; color: rgba(255,255,255,.7);
-      letter-spacing: .06em; font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 3.4vh; color: rgba(255,255,255,.7);
+      letter-spacing: .06em; font-family: 'BA Font', 'Noto Sans KR', 'Segoe UI', system-ui, sans-serif;
+      font-weight: normal;
     }
     #downloadPanel {
       position: absolute; top: 50%; left: 50%;
