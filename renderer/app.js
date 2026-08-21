@@ -1,6 +1,7 @@
 import { Application, Assets, Texture, Sprite, MeshSimple, BlurFilter, Cache } from 'pixi.js';
 import { Spine, ScaleTimeline } from '@esotericsoftware/spine-pixi-v8';
 import { Vector2 } from '@esotericsoftware/spine-core';
+import { i as initClickFx } from '../assets/clickfx/clickFx.js';
 
 window.addEventListener('error', (e) => console.error('[renderer][uncaught]', e.message, e.filename, e.lineno));
 window.addEventListener('unhandledrejection', (e) => console.error('[renderer][unhandled]', e.reason));
@@ -3461,8 +3462,15 @@ function playIntro() {
 }
 
 // ---- init ----
+function fadeOutLoadingScreen() {
+  const ls = document.getElementById('loadingScreen');
+  if (!ls) return;
+  ls.classList.add('fade-out');
+  setTimeout(() => ls.classList.add('hidden'), 900);
+}
+
 async function showAssetDownload(assetInfo) {
-  const overlay = document.getElementById('assetOverlay');
+  const downloadPanel = document.getElementById('downloadPanel');
   const status = document.getElementById('assetStatus');
   const progress = document.getElementById('assetProgress');
   const fill = document.getElementById('assetProgressFill');
@@ -3470,7 +3478,7 @@ async function showAssetDownload(assetInfo) {
   const detail = document.getElementById('assetDetail');
   const btn = document.getElementById('assetBtn');
 
-  overlay.classList.remove('hidden');
+  downloadPanel.style.display = 'block';
   progress.style.display = 'none';
   btn.style.display = 'none';
 
@@ -3488,7 +3496,7 @@ async function showAssetDownload(assetInfo) {
     status.textContent = '資源已是最新';
     btn.style.display = 'none';
     await new Promise(r => setTimeout(r, 1200));
-    overlay.classList.add('hidden');
+    fadeOutLoadingScreen();
     return;
   }
 
@@ -3527,7 +3535,7 @@ async function showAssetDownload(assetInfo) {
       detail.textContent = '';
       btn.style.display = 'none';
       await new Promise(r => setTimeout(r, 800));
-      overlay.classList.add('hidden');
+      fadeOutLoadingScreen();
       resolve();
     };
   });
@@ -3544,15 +3552,30 @@ async function init() {
       ]);
       if (assetInfo.needsDownload) {
         await showAssetDownload(assetInfo);
+      } else {
+        // 資源已就緒，淡出 loading screen
+        fadeOutLoadingScreen();
       }
     } catch (e) {
       console.warn('[lobby] Asset check failed/skipped:', e.message);
+      fadeOutLoadingScreen();
     }
+  } else {
+    // 無 checkAssets API（dev 模式），直接淡出
+    fadeOutLoadingScreen();
   }
 
   await app.init({ resizeTo: window, antialias: true, backgroundColor: 0x05060d, autoDensity: true });
   const canvas = app.canvas;
   document.getElementById('app').appendChild(canvas);
+
+  // ---- BA Click FX（蔚藍檔案點擊特效）----
+  try {
+    initClickFx();
+    console.log('[lobby] BAClickFX initialized');
+  } catch (e) {
+    console.warn('[lobby] BAClickFX init failed:', e.message);
+  }
 
   try {
     const cr = await fetchRetry('assets/data/lobby_camera_config.json');
