@@ -503,13 +503,13 @@
   <!-- Asset download overlay -->
   <!-- Loading screen: intro video + spinner + 確認中です…… -->
   <div id="loadingScreen">
-    <video id="loadingVideo" autoplay muted loop
+    <video id="loadingVideo" autoplay muted loop playsinline
       style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.5;">
-      <source src="assets/loading/title_h264.mp4" type="video/mp4">
+      <source src="assets/loading/title.webm" type="video/webm">
     </video>
     <div id="loadingIndicator">
       <img id="loadingSpinner" src="assets/loading/spinner.png"
-        style="width:80px;height:80px;animation:spin 0.8s linear infinite reverse;image-rendering:auto;filter:none;">
+        style="width:80px;height:80px;animation:spin 3s cubic-bezier(0.0,0.0,0.58,1.0) infinite;image-rendering:auto;filter:none;">
       <span id="loadingText">確認中です……</span>
     </div>
     <!-- 需要下載時顯示的面板 -->
