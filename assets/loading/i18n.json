@@ -1,0 +1,22 @@
+{
+  "ja": {
+    "loading": "確認中です……",
+    "checking": "確認中です……"
+  },
+  "en": {
+    "loading": "Checking for updates...",
+    "checking": "Checking for updates..."
+  },
+  "zh-TW": {
+    "loading": "檢查更新中……",
+    "checking": "檢查更新中……"
+  },
+  "zh-CN": {
+    "loading": "检查更新中……",
+    "checking": "检查更新中……"
+  },
+  "ko": {
+    "loading": "업데이트 확인 중...",
+    "checking": "업데이트 확인 중..."
+  }
+}

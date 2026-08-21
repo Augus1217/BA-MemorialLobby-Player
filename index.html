@@ -517,7 +517,7 @@
     <div id="loadingIndicator">
       <img id="loadingSpinner" src="assets/loading/spinner.png"
         style="width:5.55vh;height:5.55vh;animation:spin 3s linear infinite;image-rendering:auto;filter:none;">
-      <span id="loadingText">Resetting the game data...</span>
+      <span id="loadingText">檢查更新中……</span>
     </div>
     <!-- 需要下載時顯示的面板 -->
     <div id="downloadPanel" style="display:none">
@@ -534,5 +534,32 @@
   </div>
 
   <script type="module" src="/renderer/app.js"></script>
+  <script>
+    // i18n: 根據瀏覽器語言設定載入文字
+    async function initI18n() {
+      try {
+        const res = await fetch('assets/loading/i18n.json');
+        const translations = await res.json();
+        const lang = navigator.language || 'en';
+        const loadingText = document.getElementById('loadingText');
+        
+        // 精確匹配 (zh-TW, zh-CN, ja, en, ko)
+        if (translations[lang]) {
+          loadingText.textContent = translations[lang].loading;
+        }
+        // 模糊匹配 (zh → zh-TW, ja → ja)
+        else if (translations[lang.split('-')[0]]) {
+          loadingText.textContent = translations[lang.split('-')[0]].loading;
+        }
+        // 預設英文
+        else {
+          loadingText.textContent = translations.en.loading;
+        }
+      } catch (e) {
+        console.warn('i18n load failed:', e);
+      }
+    }
+    initI18n();
+  </script>
 </body>
 </html>
