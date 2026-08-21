@@ -114,6 +114,11 @@ def main():
         if not d.startswith("JP_"):
             continue
         src = os.path.join(SRC_MEDIA, d)
+        # baax extract media 可能解出雙層嵌套（JP_X/JP_X/），
+        # 偵測到時自動用內層目錄作為來源。
+        inner = os.path.join(src, d)
+        if os.path.isdir(inner):
+            src = inner
         shutil.copytree(src, os.path.join(DST_VOICE, d), dirs_exist_ok=True)
         n_voice += 1
     print(f"voice folders copied: {n_voice}")
