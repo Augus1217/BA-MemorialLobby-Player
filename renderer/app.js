@@ -3316,12 +3316,17 @@ function onTrackComplete(entry) {
   }
 }
 
-// Sushi rail conveyor loop. The game's Akari lobby ships Sushi_01_R (a
-// rail_left/rail_right translate loop) on a dedicated track so the conveyor
-// keeps moving while Idle. Added in a post-launch update (not in the original
-// 2024-11-18 bundle but present in newer game versions).
+// Sushi rail conveyor loop. The game's Akari lobby animates the conveyor via
+// the bg skeleton's own Idle_01 (66.67s rail_left/rail_right translate loop);
+// our merged skeleton carries it renamed to Sushi_01_R (kivo's naming), played
+// on a dedicated track so the conveyor keeps moving while Idle loops on track 0.
 function startRailLoop() {
   if (!spine || !has('Sushi_01_R')) return;
+  // 冪等：onTrackComplete / memoryLobbySkip 都會呼叫本函式。若已在 track 3
+  // 迴圈中就別重啟——setAnimation 會從 t=0 重播，輸送帶位置瞬間跳回起點，
+  // 再經 defaultMix 0.2s 混合形成可見的「頓一下」。
+  const cur = spine.state.getCurrent(3);
+  if (cur && cur.animation && cur.animation.name === 'Sushi_01_R' && cur.loop) return;
   spine.state.setAnimation(3, 'Sushi_01_R', true);
 }
 
