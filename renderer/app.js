@@ -3537,12 +3537,16 @@ async function init() {
   // ---- Asset check: show download UI if assets missing ----
   if (window.ba?.checkAssets) {
     try {
-      const assetInfo = await window.ba.checkAssets();
+      // 加 10 秒逾時，避免網路問題卡住整個 init
+      const assetInfo = await Promise.race([
+        window.ba.checkAssets(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('checkAssets timeout')), 10000)),
+      ]);
       if (assetInfo.needsDownload) {
         await showAssetDownload(assetInfo);
       }
     } catch (e) {
-      console.warn('[lobby] Asset check failed:', e);
+      console.warn('[lobby] Asset check failed/skipped:', e.message);
     }
   }
 
