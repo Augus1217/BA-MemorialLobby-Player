@@ -3515,7 +3515,7 @@ async function showAssetDownload(assetInfo) {
           status.textContent = `下載 ${p.package} (${p.index + 1}/${p.total})`;
           fill.style.width = p.percent + '%';
           pctText.textContent = p.percent + '%';
-          if (p.total) detail.textContent = `${(p.downloaded / 1048576).toFixed(0)} MB / ${(p.total / 1048576).toFixed(0)} MB`;
+          if (p.bytesTotal) detail.textContent = `${(p.downloaded / 1048576).toFixed(0)} MB / ${(p.bytesTotal / 1048576).toFixed(0)} MB`;
         } else if (p.status === 'extracting') {
           status.textContent = `解壓縮 ${p.package}…`;
           detail.textContent = '';

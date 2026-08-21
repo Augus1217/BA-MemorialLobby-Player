@@ -423,7 +423,7 @@ ipcMain.handle('download-assets', async (event, { version, packages }) => {
       sendProgress({ status: 'downloading', percent: 0 });
       const url = pkg.url || `${ASSETS_PACKAGES_URL}/v${version}/${tarName}`;
       await downloadFile(url, tarPath, (dl, total) => {
-        sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, total });
+        sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total });
       });
 
       sendProgress({ status: 'extracting', percent: 0 });
