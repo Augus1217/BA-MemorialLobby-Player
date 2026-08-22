@@ -32,6 +32,11 @@ Blue Archive Memorial Lobby Electron 模擬器，完整還原蔚藍檔案紀念�
 | 無頭截圖模式（`CAPTURE=<path>`） | ✅ |
 | 14 個 JP 獨佔新角色（CH0172-CH0356） | ✅ |
 | 387 首 BGM（含 JP 新增） | ✅ |
+| 首次啟動 Asset 自動下載（GitHub Releases） | ✅ |
+| Loading Spinner（BA 原始風格 + i18n） | ✅ |
+| 多語言 loading 文字（tw/jp/en/kr） | ✅ |
+| Akari 三骨架合併（home/bg/scene） | ✅ |
+| 背景序列獨立運行（Start_Idle_02 → Sushi_01_R） | ✅ |
 
 ### 資料來源
 
@@ -230,51 +235,55 @@ npm run update-assets    # 跑 build_assets.py
 
 ---
 
-## Phase 3: 首次啟動 Asset 下載 UI（待實作）
+## Phase 3: 首次啟動 Asset 下載 UI ✅
 
-### 設計
+### 實作
 
-App 啟動時在 main.js 檢查 `assets/.version`：
-- 若不存在或版本不匹配 → renderer 顯示下載介面
-- 從 GitHub Releases 下載 8 個 tar.gz
+App 啟動時在 `init()` 呼叫 `check-assets` IPC：
+- 若 `assets/.version` 不存在或與遠端不匹配 → 顯示下載介面
+- 從 GitHub Releases 下載 8 個 tar.gz（每個 < 2GB）
 - 顯示進度條（已知大小，有百分比）
-- 下載完成後解壓縮到 `assets/`
+- 下載完成後解壓縮到 `assets/`（strip 2 層 tar 路徑）
 - 寫入 `.version` 檔案
-- 重新載入 app
+- 淡出 loading screen → 進入 lobby
 
-### IPC 通道（新增）
+### IPC 通道
 
 | Channel | 方向 | 功能 |
 |---------|------|------|
-| `check-assets` | invoke | 檢查 assets 是否存在 + 版本 |
-| `download-assets` | invoke | 從遠端下載 assets |
-| `download-progress` | send | 回報下載進度 |
+| `check-assets` | invoke | 檢查 assets 是否存在 + 遠端版本比對 |
+| `download-assets` | invoke | 依序下載 8 個 package + 解壓縮 |
+| `download-progress` | send | 回報各 package 進度（status/percent/error） |
 
 ### Renderer UI
 
-- 全屏遮罩 + 下載進度 UI
-- 顯示各 package 下載狀態（等待/下載中/完成）
-- 整體進度百分比
-- 支援暫停/繼續
+- 全屏 loading screen + spinner（BA 原始風格）
+- 各 package 狀態顯示（等待/下載中/解壓縮/完成/錯誤）
+- 整體進度百分比 + 詳細資訊
+- 10 秒逾時保護
+- 多語言支援（tw/jp/en/kr，從 `navigator.language` 偵測）
 
 ---
 
-## Phase 4: App 內建更新器（待實作）
+## Phase 4: App 內建更新器（部分完成）
 
-### 設計
+### 已完成
 
-1. App 啟動時 fetch `assets_version.json`（從 GitHub raw URL）
-2. 比對本地 `.version` 與遠端 version
-3. 比對每個 package 的 SHA256
-4. 只下載有變化的 package（增量更新）
-5. 解壓縮 → 替換舊資料 → 重啟 app
+- App 啟動時 `check-assets` fetch `assets_version.json`（從 GitHub raw URL）
+- 比對本地 `.version` 與遠端 version → `needsDownload` 標記
 
-### IPC 通道（新增）
+### 待實作
+
+- 比對每個 package 的 SHA256（增量更新）
+- 只下載有變化的 package
+- 下載後替換舊資料 + 重啟 app
+
+### IPC 通道
 
 | Channel | 方向 | 功能 |
 |---------|------|------|
-| `check-update` | invoke | 檢查遠端是否有新版本 |
-| `apply-update` | invoke | 下載並套用更新 |
+| `check-assets` | invoke | 檢查遠端版本（已實作） |
+| `download-assets` | invoke | 下載並套用（已實作，全量下載） |
 
 ---
 
