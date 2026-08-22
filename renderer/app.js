@@ -1275,8 +1275,12 @@ function playStart() {
     // 13.3333s exactly like the PlayableDirector.
     introEntry.delay = introBodyStart();
     spine.state.addAnimation(0, idleClip, true, 0);
+    // 背景序列與角色本體不同步——遊戲裡 bg 骨架 t=0 就開始播開場運鏡
+    // （放大壽司軌道），角色本體等 IntroDelayDuration（3s）才進場。
+    startBgSequence();
   } else {
     spine.state.setAnimation(0, idleClip, true);
+    startBgSequence();
   }
 }
 
@@ -1291,7 +1295,7 @@ function memoryLobbySkip() {
   introVirtual = false;
   introWindowEnd = 0;
   spine.state.setAnimation(0, idleClip || 'Idle_01', true);
-  startRailLoop();
+  startBgSequence({ skip: true });
   log('skip to idle');
 }
 
@@ -3306,9 +3310,10 @@ function switchLobby(dir) {
 function onTrackComplete(entry) {
   // Intro (Start_Idle_01) finished on track 0 -> release the interaction lock so
   // the player can tap/pat; track 0 now loops the idle clip.
+  // 背景序列（track 3）自 t=0 獨立運行，與 track 0 完成與否無關——
+  // 不在此重啟，否則輸送帶會跳回起點（見 startBgSequence 冪等註解）。
   if (entry.trackIndex === 0 && state.introBlock) {
     state.introBlock = false;
-    startRailLoop();
   }
   if (entry.trackIndex === 1 && !state.busy) {
     if (state.busy === 'talk') return; // handled by timer
@@ -3316,18 +3321,27 @@ function onTrackComplete(entry) {
   }
 }
 
-// Sushi rail conveyor loop. The game's Akari lobby animates the conveyor via
-// the bg skeleton's own Idle_01 (66.67s rail_left/rail_right translate loop);
-// our merged skeleton carries it renamed to Sushi_01_R (kivo's naming), played
-// on a dedicated track so the conveyor keeps moving while Idle loops on track 0.
-function startRailLoop() {
+// Background sequence (Akari-style merged skeletons). In-game the bg is an
+// independent skeleton running its own clock from t=0: Start_Idle zooms into
+// the sushi rail (opening shot), then hands off to the conveyor loop while the
+// character body is still waiting out its IntroDelayDuration. Our merged
+// skeleton carries both renamed (kivo naming): Start_Idle_02 + Sushi_01_R,
+// replayed here on dedicated track 3.
+function startBgSequence({ skip = false } = {}) {
   if (!spine || !has('Sushi_01_R')) return;
-  // 冪等：onTrackComplete / memoryLobbySkip 都會呼叫本函式。若已在 track 3
-  // 迴圈中就別重啟——setAnimation 會從 t=0 重播，輸送帶位置瞬間跳回起點，
-  // 再經 defaultMix 0.2s 混合形成可見的「頓一下」。
-  const cur = spine.state.getCurrent(3);
-  if (cur && cur.animation && cur.animation.name === 'Sushi_01_R' && cur.loop) return;
-  spine.state.setAnimation(3, 'Sushi_01_R', true);
+  if (!skip) {
+    // 冪等：已在輸送帶迴圈中就別重啟——setAnimation 會從 t=0 重播造成頓挫。
+    const cur = spine.state.getCurrent(3);
+    if (cur && cur.animation && cur.animation.name === 'Sushi_01_R' && cur.loop) return;
+  }
+  if (!skip && has('Start_Idle_02')) {
+    // 開場運鏡（放大壽司軌道，10.33s）→ 接輸送帶迴圈（mix 與遊戲 defaultMix 一致）
+    spine.state.setAnimation(3, 'Start_Idle_02', false);
+    spine.state.addAnimation(3, 'Sushi_01_R', true, 0);
+  } else {
+    // 無開場運鏡（或跳過）→ 直接輸送帶迴圈
+    spine.state.setAnimation(3, 'Sushi_01_R', true);
+  }
 }
 
 // Head anchor for the Pat-vs-Look hold region test. Every lobby skeleton ships a
@@ -3744,7 +3758,7 @@ async function init() {
   updateFullBtn();
 
   if (ORDER.length) {
-    const m = location.hash.match(/^#lobby=([^&]+)/);
+    const m = location.hash.match(/[?#]lobby=([^&]+)/);
     const first = m && LOBBY_INDEX[m[1]] ? m[1] : ORDER[0];
     await loadLobby(first);
   } else {

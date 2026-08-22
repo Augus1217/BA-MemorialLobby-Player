@@ -90,16 +90,18 @@ function createWindow() {
     },
   });
 
+  // HASH 可能帶也可能不帶前導 '#'（env 傳值習慣不一），統一剝掉再加。
+  const _hash = (process.env.HASH || '').replace(/^#/, '');
   if (isDev) {
-    win.loadURL(DEV_URL + (process.env.HASH ? '#' + process.env.HASH : ''));
+    win.loadURL(DEV_URL + (_hash ? '#' + _hash : ''));
   } else {
     // Production: load index.prod.html from project root (Vite-bundled JS in dist/)
     const prodHtml = path.join(__dirname, 'index.prod.html');
     if (fs.existsSync(prodHtml)) {
-      win.loadFile(prodHtml, { hash: process.env.HASH || '' });
+      win.loadFile(prodHtml, { hash: _hash });
     } else {
       // Fallback: load from dist/
-      win.loadFile(path.join(__dirname, 'dist', 'index.html'), { hash: process.env.HASH || '' });
+      win.loadFile(path.join(__dirname, 'dist', 'index.html'), { hash: _hash });
     }
   }
 
