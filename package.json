@@ -50,6 +50,10 @@
       "allowToChangeInstallationDirectory": true
     }
   },
+  "author": {
+    "name": "Augus1217",
+    "email": "augus1217@users.noreply.github.com"
+  },
   "license": "MIT",
   "devDependencies": {
     "electron": "^33.0.0",
