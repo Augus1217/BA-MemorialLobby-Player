@@ -3123,12 +3123,12 @@ function selectLobby(key) {
 
 async function loadScene(entry) {
   const s = entry?.scene;
-  if (!s) return;
+  const b = entry?.bg;
+  // 允許只有 bg（背景）而無 scene（特寫）的角色（如 Yuzu：僅有 Yuzu_BG，無 Yuzu_Scene）
+  if (!s && !b) return;
   // 如果主骨架已合併場景（has Start_Idle_03），不需要載入獨立 scene/bg
   const animNames = spine?.state?.data?.skeletonData?.animations?.map(a => a.name) || [];
   if (animNames.includes('Start_Idle_03')) return;
-  const b = entry?.bg;
-  if (!s && !b) return;
   try {
     const loadOne = async (res) => {
       if (!res || !res.skel || !res.atlas) return null;
