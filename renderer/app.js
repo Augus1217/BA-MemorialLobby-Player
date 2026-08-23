@@ -91,9 +91,6 @@ const log = (s) => console.log('[lobby]', s);
   let sceneBoundsMaxY = 0;   // scene 內容的世界座標最大 Y（供底部對齊）
   let sceneBoundsCenterY = 0; // scene 內容的世界座標中心 Y（供置中對齊）
    let bgCenterX = 0, bgCenterY = 0;   // bg 內容的世界座標中心
-   let bgCoverScale = 0;               // bg 鋪滿視窗所需的縮放（max(vw/w, vh/h)）
-   let _bgRefitFrames = 0;             // idle 時節流重算 bg 邊界的幀計數器
-   const BG_OVERSCAN = 1.35;           // AABB 含不可見 slot 邊距，放大以覆蓋住黑邊
    let sceneCenterX = 0, sceneCenterY = 0; // scene 內容的世界座標中心
   let sceneStabTimer = null; // (unused)
  let currentLobby = null;
@@ -216,22 +213,9 @@ function fitScene() {
     sceneXTarget = vw / 2;
   }
   if (bg) {
-    // 與上方 fitObj 相同優先採「實際貼圖內容」邊界（ox/oy/ow/oh 在 bg 存在時即
-    // contentWorldBounds(bg)）。setup bounds 含大量空白，會讓置中偏移與 cover
-    // 縮放失準而露出黑邊。
-    let bw = 0, bh = 0;
-    if (ow > 0 && oh > 0) { bw = ow; bh = oh; }
-    else {
-      const off = new Vector2(), size = new Vector2();
-      try { bg.skeleton.getBounds(off, size); } catch {}
-      if (size.x > 0 && size.y > 0) { bw = size.x; bh = size.y; }
-    }
-    if (bw > 0 && bh > 0) {
-      bgCenterX = ox + bw / 2; bgCenterY = oy + bh / 2;
-      // 獨立座標系背景（fill 模式）必須「鋪滿」視窗：charScale（vw/3000）是人物
-      // 的填滿比例，直接套在 bg 上會因尺寸不足而露出黑色底色。
-      bgCoverScale = Math.max(vw / bw, vh / bh);
-    }
+    const off = new Vector2(), size = new Vector2();
+    try { bg.skeleton.getBounds(off, size); } catch {}
+    if (size.x > 0 && size.y > 0) { bgCenterX = off.x + size.x / 2; bgCenterY = off.y + size.y / 2; }
   }
   if (scene) {
     const off = new Vector2(), size = new Vector2();
@@ -282,38 +266,10 @@ function applyCamera(w) {
       if (bg) {
         // BA 資料驅動（lobby_transforms.json）：mode "char" = 背景與本體完全同變換
         // （同父、同 localPosition/localScale，如 CH0060BG_home），沿用人物同一變換；
-        // 其餘（Akari_BG/Yuzu_BG 等 (0,0)/scale1 獨立座標系）以 cover 縮放鋪滿視窗，
-        // 避免骨架原生尺寸不足而露出黑色底色。
+        // 其餘（Akari_BG/Yuzu_BG 等 (0,0)/scale1 獨立座標系）以內容中心對齊視窗中心填滿。
         const bt = LOBBY_TRANSFORMS && LOBBY_TRANSFORMS[currentLobby];
         if (bt && bt.bg && bt.bg.mode === 'char') setTransform(bg, spine.x, spine.y, cs);
-        else {
-          // fill 模式（Akari_BG/Yuzu_BG 等 (0,0)/scale1 獨立座標系）。skel.getBounds/
-          // contentWorldBounds 是「所有 slot 幾何的 AABB」，常把不可見/延伸的 slot
-          // （髮絲、光效、飄帶）也算進去，AABB 含大量空白邊距——用它算 cover 會讓
-          // 可見美術縮小、四周露出黑邊。所以以內容中心置中，並加 BG_OVERSCAN 把邊距
-          // 推到可視區域外。姿勢隨 intro→idle 變化，故在 idle 時節流重算（不逐幀）。
-          let bw = bgCoverScale, bcx = bgCenterX, bcy = bgCenterY;
-          if (!animActive) {
-            if (++_bgRefitFrames >= 30) {
-              _bgRefitFrames = 0;
-              const off = new Vector2(), sz = new Vector2();
-              let cw = 0, ch = 0, cx2 = 0, cy2 = 0;
-              try {
-                const cb = contentWorldBounds(bg);
-                if (cb && cb.maxX > cb.minX && cb.maxY > cb.minY) {
-                  cx2 = (cb.minX + cb.maxX) / 2; cy2 = (cb.minY + cb.maxY) / 2;
-                  cw = cb.maxX - cb.minX; ch = cb.maxY - cb.minY;
-                }
-              } catch {}
-              if (cw > 0 && ch > 0) {
-                bcx = bgCenterX = cx2; bcy = bgCenterY = cy2;
-                bw = bgCoverScale = Math.max(vw / cw, vh / ch);
-              }
-            } else { bw = bgCoverScale; bcx = bgCenterX; bcy = bgCenterY; }
-          }
-          const bs = (bw || cs) * cam.scale * BG_OVERSCAN;
-          setTransform(bg, vw / 2 - bcx * bs, vh / 2 - bcy * bs, bs);
-        }
+        else setTransform(bg, vw / 2 - bgCenterX * cs, vh / 2 - bgCenterY * cs, cs);
       }
       if (scene) setTransform(scene, spine.x, spine.y, cs);
     } else {
