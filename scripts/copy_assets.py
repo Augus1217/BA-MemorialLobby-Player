@@ -494,6 +494,14 @@ def gen_manifest():
                          and "_scene" not in f and "_bg" not in f)
         if not atlases:
             continue
+        # 主要圖集優先選「檔名主幹 == 目錄名」且層級最淺的：CH0060_home 的主檔在
+        # lobby 目錄頂層，巢狀副本（CH0060_home/…）與背景子目錄（CH0060BG_home/…）
+        # 都不該被選成主要骨架路徑。
+        dir_low = name.lower()
+        def _atlas_rank(a):
+            stem = os.path.splitext(os.path.basename(a))[0].lower()
+            return (0 if stem == dir_low else 1, a.count(os.sep), a)
+        atlases = sorted(atlases, key=_atlas_rank)
         atlas = atlases[0]
         atlas_base = os.path.splitext(os.path.basename(atlas))[0].lower()
         # Prefer merged .json matching atlas name, then .skel, then first candidate
@@ -548,8 +556,10 @@ def gen_manifest():
         if os.path.exists(atxt):
             with open(atxt) as fh:
                 pages = [l.strip() for l in fh.read().splitlines() if l.strip().endswith(".png")]
-        # _bg 背景 → "bg"；其餘（_scene 特寫或一般疊加）→ "scene"
-        key = "bg" if "_bg" in skel.lower() else "scene"
+        # _bg／<數字>BG 背景 → "bg"（含 CH0060BG_home 這種無底線的 <ID>BG 命名）；
+        # 其餘（_scene 特寫或一般疊加）→ "scene"
+        low_skel = skel.lower()
+        key = "bg" if ("_bg" in low_skel or re.search(r"\dbg_", low_skel)) else "scene"
         idx.setdefault(name, {})[key] = {"skel": skel, "atlas": atlas, "png": pages}
     # manifest 同時寫到 assets/ 根目錄（開發模式）與 assets/data/
     # （打包模式：lobby_index.json 必須進 data 包，否則純下載的
@@ -567,3 +577,9 @@ def gen_manifest():
 if __name__ == "__main__":
     main()
     gen_manifest()
+    # 從 Unity dump 抽每 lobby 的 Transform（renderer 判定 bg「同人物變換/獨立填滿」用）
+    try:
+        import extract_lobby_transforms
+        extract_lobby_transforms.main()
+    except Exception as e:
+        print(f"lobby_transforms 抽取失敗（bg 將退回內容置中推測）: {e}", file=sys.stderr)

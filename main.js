@@ -110,8 +110,9 @@ function createWindow() {
   });
   if (process.env.CAPTURE) {
     const file = process.env.CAPTURE;
+    const delay = Number(process.env.CAPTURE_DELAY) || 6000;
     win.webContents.once('did-finish-load', async () => {
-      await new Promise((r) => setTimeout(r, 6000));
+      await new Promise((r) => setTimeout(r, delay));
       const img = await win.webContents.capturePage();
       fs.writeFileSync(file, img.toPNG());
       console.log('[capture] saved', file);

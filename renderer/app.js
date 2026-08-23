@@ -95,6 +95,9 @@ const log = (s) => console.log('[lobby]', s);
   let sceneStabTimer = null; // (unused)
  let currentLobby = null;
  let LOBBY_INDEX = {};
+ // 由 Unity dump 抽出的每 lobby Transform（scripts/extract_lobby_transforms.py）：
+ // bg.mode "char"=與本體同變換（如 CH0060BG_home），"fill"=獨立座標系（如 Akari/Yuzu_BG）
+ let LOBBY_TRANSFORMS = null;
  let SCHEDULE = null;
  let BGM_MAP = {};
  let ORDER = [];
@@ -260,7 +263,14 @@ function applyCamera(w) {
       //     填滿視窗（lobby root 位於視窗中心）。本專案匯出的骨架原點並非底圖中心（量得偏移約
       //     (748,-196)），故以「內容中心對齊視窗中心」還原 BA 的填滿效果，三者統一以 charScale 繪製。
       const cs = charScale * cam.scale;
-      if (bg) setTransform(bg, vw / 2 - bgCenterX * cs, vh / 2 - bgCenterY * cs, cs);
+      if (bg) {
+        // BA 資料驅動（lobby_transforms.json）：mode "char" = 背景與本體完全同變換
+        // （同父、同 localPosition/localScale，如 CH0060BG_home），沿用人物同一變換；
+        // 其餘（Akari_BG/Yuzu_BG 等 (0,0)/scale1 獨立座標系）以內容中心對齊視窗中心填滿。
+        const bt = LOBBY_TRANSFORMS && LOBBY_TRANSFORMS[currentLobby];
+        if (bt && bt.bg && bt.bg.mode === 'char') setTransform(bg, spine.x, spine.y, cs);
+        else setTransform(bg, vw / 2 - bgCenterX * cs, vh / 2 - bgCenterY * cs, cs);
+      }
       if (scene) setTransform(scene, spine.x, spine.y, cs);
     } else {
       const s = sceneScale * cam.scale;
@@ -3668,6 +3678,11 @@ async function init() {
   }
   LOBBY_INDEX = idx;
   ORDER = Object.keys(idx);
+  try {
+    LOBBY_TRANSFORMS = await fetchRetry('assets/data/lobby_transforms.json').then(r => r.json());
+  } catch (e) {
+    console.warn('[lobby] lobby_transforms 載入失敗，背景改用內容置中推測', e);
+  }
   try {
     STUDENT_ICONS = await fetchRetry('assets/students/icon_index.json').then(r => r.json());
   } catch (e) {
