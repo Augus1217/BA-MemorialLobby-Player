@@ -14,12 +14,244 @@ import os
 import shutil
 import sys
 import re
+import json
+import subprocess
+
+# ---- home 主圖集合併 scene 圖集區域（Akari 等：home 骨架內含背景/特寫網格，
+#      但貼圖區域分散在拆分的 bg/scene 圖集，主圖集單獨載入會 Region not found）----
+
+
+def _split_atlas(text):
+    """回傳 [(page_png, [header 之後的各行]), ...]，CRLF 安全。"""
+    pages = []
+    cur = None
+    for raw in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if raw.endswith(".png"):
+            cur = (raw.strip(), [])
+            pages.append(cur)
+        elif cur is not None:
+            cur[1].append(raw)
+    return pages
+
+
+def _region_names(page_lines):
+    # spine atlas 中區域名整行不含 ':'（屬性行才有 ':'）
+    return [ln.strip() for ln in page_lines if ln.strip() and ":" not in ln]
+
+
+def _split_page_items(page_lines):
+    """單頁內容切為 (meta 行, region 區塊清單)。region 名不含 ':'。"""
+    metas = []
+    regions = []
+    cur = None
+    for ln in page_lines:
+        s = ln.strip()
+        if not s:
+            continue
+        if ":" in ln:
+            if cur is None:
+                metas.append(ln)
+            else:
+                cur.append(ln)
+        else:
+            if cur is not None:
+                regions.append(cur)
+            cur = [ln]
+    if cur is not None:
+        regions.append(cur)
+    return metas, regions
+
+
+def _referenced(skel_bytes, name):
+    if name.encode("utf-8", "ignore") in skel_bytes:
+        return True
+    base = name.split(" ")[0]
+    return bool(base) and base != name and base.encode("utf-8", "ignore") in skel_bytes
+
+
+def _merge_scene_into_home(home_atlas_path, scene_dir, scene_atlases):
+    """把 scene 圖集的區域（去重）附加為新頁進 home 主圖集，回傳新增的頁面 png 清單。"""
+    with open(home_atlas_path, encoding="utf-8", errors="ignore") as fh:
+        home_text = fh.read()
+    existing = set()
+    for _png, lines in _split_atlas(home_text):
+        existing.update(_region_names(lines))
+    out = home_text.rstrip("\n") + "\n"
+    added_pages = []
+    for sa in scene_atlases:
+        sp = os.path.join(scene_dir, sa)
+        if not os.path.exists(sp):
+            continue
+        with open(sp, encoding="utf-8", errors="ignore") as fh:
+            txt = fh.read()
+        for png, lines in _split_atlas(txt):
+            metas, regions = _split_page_items(lines)
+            kept = []
+            for seg in regions:
+                nm = seg[0].strip()
+                if nm in existing:
+                    continue
+                existing.add(nm)
+                kept.append(seg)
+            if kept:
+                out += png + "\n"
+                for m in metas:
+                    out += m + "\n"
+                for seg in kept:
+                    for l in seg:
+                        out += l + "\n"
+                added_pages.append(png.strip())
+    if added_pages:
+        out = out.replace("\r\n", "\n").replace("\r", "\n")
+        with open(home_atlas_path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(out)
+    return added_pages
+
+
+def _compute_core(key):
+    """對應 renderer/app.js lobbyGroupInfo 的 core 計算（去掉 _home/_gl/_teen/_multi
+    與泳裝/新年等服裝後綴；側欄以此作為 icon_index 的查詢鍵）。"""
+    rest = key.lower()
+    while True:
+        ch = False
+        for suf in ("_home_gl", "_home", "_gl", "_multi", "_teen"):
+            if rest.endswith(suf):
+                rest = rest[: -len(suf)]
+                ch = True
+        if not ch:
+            break
+    if rest.startswith("lobby"):
+        rest = rest[5:]
+    for suf in ("_swimsuit", "_newyear", "_ridingsuit", "_casual"):
+        if rest.endswith(suf):
+            rest = rest[: -len(suf)]
+    return rest
+
+
+def extract_portraits():
+    """從 BA 的 Student_Portrait_<characterId>.png 擷取學生大頭貼為 webp，並補齊
+    icon_index.json 中缺失的 core 條目（以 characterId 為檔名，與 BA 命名一致）。
+    採「增量合併」：保留既有 icon_index 與手動 webp，只補缺。
+    覆蓋範圍：lobby_index 列出的所有 lobby（含 voice_schedule 沒列的），用 core
+    去查圖；characterId 優先取 voice_schedule，否則由 core 推導（CH####→大寫，
+    其餘→首字大寫）。BA 檔名大小寫不一，故對每個 candidate 嘗試多種大小寫。"""
+    sched = os.path.join(SRC_DATA, "lobby_voice_schedule.json")
+    sched_lobbies = {}
+    if os.path.exists(sched):
+        try:
+            with open(sched, encoding="utf-8", errors="ignore") as fh:
+                sd = json.load(fh)
+            sched_lobbies = sd.get("lobbies", sd)
+        except Exception as e:
+            print(f"lobby_voice_schedule.json 讀取失敗: {e}", file=sys.stderr)
+    # 收集所有需要處理的 core → 偏好的 characterId
+    cores = {}
+    li_path = os.path.join(DST_DATA, "lobby_index.json")
+    if os.path.exists(li_path):
+        try:
+            with open(li_path, encoding="utf-8", errors="ignore") as fh:
+                li = json.load(fh)
+            for k in li:
+                cores.setdefault(_compute_core(k), None)
+        except Exception:
+            pass
+    for k, v in sched_lobbies.items():
+        cid = (v.get("characterId") or "").strip()
+        if cid:
+            cores.setdefault(_compute_core(k), cid)
+    dst = os.path.join(ROOT, "assets", "students")
+    os.makedirs(dst, exist_ok=True)
+    icon_path = os.path.join(dst, "icon_index.json")
+    icon = {}
+    if os.path.exists(icon_path):
+        try:
+            with open(icon_path, encoding="utf-8", errors="ignore") as fh:
+                icon = json.load(fh)
+        except Exception:
+            icon = {}
+    if not cores:
+        print("無可處理的 lobby，跳過大頭貼擷取", file=sys.stderr)
+        return
+
+    def ba_candidates(cid):
+        cands = set()
+        for c in (cid, cid.upper(), cid.capitalize(), cid.title()):
+            if c:
+                cands.add(c)
+        res = []
+        for c in sorted(cands):
+            res.append(f"Student_Portrait_{c}.png")
+            res.append(f"Student_Portrait_{c}_Small.png")
+        return res
+
+    n_new = 0
+    n_missing = 0
+    n_skip = 0
+    for core, pref_cid in sorted(cores.items()):
+        if core in icon and os.path.exists(os.path.join(dst, icon[core])):
+            n_skip += 1
+            continue
+        if pref_cid:
+            cids = [pref_cid]
+        elif core.startswith("ch"):
+            cids = [core.upper()]
+        else:
+            cids = [core.capitalize()]
+        src = None
+        resolved = None
+        for cid in cids:
+            for cand in ba_candidates(cid):
+                p = os.path.join(SRC_PORTRAIT, cand)
+                if os.path.exists(p):
+                    src = p
+                    resolved = cid
+                    break
+            if src:
+                break
+        if not src and re.fullmatch(r"CH\d+", cid, re.I):
+            # NPC lobby：BA 用 NPC_Portrait_NP####.png 而非 Student_Portrait
+            npc = "NP" + re.search(r"\d+", cid).group()
+            for cand in (f"NPC_Portrait_{npc}.png", f"NPC_Portrait_{npc}_Small.png"):
+                p = os.path.join(SRC_PORTRAIT, cand)
+                if os.path.exists(p):
+                    src = p
+                    resolved = cid
+                    break
+        if not src:
+            n_missing += 1
+            print(f"大頭貼在 BA 中缺失: core={core} cid={cids}", file=sys.stderr)
+            continue
+        webp = f"{resolved}.webp"
+        dst_webp = os.path.join(dst, webp)
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", src,
+                 "-vf", "scale=120:120:force_original_aspect_ratio=decrease,pad=120:120:(ow-iw)/2:(oh-ih)/2",
+                 "-color_primaries", "bt709", dst_webp],
+                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            print(f"ffmpeg 轉檔失敗 {resolved}: {e}", file=sys.stderr)
+            continue
+        icon[core] = webp
+        n_new += 1
+    if n_new or n_missing:
+        with open(icon_path, "w", encoding="utf-8") as fh:
+            json.dump(icon, fh, ensure_ascii=False, indent=1)
+        print(f"大頭貼: 新增 {n_new} 張 webp，BA 缺失 {n_missing} 張，已存在跳過 {n_skip}")
+    else:
+        print(f"大頭貼: 全部已涵蓋（跳過 {n_skip}）")
+
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_SPINE = os.environ.get("BA_SRC_SPINE", "/home/augus/JP_Extracted_Full/Assets/_MX/SpineLobbies")
 SRC_MEDIA = os.environ.get("BA_SRC_MEDIA", "/home/augus/JP_Voice_Extracted")
 SRC_BGM = os.environ.get("BA_SRC_BGM", "/home/augus/Blue-Archive-Asset-Downloader/JP_Android_RawData/Media/GameData/Audio/BGM")
 SRC_DATA = os.environ.get("BA_SRC_DATA", "/home/augus/BA_MemorialLobby/data")
+SRC_PORTRAIT = os.environ.get(
+    "BA_SRC_PORTRAIT",
+    "/home/augus/JP_Extracted_Full/Assets/_MX/AddressableAsset/UIs/01_Common/01_Character",
+)
 
 DST_SPINE = os.path.join(ROOT, "assets", "spine")
 DST_SCENE = os.path.join(ROOT, "assets", "scene")
@@ -107,6 +339,61 @@ def main():
                 print(f"scene {name}: {copied} files")
     print(f"scenes copied: {n_scene}")
 
+    # 合併 scene 目錄的 bg/scene 圖集區域進 home 主圖集（Akari 等：home 骨架內含
+    # 背景/特寫網格，但區域分散在拆分的 bg/scene 圖集）。僅對「home 骨架確實參照了
+    # scene 區域」的 lobby 執行，避免無謂擴張其他 lobby 圖集。
+    n_merged = 0
+    for name in sorted(os.listdir(DST_SPINE)):
+        if only and name not in only:
+            continue
+        home_dir = os.path.join(DST_SPINE, name, name)
+        scene_dir = os.path.join(DST_SCENE, name)
+        if not os.path.isdir(home_dir) or not os.path.isdir(scene_dir):
+            continue
+        home_atlas = None
+        for f in sorted(os.listdir(home_dir)):
+            if f.endswith(".atlas") and not re.search(r"_(1|2|3)\.atlas$", f) \
+               and "_scene" not in f and "_bg" not in f:
+                home_atlas = f
+                break
+        if not home_atlas:
+            continue
+        home_atlas_path = os.path.join(home_dir, home_atlas)
+        scene_atlases = [f for f in sorted(os.listdir(scene_dir))
+                         if f.endswith(".atlas") and not re.search(r"_(1|2|3)\.atlas$", f)]
+        if not scene_atlases:
+            continue
+        home_skel = None
+        for f in sorted(os.listdir(home_dir)):
+            if f.endswith(".skel") and not re.search(r"_(1|2|3)\.skel$", f) \
+               and "_scene" not in f and "_bg" not in f:
+                with open(os.path.join(home_dir, f), "rb") as fh:
+                    home_skel = fh.read()
+                break
+        if not home_skel:
+            continue
+        scene_region_names = set()
+        for sa in scene_atlases:
+            try:
+                t = open(os.path.join(scene_dir, sa), encoding="utf-8", errors="ignore").read()
+            except Exception:
+                continue
+            for _p, lines in _split_atlas(t):
+                scene_region_names.update(_region_names(lines))
+        if not scene_region_names:
+            continue
+        if not any(_referenced(home_skel, nm) for nm in scene_region_names):
+            continue
+        added = _merge_scene_into_home(home_atlas_path, scene_dir, scene_atlases)
+        if added:
+            for png in added:
+                sp = os.path.join(scene_dir, png)
+                if os.path.exists(sp):
+                    shutil.copy2(sp, os.path.join(home_dir, png))
+            n_merged += 1
+            print(f"merged scene regions into {name} home atlas ({len(added)} page(s): {added})")
+    print(f"home atlases merged with scene: {n_merged}")
+
     n_voice = 0
     if not os.path.exists(SRC_MEDIA):
         print(f"SRC_MEDIA not found: {SRC_MEDIA}, skipping voice copy", file=sys.stderr)
@@ -176,6 +463,9 @@ def main():
                 n += 1
         print(f"manual/{sub} copied: {n} files")
 
+    # 學生大頭貼：從 BA 擷取 Student_Portrait_<characterId>.png → webp，補齊 icon_index
+    extract_portraits()
+
 
 def gen_manifest():
     """Per-lobby resolved main assets (handle Airi0/Airi, CH9996/CH0996, juri/Juri quirks)."""
@@ -239,8 +529,12 @@ def gen_manifest():
                          if f.endswith(".atlas") and not re.search(r"_[1-3]\.atlas$", f))
         if not skels or not atlases:
             continue
-        # Akari 等 lobby 的 scene 目錄可能同時有 _bg（已併入主骨架）與 _scene
-        # （閃白特效）兩組——必須選 _scene，選到 _bg 會讓背景重疊畫兩次。
+        # 場景疊加層（assets/scene/<name>）：
+        #   - 含 _scene 的是「前景特寫」（開場閃白時移除），放 "scene" 鍵；
+        #   - 含 _bg 的是「背景」（持續繪製於本體之後），放 "bg" 鍵。
+        # Akari 等 lobby 的 scene 目錄可能同時有 _bg（已併入主骨架，應忽略）與
+        # _scene（特寫）兩組——優先選 _scene，因此只有 _bg 孤身出現（如 Yuzu 的
+        # yuzu_bg）時才當背景處理，避免重疊繪製。
         def scene_rank(f):
             return (1 if "_bg" in f.lower() else 0, f)
         skels = sorted(skels, key=scene_rank)
@@ -254,7 +548,9 @@ def gen_manifest():
         if os.path.exists(atxt):
             with open(atxt) as fh:
                 pages = [l.strip() for l in fh.read().splitlines() if l.strip().endswith(".png")]
-        idx.setdefault(name, {})["scene"] = {"skel": skel, "atlas": atlas, "png": pages}
+        # _bg 背景 → "bg"；其餘（_scene 特寫或一般疊加）→ "scene"
+        key = "bg" if "_bg" in skel.lower() else "scene"
+        idx.setdefault(name, {})[key] = {"skel": skel, "atlas": atlas, "png": pages}
     # manifest 同時寫到 assets/ 根目錄（開發模式）與 assets/data/
     # （打包模式：lobby_index.json 必須進 data 包，否則純下載的
     # Player fetch assets/lobby_index.json 會 404 起不來）
