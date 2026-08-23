@@ -14,9 +14,7 @@ const charNameEl = document.getElementById('charName');
 const subNameEl = document.getElementById('subName');
 const loadingEl = document.getElementById('loading');
 const loadingText = document.getElementById('loadingText');
-const introEl = document.getElementById('intro');
-const introVideoEl = document.getElementById('introVideo');
-const introSkipEl = document.getElementById('introSkip');
+
 const errEl = document.getElementById('err');
 const fadeEl = document.getElementById('fade');
 const whiteFlashEl = document.getElementById('whiteflash');
@@ -92,8 +90,8 @@ const log = (s) => console.log('[lobby]', s);
    let sceneIndependent = false;   // scene 骨架 ≠ 角色骨架（獨立背景，需另行定位）
   let sceneBoundsMaxY = 0;   // scene 內容的世界座標最大 Y（供底部對齊）
   let sceneBoundsCenterY = 0; // scene 內容的世界座標中心 Y（供置中對齊）
-  let bgCenterX = 0, bgCenterY = 0;   // bg 內容的世界座標中心
-  let sceneCenterX = 0;               // scene 內容的世界座標中心 X
+   let bgCenterX = 0, bgCenterY = 0;   // bg 內容的世界座標中心
+   let sceneCenterX = 0, sceneCenterY = 0; // scene 內容的世界座標中心
   let sceneStabTimer = null; // (unused)
  let currentLobby = null;
  let LOBBY_INDEX = {};
@@ -219,7 +217,7 @@ function fitScene() {
   if (scene) {
     const off = new Vector2(), size = new Vector2();
     try { scene.skeleton.getBounds(off, size); } catch {}
-    if (size.x > 0 && size.y > 0) sceneCenterX = off.x + size.x / 2;
+    if (size.x > 0 && size.y > 0) { sceneCenterX = off.x + size.x / 2; sceneCenterY = off.y + size.y / 2; }
   }
 
   if (spine) {
@@ -244,30 +242,44 @@ function applyCamera(w) {
   const vw = app.renderer.width, vh = app.renderer.height;
 
   if (bg || scene) {
-    const setTransform = (obj, tx, ty) => {
+    const setTransform = (obj, tx, ty, sc) => {
+      const target = (sc !== undefined ? sc : sceneScale) * cam.scale;
       obj.scale.set(
-        obj.scale.x + (sceneScale * cam.scale - obj.scale.x) * k,
-        obj.scale.y + (sceneScale * cam.scale - obj.scale.y) * k,
+        obj.scale.x + (target - obj.scale.x) * k,
+        obj.scale.y + (target - obj.scale.y) * k,
       );
       obj.x += (tx - cam.x - obj.x) * k;
       obj.y += (ty - cam.y - obj.y) * k;
     };
-    const s = sceneScale * cam.scale;
-    if (bg) {
-      // 背景填滿視窗：內容中心對齊視窗中心
-      setTransform(bg, sceneXTarget, vh * 0.5 - bgCenterY * s);
-    }
-    if (scene) {
+    if (sceneIndependent) {
+      // 三獨立物件（Akari）：由 BA 資料堆的 GameObject Transform 還原——
+      //   - Akari_home 與 Akari_Scene 的 localPosition(0,-962)/localScale(100) 與父節點完全相同，
+      //     故 scene（壽司特寫）在 BA 中與本體共用「完全相同」的變換（同座標系、前景繪製），
+      //     沿用本體同一變換（spine.x, spine.y）。
+      //   - Akari_BG 的 localPosition(0,0,0) 是 GameObject 軸心；BA 中可視底圖以該軸心為中心繪製、
+      //     填滿視窗（lobby root 位於視窗中心）。本專案匯出的骨架原點並非底圖中心（量得偏移約
+      //     (748,-196)），故以「內容中心對齊視窗中心」還原 BA 的填滿效果，三者統一以 charScale 繪製。
+      const cs = charScale * cam.scale;
+      if (bg) setTransform(bg, vw / 2 - bgCenterX * cs, vh / 2 - bgCenterY * cs, cs);
+      if (scene) setTransform(scene, spine.x, spine.y, cs);
+    } else {
+      const s = sceneScale * cam.scale;
       if (bg) {
-        // 前景場景與背景同世界座標系：相對背景中心偏移
-        setTransform(scene, sceneXTarget + (sceneCenterX - bgCenterX) * s, vh * 0.5 + (sceneBoundsCenterY - bgCenterY) * s);
-      } else {
-        // 獨立場景（背景骨架 ≠ 角色骨架）：內容中心對齊視窗中心，避免被推到視窗外；
-        // 同骨架場景（場景即角色，如 Fuuka/Momoi/Wakamo）沿用「相機線」定位。
-        const sceneYTarget = sceneIndependent
-          ? vh * 0.5 - sceneBoundsCenterY * s
-          : vh * 0.5 + sceneBiasY;
-        setTransform(scene, sceneXTarget, sceneYTarget);
+        // 背景填滿視窗：內容中心對齊視窗中心
+        setTransform(bg, sceneXTarget, vh * 0.5 - bgCenterY * s);
+      }
+      if (scene) {
+        if (bg) {
+          // 前景場景與背景同世界座標系：相對背景中心偏移
+          setTransform(scene, sceneXTarget + (sceneCenterX - bgCenterX) * s, vh * 0.5 + (sceneBoundsCenterY - bgCenterY) * s);
+        } else {
+          // 獨立場景（背景骨架 ≠ 角色骨架）：內容中心對齊視窗中心，避免被推到視窗外；
+          // 同骨架場景（場景即角色，如 Fuuka/Momoi/Wakamo）沿用「相機線」定位。
+          const sceneYTarget = sceneIndependent
+            ? vh * 0.5 - sceneBoundsCenterY * s
+            : vh * 0.5 + sceneBiasY;
+          setTransform(scene, sceneXTarget, sceneYTarget);
+        }
       }
     }
   }
@@ -1232,6 +1244,11 @@ const flashBlur = new BlurFilter({ strength: 0, quality: 3 });
 let flashBlurOn = false;
 // Drive the #whiteflash DOM overlay (live view) + keep it in sync each frame.
 function tickWhiteFlash() {
+  // 特寫壽司退場：本體進場（introDelay 到，白閃起）時移除 scene 物件
+  if (closeupArmAt >= 0 && performance.now() - closeupArmAt >= introBodyStart() * 1000) {
+    closeupArmAt = -1;
+    removeSceneCloseup();
+  }
   const t = introFlashTime();
   const alpha = whiteFlashAlpha(t);
   lastFlashTick = { t, alpha };
@@ -1257,6 +1274,21 @@ function resetWhiteFlash() {
   }
 }
 
+// ---- Akari 開場壽司特寫（獨立 scene spine）退場 ----
+// BA 中 Akari_Scene 是獨立 spine：開場特寫播完、本體進場（白閃）時整隻移除。
+// 這裡直接把 scene 物件從舞台移除並銷毀，對應遊戲「切換後移除 scene 骨架」的行為。
+let closeupArmAt = -1;        // 特寫開始時間戳（performance.now()），用於判斷本體進場時機
+function armSceneCloseup() { closeupArmAt = performance.now(); }
+function removeSceneCloseup() {
+  if (!scene) return;          // 已移除（冪等）
+  const s = scene;
+  scene = null;               // 先置空，避免 loadLobby 拆卸時重複銷毀
+  if (s.parent) s.parent.removeChild(s);
+  destroyTextures(collectTextures(s));
+  s.destroy();
+  log('scene closeup removed');
+}
+
 function playStart() {
   if (!spine) return;
   const introName = 'Start_Idle_01';
@@ -1275,8 +1307,8 @@ function playStart() {
     // 13.3333s exactly like the PlayableDirector.
     introEntry.delay = introBodyStart();
     spine.state.addAnimation(0, idleClip, true, 0);
-    // 背景序列與角色本體不同步——遊戲裡 bg 骨架 t=0 就開始播開場運鏡
-    // （放大壽司軌道），角色本體等 IntroDelayDuration（3s）才進場。
+    // 背景序列與特寫（獨立 spine 物件）依 BA PlayableDirector 由 startBgSequence 統一驅動：
+    // bg 與本體同在 bodyStart(3s) 進場；scene 特寫從 0s 播放，本體進場（白閃）時移除。
     startBgSequence();
   } else {
     spine.state.setAnimation(0, idleClip, true);
@@ -1294,6 +1326,8 @@ function memoryLobbySkip() {
   state.introBlock = false;
   introVirtual = false;
   introWindowEnd = 0;
+  closeupArmAt = -1;
+  removeSceneCloseup();
   spine.state.setAnimation(0, idleClip || 'Idle_01', true);
   startBgSequence({ skip: true });
   log('skip to idle');
@@ -3089,6 +3123,10 @@ function selectLobby(key) {
 
 async function loadScene(entry) {
   const s = entry?.scene;
+  if (!s) return;
+  // 如果主骨架已合併場景（has Start_Idle_03），不需要載入獨立 scene/bg
+  const animNames = spine?.state?.data?.skeletonData?.animations?.map(a => a.name) || [];
+  if (animNames.includes('Start_Idle_03')) return;
   const b = entry?.bg;
   if (!s && !b) return;
   try {
@@ -3102,14 +3140,15 @@ async function loadScene(entry) {
       for (const slot of obj.skeleton.slots) {
         if (isTopLightSlot(slot.data.name)) slot.data.blendMode = 3;
       }
-      const anims = obj.state.data.skeletonData.animations;
-      obj.state.setAnimation(0, anims[0].name, true);
+      // 不在此自動播放——由 startBgSequence 依 BA 時間軸統一驅動（避免搶在
+      // intro 之前就跑 idle 迴圈，導致 startBgSequence 的冪等判斷誤判而跳過開場）。
       return obj;
     };
     scene = await loadOne(s);
     bg = await loadOne(b);
-    if (scene) app.stage.addChildAt(scene, 0);
-    if (bg) app.stage.addChildAt(bg, 0);   // bg 插到最底（scene/spine 之上層）
+    // 圖層：bg 插到最底，scene 置頂（特寫前景）；spine 由 loadLobby 排在 bg 之上、scene 之下。
+    if (bg) app.stage.addChildAt(bg, 0);
+    if (scene) app.stage.addChild(scene);
     if (scene || bg) log(`場景: ${currentLobby}`);
   } catch (e) {
     console.warn('[lobby] 場景載入失敗，略過', e);
@@ -3259,8 +3298,24 @@ async function loadLobby(name) {
   }
 
   await loadScene(entry);
-  sceneIndependent = !!(entry.bg) || !!(entry.scene && entry.scene.skel && entry.scene.skel !== entry.skel);
-  app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 1));
+  // Akari 為三獨立 spine（spine=本體 / bg=背景 / scene=特寫）：本體無 Start_Idle_03，
+  // 故 sceneIndependent=true，由 fitScene/applyCamera 對獨立 scene 物件個別定位。
+  const animNames2 = spine?.state?.data?.skeletonData?.animations?.map(a => a.name) || [];
+  sceneIndependent = animNames2.includes('Start_Idle_03')
+    ? false
+    : !!(entry.bg) || !!(entry.scene && entry.scene.skel && entry.scene.skel !== entry.skel);
+  // 圖層順序：bg 最底 → spine（本體）中 → scene（特寫）最頂（前景）。其餘 UI/對話在互動時
+  // 才 addChild，自然位於最上層。
+  if (bg && scene) {
+    app.stage.setChildIndex(bg, 0);
+    app.stage.setChildIndex(spine, 1);
+    app.stage.setChildIndex(scene, app.stage.children.length - 1);
+  } else if (scene) {
+    app.stage.setChildIndex(scene, app.stage.children.length - 1);
+    app.stage.setChildIndex(spine, app.stage.children.length - 2 >= 0 ? app.stage.children.length - 2 : 0);
+  } else {
+    app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 1));
+  }
   fitted = false;
   // frame on the Idle pose (mesh geometry only exists after a render), then play the intro
   idleClip = resolveIdleClip();
@@ -3321,26 +3376,37 @@ function onTrackComplete(entry) {
   }
 }
 
-// Background sequence (Akari-style merged skeletons). In-game the bg is an
-// independent skeleton running its own clock from t=0: Start_Idle zooms into
-// the sushi rail (opening shot), then hands off to the conveyor loop while the
-// character body is still waiting out its IntroDelayDuration. Our merged
-// skeleton carries both renamed (kivo naming): Start_Idle_02 + Sushi_01_R,
-// replayed here on dedicated track 3.
+// Background + closeup sequence (BA 原生三獨立 spine 模式). Akari_home 現為三個
+// 獨立物件：spine=角色本體、bg=背景骨架、scene=開場壽司特寫。依 BA PlayableDirector
+// (Akari_Timeline) 的時間軸：
+//   - scene(特寫): Start_Idle_01 @0s，播完本體進場（白閃）時移除
+//   - bg(背景)   : Start_Idle_01 @3s（與本體同 delay），接 Idle_01 迴圈
+//   - spine(本體): 由 playStart 驅動（Start_Idle_01 @3s → Idle_01）
 function startBgSequence({ skip = false } = {}) {
-  if (!spine || !has('Sushi_01_R')) return;
-  if (!skip) {
-    // 冪等：已在輸送帶迴圈中就別重啟——setAnimation 會從 t=0 重播造成頓挫。
-    const cur = spine.state.getCurrent(3);
-    if (cur && cur.animation && cur.animation.name === 'Sushi_01_R' && cur.loop) return;
+  // ---- BG（獨立 spine 物件）----
+  if (bg && bg.state) {
+    if (!skip) {
+      // 冪等：已在 Idle_01 迴圈中就別重啟——setAnimation 會從 t=0 重播造成頓挫。
+      const cur = bg.state.getCurrent(0);
+      if (cur && cur.animation && cur.animation.name === 'Idle_01' && cur.loop) return;
+      // 依 BA：bg 與本體同在 bodyStart(3s) 進場，0-3s 靜止於 setup pose（避免背景取景偏移）。
+      const bgEntry = bg.state.setAnimation(0, 'Start_Idle_01', false);
+      bgEntry.delay = introBodyStart();
+      bg.state.addAnimation(0, 'Idle_01', true, 0);
+    } else {
+      bg.state.setAnimation(0, 'Idle_01', true);
+    }
   }
-  if (!skip && has('Start_Idle_02')) {
-    // 開場運鏡（放大壽司軌道，10.33s）→ 接輸送帶迴圈（mix 與遊戲 defaultMix 一致）
-    spine.state.setAnimation(3, 'Start_Idle_02', false);
-    spine.state.addAnimation(3, 'Sushi_01_R', true, 0);
-  } else {
-    // 無開場運鏡（或跳過）→ 直接輸送帶迴圈
-    spine.state.setAnimation(3, 'Sushi_01_R', true);
+  // ---- SCENE（開場壽司特寫，獨立 spine 物件）----
+  if (scene && scene.state) {
+    if (!skip) {
+      // 特寫從 0s 起播一次（BA 時間軸 m_Start=0）；播至本體進場（白閃）時由
+      // removeSceneCloseup 整個移除（見 tickWhiteFlash）。
+      scene.state.setAnimation(0, 'Start_Idle_01', false);
+      armSceneCloseup();
+    } else {
+      removeSceneCloseup();
+    }
   }
 }
 
@@ -3429,61 +3495,54 @@ function onPointerUp(e) {
   downTime = 0;
 }
 
-// ---- 開場標題影片：title.mp4（畫面）+ pv-a.ogg（音軌）----
-// 資源由 main 的 intro-media handler 準備（從 APK 解包目錄複製到 assets/intro），
-// 此處播放並等待結束／使用者跳過，之後才載入第一個 lobby。
-function playIntro() {
+// ---- Tap To Start：asset check 完成後顯示，點擊進入 lobby ----
+// loadingScreen 的影片背景持續播放；此處只把 spinner 換成 TAP TO START，
+// 並播 pv-a.ogg 音軌（資源由 main 的 intro-media handler 提供）。
+function showTapToStart() {
   return new Promise(async (resolve) => {
+    const ls = document.getElementById('loadingScreen');
+    const indicator = document.getElementById('loadingIndicator');
+    const tts = document.getElementById('tapToStart');
+    if (!ls || ls.classList.contains('hidden')) { resolve(); return; }
+    // dev：URL 帶 autostart=1 時跳過等待（自動化測試 / hash 直連 lobby）
+    if (/autostart=1/.test(location.search + location.hash)) { fadeOutLoadingScreen(); resolve(); return; }
     let finished = false;
+    let audio = null;
     let guard = null;
-    const cleanup = () => {
-      introVideoEl.removeEventListener('ended', finish);
-      introVideoEl.removeEventListener('error', finish);
-      introSkipEl.removeEventListener('click', finish);
-      introVideoEl.removeEventListener('click', finish);
-      document.removeEventListener('keydown', onIntroKey);
-    };
+    try {
+      const media = window.ba && window.ba.introMedia ? await window.ba.introMedia() : null;
+      if (media && media.audio) {
+        audio = new Audio(media.audio);
+        audio.play().catch(() => {});
+      }
+    } catch {}
     const finish = () => {
       if (finished) return;
       finished = true;
       clearTimeout(guard);
-      cleanup();
-      introEl.classList.remove('show');
-      introVideoEl.pause();
-      try { introVideoEl.removeAttribute('src'); introVideoEl.load(); } catch {}
+      document.removeEventListener('keydown', onKey);
+      if (audio) { audio.pause(); audio = null; }
+      fadeOutLoadingScreen();
       resolve();
     };
-    const onIntroKey = (e) => {
+    const onKey = (e) => {
       if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); finish(); }
     };
-    try {
-      const media = window.ba && window.ba.introMedia ? await window.ba.introMedia() : null;
-      if (!media || !media.video) { resolve(); return; }
-      introVideoEl.src = media.video;
-      let audio = null;
-      if (media.audio) {
-        audio = new Audio(media.audio);
-        audio.play().catch(() => {});
-      }
-      introEl.classList.add('show');
-      introVideoEl.addEventListener('ended', finish);
-      introVideoEl.addEventListener('error', finish);
-      introSkipEl.addEventListener('click', finish);
-      introVideoEl.addEventListener('click', finish);
-      document.addEventListener('keydown', onIntroKey);
-      await introVideoEl.play().catch(() => {});
-      guard = setTimeout(finish, 60000);
-    } catch (e) {
-      log(`intro err: ${e.message}`);
-      resolve();
-    }
+    if (indicator) indicator.style.display = 'none';
+    if (tts) tts.style.display = 'block';
+    document.addEventListener('pointerdown', finish, { once: true });
+    document.addEventListener('keydown', onKey);
+    // 60 秒保險：無論如何都放行，避免卡在標題畫面
+    guard = setTimeout(finish, 60000);
   });
 }
 
 // ---- init ----
 function fadeOutLoadingScreen() {
   const ls = document.getElementById('loadingScreen');
-  if (!ls) return;
+  if (!ls || ls.classList.contains('hidden')) return;
+  const lv = document.getElementById('loadingVideo');
+  if (lv) { try { lv.pause(); } catch {} }
   ls.classList.add('fade-out');
   setTimeout(() => ls.classList.add('hidden'), 900);
 }
@@ -3515,7 +3574,7 @@ async function showAssetDownload(assetInfo) {
     status.textContent = '資源已是最新';
     btn.style.display = 'none';
     await new Promise(r => setTimeout(r, 1200));
-    fadeOutLoadingScreen();
+    downloadPanel.style.display = 'none';
     return;
   }
 
@@ -3554,7 +3613,7 @@ async function showAssetDownload(assetInfo) {
       detail.textContent = '';
       btn.style.display = 'none';
       await new Promise(r => setTimeout(r, 800));
-      fadeOutLoadingScreen();
+      downloadPanel.style.display = 'none';
       resolve();
     };
   });
@@ -3562,6 +3621,7 @@ async function showAssetDownload(assetInfo) {
 
 async function init() {
   // ---- Asset check: show download UI if assets missing ----
+  // loadingScreen 保持顯示（spinner），檢查／下載完成後才換成 TAP TO START。
   if (window.ba?.checkAssets) {
     try {
       // 加 10 秒逾時，避免網路問題卡住整個 init
@@ -3571,17 +3631,10 @@ async function init() {
       ]);
       if (assetInfo.needsDownload) {
         await showAssetDownload(assetInfo);
-      } else {
-        // 資源已就緒，淡出 loading screen
-        fadeOutLoadingScreen();
       }
     } catch (e) {
       console.warn('[lobby] Asset check failed/skipped:', e.message);
-      fadeOutLoadingScreen();
     }
-  } else {
-    // 無 checkAssets API（dev 模式），直接淡出
-    fadeOutLoadingScreen();
   }
 
   await app.init({ resizeTo: window, antialias: true, backgroundColor: 0x05060d, autoDensity: true });
@@ -3655,8 +3708,8 @@ async function init() {
   }
   await loadStudents();
 
-  // ---- opening title video (title.mp4 + pv-a.ogg), once at startup ----
-  await playIntro();
+  // ---- Tap To Start：資料就緒後把 spinner 換成 TAP TO START，點擊才進 lobby ----
+  await showTapToStart();
 
   // camera smoothing
   app.ticker.add(() => {

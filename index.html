@@ -56,25 +56,6 @@
     }
     #fade.on { opacity: 1; pointer-events: auto; }
 
-    /* opening title video (title.mp4 + pv-a.ogg), played once at startup */
-    #intro {
-      position: fixed; inset: 0; z-index: 80; background: #000;
-      display: none; align-items: center; justify-content: center;
-    }
-    #intro.show { display: flex; }
-    #intro video {
-      width: 100%; height: 100%; object-fit: cover;
-      cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer;
-    }
-    #introSkip {
-      position: absolute; right: 18px; bottom: 18px; z-index: 81;
-      background: rgba(8,10,22,.55); color: #dfe4ff; border: 1px solid rgba(255,255,255,.25);
-      border-radius: 8px; padding: 8px 18px; font-size: 13px; letter-spacing: .12em;
-      cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer;
-      transition: background .25s, border-color .25s;
-    }
-    #introSkip:hover { background: rgba(40,48,96,.7); border-color: rgba(255,255,255,.5); }
-
     #loading {
       position: fixed; inset: 0; z-index: 40; display: none;
       align-items: center; justify-content: center; color: #cfd6ff;
@@ -326,6 +307,18 @@
     @keyframes loadingFadeOut {
       to { opacity: 0; pointer-events: none; }
     }
+    #tapToStart {
+      position: absolute; left: 50%; bottom: 14%; transform: translateX(-50%);
+      color: #fff; font-size: 18px; letter-spacing: .35em; text-transform: uppercase;
+      cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; z-index: 210;
+      animation: pulse 2.2s ease-in-out infinite;
+      user-select: none; -webkit-user-select: none;
+      text-shadow: 0 0 12px rgba(0,0,0,.8), 0 2px 6px rgba(0,0,0,.9);
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .35; }
+    }
     #loadingIndicator {
       position: absolute; bottom: 1.76vh; left: 2.24vw;
       display: flex; align-items: center; gap: 14px;
@@ -448,10 +441,6 @@
   </div>
 
   <div id="loading"><div class="spin"></div><span id="loadingText">載入中</span></div>
-  <div id="intro">
-    <video id="introVideo" playsinline muted></video>
-    <button id="introSkip">跳過 ▶</button>
-  </div>
   <div id="whiteflash"></div>
   <div id="fade"></div>
   <div id="err"></div>
@@ -524,6 +513,8 @@
         style="width:5.55vh;height:5.55vh;animation:spin 3s linear infinite;image-rendering:auto;filter:none;">
       <span id="loadingText">檢查更新中……</span>
     </div>
+    <!-- 檢查完成後顯示，點擊進入 lobby -->
+    <div id="tapToStart" style="display:none">TAP TO START</div>
     <!-- 需要下載時顯示的面板 -->
     <div id="downloadPanel" style="display:none">
       <div id="assetTitle">BA Memorial Lobby</div>
@@ -538,6 +529,15 @@
     </div>
   </div>
 
+  <script>
+    // 臨時錯誤鉤子：印完整 stack 方便除錯
+    window.addEventListener('error', (e) => {
+      console.log('[errhook]', e.error && e.error.stack ? e.error.stack : (e.message + ' @' + e.filename + ':' + e.lineno));
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      console.log('[errhook-reject]', e.reason && e.reason.stack ? e.reason.stack : String(e.reason));
+    });
+  </script>
   <script type="module" src="/renderer/app.js"></script>
   <script>
     // i18n: 根據瀏覽器語言設定載入文字

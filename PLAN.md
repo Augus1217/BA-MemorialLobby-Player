@@ -35,8 +35,12 @@ Blue Archive Memorial Lobby Electron 模擬器，完整還原蔚藍檔案紀念�
 | 首次啟動 Asset 自動下載（GitHub Releases） | ✅ |
 | Loading Spinner（BA 原始風格 + i18n） | ✅ |
 | 多語言 loading 文字（tw/jp/en/kr） | ✅ |
-| Akari 三骨架合併（home/bg/scene） | ✅ |
-| 背景序列獨立運行（Start_Idle_02 → Sushi_01_R） | ✅ |
+| Akari 三物件分離播放（home/bg/scene 各一獨立 Pixi spine，仿 BA PlayableDirector） | ✅ |
+| home 用 character-only `akari_home.skel`（2-page atlas），bg/scene 用各自 `.skel` | ✅ |
+| 時間軸還原：scene Start_Idle_01@0s→3s 移除；home/bg Start_Idle_01@3s(delay)→Idle_01 | ✅ |
+| 背景序列獨立運行（bg Start_Idle_01 → Idle_01，delay=introBodyStart 與 home 同步） | ✅ |
+| Scene 特寫作為頂層獨立物件，本體進場白閃時整個移除（removeSceneCloseup） | ✅ |
+| bg/scene 定位由 BA GameObject Transform 還原：bg(localScale 1, 獨立父節點)以 charScale 內容置中填滿；scene(Akari_Scene, localScale 100/localPosition(0,-962)/父節點與本體完全相同)沿用本體同一變換 | ✅ |
 
 ### 資料來源
 
