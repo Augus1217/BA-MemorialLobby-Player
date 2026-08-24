@@ -1,4 +1,4 @@
-import { Application, Assets, Texture, Sprite, MeshSimple, BlurFilter, Cache } from 'pixi.js';
+import { Application, Assets, Texture, Sprite, MeshSimple, BlurFilter, Cache, RenderTexture, Matrix } from 'pixi.js';
 import { Spine, ScaleTimeline } from '@esotericsoftware/spine-pixi-v8';
 import { Vector2 } from '@esotericsoftware/spine-core';
 import { i as initClickFx } from '../assets/clickfx/clickFx.js';
@@ -91,6 +91,7 @@ const log = (s) => console.log('[lobby]', s);
   let sceneBoundsMaxY = 0;   // scene 內容的世界座標最大 Y（供底部對齊）
   let sceneBoundsCenterY = 0; // scene 內容的世界座標中心 Y（供置中對齊）
    let bgCenterX = 0, bgCenterY = 0;   // bg 內容的世界座標中心
+   let bgVis = null;                   // bg「實際可見美術」範圍（像素量測，骨架座標系）
    let sceneCenterX = 0, sceneCenterY = 0; // scene 內容的世界座標中心
   let sceneStabTimer = null; // (unused)
  let currentLobby = null;
@@ -177,6 +178,57 @@ function contentWorldBounds(obj) {
   } catch { return null; }
 }
 
+// 以「實際渲染像素的 alpha」量出骨架座標系中真正可見的美術範圍。
+// vertex-based bounds（skeleton.getBounds / contentWorldBounds）是 mesh 頂點的 AABB：
+// 頂點範圍內含貼圖透明區、且含不可見/延伸 slot，會高估可見範圍；且姿勢隨 intro→idle
+// 改變（Yuzu 量測：fit 時內容中心 (251,-1377)、idle 時 (-307,-1825)，差 ~300px），
+// 直接拿來定位背景就是黑邊的來源。此函式把物件單獨渲染到 RenderTexture（縮放 0.25
+// 省記憶體），掃 alpha 得到精確的可見 bbox。
+function measureVisibleBounds(obj) {
+  const saved = { x: obj.x, y: obj.y, sx: obj.scale.x, sy: obj.scale.y, a: obj.alpha, v: obj.visible, r: obj.rotation };
+  obj.x = 0; obj.y = 0; obj.rotation = 0; obj.scale.set(1); obj.alpha = 1; obj.visible = true;
+  let rt = null;
+  try {
+    const off = new Vector2(), size = new Vector2();
+    obj.skeleton.getBounds(off, size);
+    if (!(size.x > 1 && size.y > 1)) return null;
+    const RES = 0.25;
+    rt = RenderTexture.create({ width: Math.ceil(size.x), height: Math.ceil(size.y), resolution: RES, antialias: false });
+    app.renderer.render({
+      container: obj, renderTexture: rt, clear: true,
+      transform: new Matrix(RES, 0, 0, RES, -off.x * RES, -off.y * RES),
+    });
+    const cv = app.renderer.extract.canvas(rt);
+    const w = cv.width, h = cv.height;
+    const d = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+    let minX = w, minY = h, maxX = -1, maxY = -1;
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < w; x++) {
+        if (d[(row + x) * 4 + 3] > 8) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxX < 0) return null;
+    const inv = 1 / RES;
+    return {
+      minX: off.x + minX * inv, minY: off.y + minY * inv,
+      maxX: off.x + (maxX + 1) * inv, maxY: off.y + (maxY + 1) * inv,
+    };
+  } catch (e) {
+    console.warn('[bg] 可見範圍量測失敗，退回內容置中:', e.message);
+    return null;
+  } finally {
+    if (rt) rt.destroy(true);
+    obj.x = saved.x; obj.y = saved.y; obj.rotation = saved.r;
+    obj.scale.set(saved.sx, saved.sy); obj.alpha = saved.a; obj.visible = saved.v;
+  }
+}
+
 function fitScene() {
   const vw = app.renderer.width, vh = app.renderer.height;
 
@@ -236,6 +288,7 @@ function fitScene() {
   cam.scale = 1;   // 無使用者縮放（zoom/scroll/pinch 已移除）
   cam.x = 0;
   cam.y = 0;
+  bgVis = null;    // 每 lobby 重新量測（姿勢不同）
   fitted = true;
   applyCamera(1);
 }
@@ -269,7 +322,18 @@ function applyCamera(w) {
         // 其餘（Akari_BG/Yuzu_BG 等 (0,0)/scale1 獨立座標系）以內容中心對齊視窗中心填滿。
         const bt = LOBBY_TRANSFORMS && LOBBY_TRANSFORMS[currentLobby];
         if (bt && bt.bg && bt.bg.mode === 'char') setTransform(bg, spine.x, spine.y, cs);
-        else setTransform(bg, vw / 2 - bgCenterX * cs, vh / 2 - bgCenterY * cs, cs);
+        else if (bgVis) {
+          // fill 模式（Akari_BG/Yuzu_BG 等 (0,0)/scale1 獨立座標系）：以「實際可見
+          // 美術」的像素量測範圍做 cover 並置中——vertex bounds 含透明邊距且隨姿勢
+          // 改變，是先前黑邊的來源。量測在進入 idle 後執行一次（bgVis 非 null）。
+          const w = bgVis.maxX - bgVis.minX, h = bgVis.maxY - bgVis.minY;
+          const bs = Math.max(vw / w, vh / h) * cam.scale;
+          setTransform(bg, vw / 2 - (bgVis.minX + w / 2) * bs, vh / 2 - (bgVis.minY + h / 2) * bs, bs);
+        } else {
+          // 量測前（intro 期間）的過渡：沿用 fit 時的內容中心
+          if (!animActive) bgVis = measureVisibleBounds(bg);
+          setTransform(bg, vw / 2 - bgCenterX * cs, vh / 2 - bgCenterY * cs, cs);
+        }
       }
       if (scene) setTransform(scene, spine.x, spine.y, cs);
     } else {
