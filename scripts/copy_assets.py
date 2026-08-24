@@ -494,6 +494,28 @@ def gen_manifest():
                          and "_scene" not in f and "_bg" not in f)
         if not atlases:
             continue
+        # kivo 合併骨架（fetch_kivo_combined.py 下載的 <X>_Combined/）優先：
+        # 人物＋背景＋場景已在同一 skeleton（同一座標系），直接作為主要入口，
+        # 並令 scene 疊加層略過（合併版已含全部圖層，疊加會重複繪製）。
+        comb = sorted(f for f in files
+                      if f.endswith(".skel") and "_combined" in f.lower())
+        if comb:
+            cs = comb[0]
+            cbase = os.path.splitext(os.path.basename(cs))[0].lower()
+            cdir = os.path.dirname(cs)
+            # atlas 必須取「合併 skel 同目錄」的那份——其他子目錄可能有同名 atlas
+            ca = next((f for f in files
+                       if f.endswith(".atlas") and os.path.dirname(f) == cdir
+                       and os.path.splitext(os.path.basename(f))[0].lower() == cbase), None)
+            if ca:
+                pages = []
+                atxt = os.path.join(d, ca.replace("\\", os.sep))
+                if os.path.exists(atxt):
+                    with open(atxt) as fh:
+                        pages = [l.strip() for l in fh.read().splitlines()
+                                 if l.strip().endswith(".png")]
+                idx[name] = {"skel": cs, "atlas": ca, "png": pages}
+                continue
         # 主要圖集優先選「檔名主幹 == 目錄名」且層級最淺的：CH0060_home 的主檔在
         # lobby 目錄頂層，巢狀副本（CH0060_home/…）與背景子目錄（CH0060BG_home/…）
         # 都不該被選成主要骨架路徑。
@@ -530,6 +552,10 @@ def gen_manifest():
     for name in sorted(os.listdir(DST_SCENE)):
         d = os.path.join(DST_SCENE, name)
         if not os.path.isdir(d):
+            continue
+        # 該 lobby 已改用 kivo 合併骨架時，背景/特寫已內含，不再疊加
+        prev = idx.get(name) or {}
+        if "_combined" in str(prev.get("atlas", "")).lower():
             continue
         skels = sorted(f for f in os.listdir(d)
                        if f.endswith(".skel") and not re.search(r"_[1-3]\.skel$", f))
