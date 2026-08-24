@@ -264,12 +264,13 @@ function applyCamera(w) {
       //     (748,-196)），故以「內容中心對齊視窗中心」還原 BA 的填滿效果，三者統一以 charScale 繪製。
       const cs = charScale * cam.scale;
       if (bg) {
-        // BA 資料驅動（lobby_transforms.json）：mode "char" = 背景與本體完全同變換
-        // （同父、同 localPosition/localScale，如 CH0060BG_home），沿用人物同一變換；
-        // 其餘（Akari_BG/Yuzu_BG 等 (0,0)/scale1 獨立座標系）以內容中心對齊視窗中心填滿。
-        const bt = LOBBY_TRANSFORMS && LOBBY_TRANSFORMS[currentLobby];
-        if (bt && bt.bg && bt.bg.mode === 'char') setTransform(bg, spine.x, spine.y, cs);
-        else setTransform(bg, vw / 2 - bgCenterX * cs, vh / 2 - bgCenterY * cs, cs);
+        // 背景一律沿用人物同一變換（spine.x, spine.y, charScale）。實證：
+        // kivo 合併骨架（Yuzu_home_Combined）中 90 個 bg 骨骼的世界座標與我們的
+        // 分離 yuzu_bg 完全相同（誤差 <0.001）——合併是「恆等變換」，bg 骨架座標
+        // == 人物骨架座標系；CH0060BG_home 的 GameObject 變換亦與本體相同
+        // （lobby_transforms.json mode "char"）。底圖大於視窗屬正常（視窗是背景
+        // 的檢視區）；舊的「內容置中/cover 縮放」會把底圖縮小下移，正是黑帶來源。
+        setTransform(bg, spine.x, spine.y, cs);
       }
       if (scene) setTransform(scene, spine.x, spine.y, cs);
     } else {
