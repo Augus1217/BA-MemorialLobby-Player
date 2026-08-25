@@ -420,9 +420,14 @@ ipcMain.handle('check-assets', async () => {
   }
 
   // 計算需要下載的包（schema 2 增量；schema 1 回退為整版）
+  // dev 模式（直接跑 repo）：assets/ 已在本地，installed.json 只是下載器記帳，
+  // 不該讓它反過來把整個 assets 判成未安裝。此時僅提示有新版本、不強制下載。
   let needsDownloadPacks = [];
+  const devAssets = isDev && hasAssets;
   if (remoteVersion?.packages) {
-    if (remoteVersion.schema === 2) {
+    if (devAssets) {
+      needsDownloadPacks = [];
+    } else if (remoteVersion.schema === 2) {
       for (const [k, v] of Object.entries(remoteVersion.packages)) {
         if (installed[k] !== v.sha256) needsDownloadPacks.push(k);
       }
@@ -445,8 +450,9 @@ ipcMain.handle('check-assets', async () => {
     hasAssets,
     remoteVersion: remoteVersion?.version || null,
     schema: remoteVersion?.schema || 1,
-    needsDownload: needsDownloadPacks.length > 0 || !hasAssets,
-    needsDownloadPacks,
+    // dev 模式本地資源已齊，永不阻擋進入
+    needsDownload: devAssets ? false : (needsDownloadPacks.length > 0 || !hasAssets),
+    needsDownloadPacks: devAssets ? [] : needsDownloadPacks,
     packages: remoteVersion?.packages || null,
     lobbies: remoteVersion?.lobbies || null,
     streaming,
@@ -512,7 +518,11 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks }
       results.push({ name, ok: false, error: e.message });
     }
   }
-  try { fs.mkdirSync(assetsDir, { recursive: true }); fs.writeFileSync(getAssetsVersionPath(), version); } catch {}
+  // 僅在「至少一包成功」時寫入 .version；全失敗（如 release 資產缺包 404）
+  // 不覆寫版本號，讓下次啟動仍判定 needsDownload 重試。
+  if (results.some(r => r.ok)) {
+    try { fs.mkdirSync(assetsDir, { recursive: true }); fs.writeFileSync(getAssetsVersionPath(), version); } catch {}
+  }
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   return results;
 });
@@ -573,7 +583,10 @@ ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies
       results.push({ name, ok: false, error: e.message });
     }
   }
-  try { fs.writeFileSync(getAssetsVersionPath(), version); } catch {}
+  // 同 download-assets：全失敗時不寫 .version，保留 needsDownload 狀態供重試。
+  if (results.some(r => r.ok)) {
+    try { fs.writeFileSync(getAssetsVersionPath(), version); } catch {}
+  }
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   const failed = results.filter(r => !r.ok);
   return failed.length ? { ok: false, results } : { ok: true, results };

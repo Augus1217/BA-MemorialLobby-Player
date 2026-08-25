@@ -3787,7 +3787,19 @@ async function showAssetDownload(assetInfo) {
       });
 
       const version = assetInfo.remoteVersion || '1.0.0';
-      await window.ba.downloadAssets({ version, packages: assetInfo.packages });
+      const results = await window.ba.downloadAssets({ version, packages: assetInfo.packages });
+
+      // 有包失敗（如 release 缺檔 404）：顯示錯誤並保留面板讓使用者重試，
+      // 不關閉面板、不 resolve（避免半套資源被當成安裝完成）。
+      if (Array.isArray(results) && results.some(r => !r.ok)) {
+        const failed = results.filter(r => !r.ok);
+        status.textContent = t('dl.failed');
+        detail.textContent = t('dl.failedDetail', { n: failed.length, err: failed[0]?.error || '' });
+        btn.textContent = t('dl.retry');
+        btn.style.display = 'inline-block';
+        progress.style.display = 'none';
+        return;
+      }
 
       status.textContent = t('dl.finished');
       fill.style.width = '100%';
