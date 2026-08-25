@@ -3396,16 +3396,26 @@ function onTrackComplete(entry) {
 function startBgSequence({ skip = false } = {}) {
   // ---- BG（獨立 spine 物件）----
   if (bg && bg.state) {
+    // bg 的進場/迴圈動畫名各 lobby 不同：Idle_01（多數）、
+    // Start_WhaleMove_01_R → WhaleMove_01_R（星野鯨魚）……
+    // 依骨架實際擁有的動畫以「Start_X → X」配對，退回 Idle_01 迴圈。
+    const bgAnims = bg.state.data.skeletonData.animations.map(a => a.name);
+    const bgIntro = bgAnims.find(n => n.startsWith('Start_') && bgAnims.includes(n.slice(6)));
+    const bgLoop = bgIntro ? bgIntro.slice(6) : (bgAnims.includes('Idle_01') ? 'Idle_01' : bgAnims[0]);
     if (!skip) {
-      // 冪等：已在 Idle_01 迴圈中就別重啟——setAnimation 會從 t=0 重播造成頓挫。
+      // 冪等：已在目標迴圈中就別重啟——setAnimation 會從 t=0 重播造成頓挫。
       const cur = bg.state.getCurrent(0);
-      if (cur && cur.animation && cur.animation.name === 'Idle_01' && cur.loop) return;
+      if (cur && cur.animation && cur.animation.name === bgLoop && cur.loop) return;
       // 依 BA：bg 與本體同在 bodyStart(3s) 進場，0-3s 靜止於 setup pose（避免背景取景偏移）。
-      const bgEntry = bg.state.setAnimation(0, 'Start_Idle_01', false);
-      bgEntry.delay = introBodyStart();
-      bg.state.addAnimation(0, 'Idle_01', true, 0);
+      if (bgIntro) {
+        const bgEntry = bg.state.setAnimation(0, bgIntro, false);
+        bgEntry.delay = introBodyStart();
+        bg.state.addAnimation(0, bgLoop, true, 0);
+      } else {
+        bg.state.setAnimation(0, bgLoop, true);
+      }
     } else {
-      bg.state.setAnimation(0, 'Idle_01', true);
+      bg.state.setAnimation(0, bgLoop, true);
     }
   }
   // ---- SCENE（開場壽司特寫，獨立 spine 物件）----
