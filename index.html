@@ -330,7 +330,8 @@
       font-weight: normal;
       font-style: normal;
     }
-    #loadingText {
+    #loadingText,
+    #bootLoadingText {
       font-size: 2.5vh; color: #000;
       letter-spacing: .06em; font-family: 'BA Font', 'Noto Sans KR', 'Segoe UI', system-ui, sans-serif;
       font-weight: normal;
@@ -415,32 +416,32 @@
   <div id="fx"></div>
   <div id="hud">
     <div id="hudTop" class="hudbar">
-      <button id="btnPrev" class="btn" title="上一位">‹</button>
+      <button id="btnPrev" class="btn" data-i18n-title="hud.prev" title="上一位">‹</button>
       <div id="titleBlock">
         <div id="charName"></div>
         <div id="subName">MEMORIAL LOBBY</div>
       </div>
-      <button id="btnNext" class="btn" title="下一位">›</button>
+      <button id="btnNext" class="btn" data-i18n-title="hud.next" title="下一位">›</button>
     </div>
     <div id="hudBottom" class="hudbar">
-      <button id="btnSkip" class="btn" style="margin-right:20px" title="ˑˑˑˑ (跳過)">ˑˑˑˑ</button>
-      <button id="btnLang" class="btn" title="名稱語言 (繁/日/簡/EN)">繁</button>
-      <button id="btnFull" class="btn" style="margin-left:10px" title="全螢幕">⤢</button>
-      <button id="btnBgm" class="btn" style="margin-left:10px" title="音樂">♪</button>
-      <button id="btnExport" class="btn" style="margin-left:10px" title="匯出影片">⏺</button>
+      <button id="btnSkip" class="btn" style="margin-right:20px" data-i18n-title="hud.skip" title="ˑˑˑˑ (跳過)">ˑˑˑˑ</button>
+      <button id="btnLang" class="btn" data-i18n-title="hud.lang" title="名稱語言 (繁/日/簡/EN)">繁</button>
+      <button id="btnFull" class="btn" style="margin-left:10px" data-i18n-title="hud.fullscreen" title="全螢幕">⤢</button>
+      <button id="btnBgm" class="btn" style="margin-left:10px" data-i18n-title="hud.bgm" title="音樂">♪</button>
+      <button id="btnExport" class="btn" style="margin-left:10px" data-i18n-title="hud.export" title="匯出影片">⏺</button>
     </div>
   </div>
 
-  <button id="btnStudents" class="btn" title="學生列表">☰</button>
+  <button id="btnStudents" class="btn" data-i18n-title="hud.students" title="學生列表">☰</button>
   <div id="sidePanel">
     <div class="sb-head">
-      <input id="sbSearch" type="text" placeholder="搜尋學生 / 名稱 / ID…" />
-      <button id="sbClose" class="btn" title="收合">×</button>
+      <input id="sbSearch" type="text" data-i18n-ph="sidebar.searchPh" placeholder="搜尋學生 / 名稱 / ID…" />
+      <button id="sbClose" class="btn" data-i18n-title="sidebar.close" title="收合">×</button>
     </div>
     <div id="sbList"></div>
   </div>
 
-  <div id="loading"><div class="spin"></div><span id="loadingText">載入中</span></div>
+  <div id="loading"><div class="spin"></div><span id="loadingText" data-i18n="loading.loading">載入中</span></div>
   <div id="whiteflash"></div>
   <div id="fade"></div>
   <div id="err"></div>
@@ -453,52 +454,52 @@
   </div>
 
   <div id="exportPanel">
-    <div class="panel-title">匯出動畫 <span id="expChar"></span></div>
-    <div class="panel-row"><span class="lbl">動畫</span>
+    <div class="panel-title" data-i18n="exp.title">匯出動畫 <span id="expChar"></span></div>
+    <div class="panel-row"><span class="lbl" data-i18n="exp.anim">動畫</span>
       <div class="segs" id="expClip">
         <button data-k="start">Start_Idle</button><button data-k="idle" class="on">Idle</button><button data-k="talk">Talk</button>
       </div>
     </div>
     <div class="panel-row" id="expTalkRow" style="display:none">
-      <span class="lbl">Talk clip</span>
+      <span class="lbl" data-i18n="exp.talkClip">Talk clip</span>
       <select id="expTalkSel"></select>
     </div>
-    <div class="panel-row"><span class="lbl">解析度</span>
+    <div class="panel-row"><span class="lbl" data-i18n="exp.res">解析度</span>
       <div class="segs" id="expRes">
-        <button data-r="win" class="on">目前視窗</button><button data-r="screen">目前螢幕</button><button data-r="kivo">kivo 適應</button><button data-r="custom">自訂</button>
+        <button data-r="win" class="on" data-i18n="exp.resWin">目前視窗</button><button data-r="screen" data-i18n="exp.resScreen">目前螢幕</button><button data-r="kivo" data-i18n="exp.resKivo">kivo 適應</button><button data-r="custom" data-i18n="exp.resCustom">自訂</button>
       </div>
     </div>
     <div class="panel-row" id="expCustomRow" style="display:none">
-      <span class="lbl">自訂</span>
+      <span class="lbl" data-i18n="exp.custom">自訂</span>
       <input type="number" id="expCustomW" min="64" max="7680" value="1920" />
       <span class="lbl">×</span>
       <input type="number" id="expCustomH" min="64" max="4320" value="1080" />
     </div>
-    <div class="panel-row"><span class="lbl">幀率</span>
+    <div class="panel-row"><span class="lbl" data-i18n="exp.fps">幀率</span>
       <div class="segs" id="expFps">
         <button data-v="30" class="on">30</button><button data-v="60">60</button>
       </div>
     </div>
-    <div class="panel-row"><span class="lbl">格式</span>
+    <div class="panel-row"><span class="lbl" data-i18n="exp.fmt">格式</span>
       <div class="segs" id="expFmt">
         <button data-fmt="mp4" class="on">MP4</button><button data-fmt="webm">WebM</button>
       </div>
     </div>
     <div class="panel-row" id="expVoiceRow">
-      <label class="ck"><input type="checkbox" id="expVoice" checked /> 包含語音</label>
-      <label class="ck" id="expDialogCk"><input type="checkbox" id="expDialog" /> 包含對話框</label>
+      <label class="ck"><input type="checkbox" id="expVoice" checked /> <span data-i18n="exp.voice">包含語音</span></label>
+      <label class="ck" id="expDialogCk"><input type="checkbox" id="expDialog" /> <span data-i18n="exp.dialog">包含對話框</span></label>
     </div>
     <div class="panel-btns">
-      <button id="expBgm" class="btnTxt">匯出 BGM</button>
-      <button id="expCancel" class="btnTxt">取消</button>
-      <button id="expStart" class="btnTxt primary">開始匯出</button>
+      <button id="expBgm" class="btnTxt" data-i18n="exp.bgm">匯出 BGM</button>
+      <button id="expCancel" class="btnTxt" data-i18n="exp.cancel">取消</button>
+      <button id="expStart" class="btnTxt primary" data-i18n="exp.start">開始匯出</button>
     </div>
   </div>
 
   <div id="recBadge">
     <span class="rec-dot"></span> REC <span id="recTime">0:00</span>
     <span class="rec-sep">/</span> <span id="recDur">0:10</span>
-    <button id="recStop" title="停止錄製">■</button>
+    <button id="recStop" data-i18n-title="rec.stop" title="停止錄製">■</button>
   </div>
 
   <!-- Asset download overlay -->
@@ -511,22 +512,22 @@
     <div id="loadingIndicator">
       <img id="loadingSpinner" src="assets/loading/spinner.png"
         style="width:5.55vh;height:5.55vh;animation:spin 3s linear infinite;image-rendering:auto;filter:none;">
-      <span id="loadingText">檢查更新中……</span>
+      <span id="bootLoadingText" data-i18n="boot.checking">檢查更新中……</span>
     </div>
     <!-- 檢查完成後顯示，點擊進入 lobby -->
     <div id="tapToStart" style="display:none">TAP TO START</div>
     <!-- 需要下載時顯示的面板 -->
     <div id="downloadPanel" style="display:none">
       <div id="assetTitle">BA Memorial Lobby</div>
-      <div id="assetSubtitle">發現新版本，需下載遊戲資源</div>
+      <div id="assetSubtitle" data-i18n="dl.subtitle">發現新版本，需下載遊戲資源</div>
       <div id="assetStatus"></div>
       <div id="assetProgress">
         <div id="assetProgressBar"><div id="assetProgressFill"></div></div>
         <div id="assetProgressText">0%</div>
       </div>
       <div id="assetDetail"></div>
-      <label class="ck" id="streamingRow" style="margin:12px 0; justify-content:center; display:none;"><input type="checkbox" id="streamingCk"> 串流模式（隨播隨下，初始只下載核心約 30MB）</label>
-      <button id="assetBtn" class="btnTxt primary" style="display:none">開始下載</button>
+      <label class="ck" id="streamingRow" style="margin:12px 0; justify-content:center; display:none;"><input type="checkbox" id="streamingCk"> <span data-i18n="dl.streamingOpt">串流模式（隨播隨下，初始只下載核心約 30MB）</span></label>
+      <button id="assetBtn" class="btnTxt primary" style="display:none" data-i18n="dl.start">開始下載</button>
     </div>
   </div>
 
@@ -540,32 +541,5 @@
     });
   </script>
   <script type="module" src="/renderer/app.js"></script>
-  <script>
-    // i18n: 根據瀏覽器語言設定載入文字
-    async function initI18n() {
-      try {
-        const res = await fetch('assets/loading/i18n.json');
-        const translations = await res.json();
-        const lang = navigator.language || 'en';
-        const loadingText = document.getElementById('loadingText');
-        
-        // 精確匹配 (zh-TW, zh-CN, ja, en, ko)
-        if (translations[lang]) {
-          loadingText.textContent = translations[lang].loading;
-        }
-        // 模糊匹配 (zh → zh-TW, ja → ja)
-        else if (translations[lang.split('-')[0]]) {
-          loadingText.textContent = translations[lang.split('-')[0]].loading;
-        }
-        // 預設英文
-        else {
-          loadingText.textContent = translations.en.loading;
-        }
-      } catch (e) {
-        console.warn('i18n load failed:', e);
-      }
-    }
-    initI18n();
-  </script>
 </body>
 </html>

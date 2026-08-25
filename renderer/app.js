@@ -68,6 +68,84 @@ const chatText = document.getElementById('chatText');
 let chatAnchor = null;
 let CHAT_ANCHORS = {};   // app lobby key -> { tx, ty, skY, skScale } from lobby_chat_anchors.json
 
+// ---- i18n (UI language, bound to the btnLang name-language cycle) ----
+// Dictionary: assets/data/ui_i18n.json — flat "key": text per UI lang
+// (zh-TW / zh-CN / ja / en / ko). The chosen mode also drives student-name
+// fields (LANG_MODES below), so one button switches both. zh-TW is the source
+// of truth; t() falls back to it and finally to the raw key.
+const I18N_UI = {
+  tw: 'zh-TW', jp: 'ja', cn: 'zh-CN', en: 'en', kr: 'ko',
+};
+const I18N_TAG_FALLBACK = 'zh-TW';
+let i18nDict = null;       // loaded dict (all langs)
+let uiLang = null;         // active LANG_MODES key ('tw'|'jp'|'cn'|'en'|'kr')
+
+function i18nTag(mode) {
+  return I18N_UI[mode] || I18N_TAG_FALLBACK;
+}
+
+function langParamToMode(v) {
+  if (!v) return null;
+  let mode = Object.keys(I18N_UI).find(k => k === v);
+  if (!mode) mode = Object.keys(I18N_UI).find(k => I18N_UI[k].toLowerCase() === v.toLowerCase());
+  return mode || null;
+}
+
+function fromUrlLang() {
+  const m = location.hash.match(/[?#&]lang=([\w-]+)/) || location.search.match(/[?&]lang=([\w-]+)/);
+  return m ? langParamToMode(m[1]) : null;
+}
+
+function detectUiLang() {
+  // Priority: explicit ?lang= URL param (deep links/automation) -> saved
+  // choice -> navigator.language -> en.
+  const fromUrl = fromUrlLang();
+  if (fromUrl) return fromUrl;
+  try {
+    const saved = localStorage.getItem('ba_lang');
+    if (saved && I18N_UI[saved]) return saved;
+  } catch {}
+  const n = String(navigator.language || 'en').toLowerCase();
+  if (n.startsWith('zh')) return /hans|cn|sg|my/.test(n) ? 'cn' : 'tw';
+  if (n.startsWith('ja')) return 'jp';
+  if (n.startsWith('ko')) return 'kr';
+  return 'en';
+}
+
+async function loadI18n() {
+  uiLang = detectUiLang();
+  // Keep the name-language mode in sync so character names follow the UI
+  // language on first load / explicit override; btnLang re-syncs afterwards.
+  try {
+    if (fromUrlLang() || !localStorage.getItem('ba_lang')) {
+      localStorage.setItem('ba_lang', uiLang);
+      langMode = uiLang;
+    }
+  } catch {}
+  try {
+    i18nDict = await fetchRetry('assets/data/ui_i18n.json').then(r => r.json());
+  } catch (e) {
+    console.warn('[lobby] ui_i18n 載入失敗，UI 文字退回原始碼字串', e);
+    i18nDict = null;
+  }
+}
+
+function t(key, params) {
+  let s = i18nDict?.[i18nTag(uiLang)]?.[key]
+    ?? i18nDict?.[I18N_TAG_FALLBACK]?.[key]
+    ?? key;
+  if (params) for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v);
+  return s;
+}
+
+// Walk static DOM: data-i18n -> textContent, data-i18n-title -> title,
+// data-i18n-ph -> placeholder.
+function applyI18n(root = document) {
+  for (const el of root.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
+  for (const el of root.querySelectorAll('[data-i18n-title]')) el.title = t(el.dataset.i18nTitle);
+  for (const el of root.querySelectorAll('[data-i18n-ph]')) el.placeholder = t(el.dataset.i18nPh);
+}
+
 let toastTimer = null;
 function showToast(msg) {
   toastEl.textContent = msg;
@@ -2363,7 +2441,7 @@ function segVal(id) {
 function exportClipType() { return segVal('expClip') || 'idle'; }
 
 function openExportPanel() {
-  if (!spine) { showToast('尚未載入角色'); return; }
+  if (!spine) { showToast(t('msg.noChar')); return; }
   expChar.textContent = prettyName(currentLobby);
   const talks = animNames().filter(n => n.startsWith('Talk_') && n.endsWith('_M')).sort();
   expTalkSel.innerHTML = '';
@@ -2632,13 +2710,13 @@ async function startAnimExport() {
   let animName, track1 = null, track2 = null;
   if (clipType === 'talk') {
     const m = expTalkSel.value;
-    if (!m || !has(m)) { showErr('此角色沒有可用的 Talk clip'); return; }
+    if (!m || !has(m)) { showErr(t('msg.noTalk')); return; }
     animName = m;
     track1 = m;
     const a2 = m.replace(/_M$/, '_A');
     track2 = has(a2) ? a2 : null;
   } else if (clipType === 'start') {
-    if (!has('Start_Idle_01')) { showErr('此角色沒有 Start_Idle_01'); return; }
+    if (!has('Start_Idle_01')) { showErr(t('msg.noStartIdle')); return; }
     animName = 'Start_Idle_01';
   } else {
     animName = idleClip || 'Idle_01';
@@ -2721,7 +2799,7 @@ async function startAnimExport() {
     channels: audio ? audio.channels : 2,
   });
   if (!sess || sess.canceled) { await cleanupAnimExport(); return; }
-  if (sess.error) { await cleanupAnimExport(); showErr(`匯出啟動失敗: ${sess.error}`); return; }
+  if (sess.error) { await cleanupAnimExport(); showErr(t('msg.expStartFail', { err: sess.error })); return; }
 
   document.body.classList.add('recording');
 
@@ -2806,9 +2884,9 @@ async function startAnimExport() {
   }
 
   await cleanupAnimExport();
-  if (res?.path) { log(`動畫匯出完成: ${res.path}`); showToast('動畫已儲存'); }
+  if (res?.path) { log(`動畫匯出完成: ${res.path}`); showToast(t('msg.animSaved')); }
   else if (animAbort) log('動畫匯出已取消');
-  else showErr(`動畫匯出失敗: ${res?.error || '未知錯誤'}`);
+  else showErr(t('msg.animFail', { err: res?.error || t('msg.unknown') }));
 }
 
 function stopAnimExport(abort = false) {
@@ -2851,14 +2929,14 @@ async function restoreRendererState() {
 // ---- 匯出 BGM（原檔複製，不做混音）----
 async function exportBgm() {
   const file = bgmForLobby(currentLobby);
-  if (!file) { showErr('此角色沒有對應 BGM'); return; }
+  if (!file) { showErr(t('msg.noBgm')); return; }
   try {
     const res = await window.ba.exportBgm({ filename: file, defaultName: file });
     if (res?.canceled) log('BGM 匯出已取消');
-    else if (res?.path) { log(`BGM 匯出完成: ${res.path}`); showToast('BGM 已儲存'); }
-    else showErr(`BGM 匯出失敗: ${res?.error || '無結果'}`);
+    else if (res?.path) { log(`BGM 匯出完成: ${res.path}`); showToast(t('msg.bgmSaved')); }
+    else showErr(t('msg.bgmFail', { err: res?.error || t('msg.noResult') }));
   } catch (e) {
-    showErr(`BGM 匯出失敗: ${e.message}`);
+    showErr(t('msg.bgmFail', { err: e.message }));
   }
 }
 
@@ -2925,14 +3003,14 @@ function lobbyGroupInfo(key) {
     if (rest.endsWith('_home_gl')) { rest = rest.slice(0, -'_home_gl'.length); isDup = true; changed = true; }
     else if (rest.endsWith('_home')) { rest = rest.slice(0, -'_home'.length); changed = true; }
     else if (rest.endsWith('_gl')) { rest = rest.slice(0, -'_gl'.length); isDup = true; changed = true; }
-    else if (rest.endsWith('_multi')) { rest = rest.slice(0, -'_multi'.length); labels.push('多人'); changed = true; }
-    else if (rest.endsWith('_teen')) { rest = rest.slice(0, -'_teen'.length); labels.push('Teen'); changed = true; }
+    else if (rest.endsWith('_multi')) { rest = rest.slice(0, -'_multi'.length); labels.push(t('variant.multi')); changed = true; }
+    else if (rest.endsWith('_teen')) { rest = rest.slice(0, -'_teen'.length); labels.push(t('variant.teen')); changed = true; }
     if (!changed) break;
   }
   if (rest.startsWith('lobby')) rest = rest.slice(5);
   // Inner costume suffixes (sit between the name and "_home").
-  for (const [suf, label] of [['_swimsuit', '泳裝'], ['_newyear', '新年'], ['_ridingsuit', '騎行服'], ['_casual', '便服']]) {
-    if (rest.endsWith(suf)) { rest = rest.slice(0, -suf.length); labels.push(label); }
+  for (const [suf, key] of [['_swimsuit', 'variant.swimsuit'], ['_newyear', 'variant.newyear'], ['_ridingsuit', 'variant.ridingsuit'], ['_casual', 'variant.casual']]) {
+    if (rest.endsWith(suf)) { rest = rest.slice(0, -suf.length); labels.push(t(key)); }
   }
   labels.reverse();
   // Airi0_home duplicates Airi_home -> treat the trailing 0 as a duplicate copy.
@@ -2947,11 +3025,13 @@ function lobbyGroupInfo(key) {
 }
 
 // ---- student display names (students_data.csv, keyed by file_id) ----
+// The same mode also selects the UI language via I18N_UI (see t()/applyI18n).
 const LANG_MODES = [
   ['tw', '繁', 'name_tw'],
   ['jp', '日', 'name_jp'],
   ['cn', '簡', 'name_cn'],
   ['en', 'EN', 'name_en'],
+  ['kr', '한', 'name_kr'],
 ];
 let STUDENTS = null;
 let langMode = null;
@@ -3032,7 +3112,7 @@ function renderStudentName(lobbyKey) {
   const label = rec ? rec[langField(langMode)] : null;
   charNameEl.textContent = label || prettyName(lobbyKey);
   btnLang.textContent = langLabel(langMode);
-  btnLang.title = `名稱語言 (${LANG_MODES.map(l => l[1]).join('/')})`;
+  btnLang.title = t('hud.lang', { modes: LANG_MODES.map(l => l[1]).join('/') });
 }
 
 // ---- collapsible student sidebar ----
@@ -3113,7 +3193,7 @@ function renderSidebar() {
   if (!shown) {
     const e = document.createElement('div');
     e.className = 'sb-empty';
-    e.textContent = '沒有符合的學生';
+    e.textContent = t('sidebar.noMatch');
     sbList.appendChild(e);
   }
 }
@@ -3278,14 +3358,14 @@ async function loadLobby(name) {
   headAnchorBone = null;
 
   const entry = LOBBY_INDEX[name];
-  if (!entry) { showErr(`索引中無 ${name}`); return; }
+  if (!entry) { showErr(t('msg.notInIndex', { name })); return; }
   // 串流模式：確保該 lobby 的資源已在本地（隨播隨下）
   if (_assetInfo?.lobbies?.[name]) {
     try { await ensureLobbyAssets(name); } catch (e) { console.warn('[lobby] 串流下載失敗', e.message); }
   }
   loadIdleClip(entry);
   loadingEl.classList.add('show');
-  loadingText.textContent = `載入 ${prettyName(name)}`;
+  loadingText.textContent = t('loading.load', { name: prettyName(name) });
   try {
     const charAssets = entry.skel && entry.atlas
       ? [assetUrl(`assets/spine/${name}/${entry.skel}`), assetUrl(`assets/spine/${name}/${entry.atlas}`)]
@@ -3307,7 +3387,7 @@ async function loadLobby(name) {
     app.stage.addChild(spine);
     currentLobby = name;
   } catch (e) {
-    showErr(`載入 ${name} 失敗:\n${e.message}`);
+    showErr(t('msg.loadFail', { name, err: e.message }));
     loadingEl.classList.remove('show');
     return;
   }
@@ -3587,7 +3667,7 @@ async function ensureLobbyAssets(lobbyName) {
     if (loadingText) loadingText.textContent = msg;
   };
   window.ba.onDownloadProgress?.((p) => {
-    showLoading(`下載 ${p.package} (${p.index + 1}/${p.total}) ${p.percent || 0}%`);
+    showLoading(t('dl.lobbyDl', { pkg: p.package, i: p.index + 1, n: p.total, pct: p.percent || 0 }));
   });
   try {
     const res = await window.ba.ensureLobby({
@@ -3603,7 +3683,7 @@ async function ensureLobbyAssets(lobbyName) {
   } catch (e) {
     console.warn('[lobby] ensureLobby 失敗:', e.message);
   } finally {
-    if (shown) { loading.classList.remove('show'); if (loadingText) loadingText.textContent = '載入中'; }
+    if (shown) { loading.classList.remove('show'); if (loadingText) loadingText.textContent = t('loading.loading'); }
   }
 }
 
@@ -3648,12 +3728,13 @@ async function showAssetDownload(assetInfo) {
   const updateDetail = () => {
     if (isIncremental) {
       if (namesToShow.length === 0) {
-        status.textContent = '資源已是最新';
-        detail.textContent = `已安裝 ${Object.keys(assetInfo.packages).length} 個包，全部為最新`;
-        if (streamingCk?.checked) detail.textContent += '（串流模式：僅核心需更新）';
+        status.textContent = t('dl.upToDate');
+        detail.textContent = t('dl.allLatest', { n: Object.keys(assetInfo.packages).length });
+        if (streamingCk?.checked) detail.textContent += t('dl.streamUpd');
       } else {
-        const modeNote = isStreaming ? '（串流模式：僅核心）' : '';
-        detail.textContent = `${namesToShow.length} 個包待更新（約 ${totalGB} GB）${modeNote}：` + namesToShow.slice(0, 8).join('、') + (namesToShow.length > 8 ? '…' : '');
+        const modeNote = isStreaming ? t('dl.streamCore') : '';
+        detail.textContent = t('dl.pending', { n: namesToShow.length, gb: totalGB, note: modeNote })
+          + namesToShow.slice(0, 8).join('、') + (namesToShow.length > 8 ? '…' : '');
       }
     } else {
       detail.textContent = namesToShow.length ? namesToShow.join('、') : '';
@@ -3661,21 +3742,21 @@ async function showAssetDownload(assetInfo) {
   };
 
   if (assetInfo.hasAssets && assetInfo.remoteVersion) {
-    status.textContent = `發現新版本 v${assetInfo.remoteVersion}（目前 v${assetInfo.localVersion || '無'}）`;
+    status.textContent = t('dl.versionFound', { remote: assetInfo.remoteVersion, local: assetInfo.localVersion || t('dl.localNone') });
     updateDetail();
   } else if (!assetInfo.hasAssets) {
-    status.textContent = '首次使用需下載遊戲資源';
+    status.textContent = t('dl.firstRun');
     updateDetail();
-    if (streamingCk) detail.textContent += '\n勾選「串流模式」可先只下載核心（約 30MB），每選一位角色時再下載她的資源。';
+    if (streamingCk) detail.textContent += t('dl.firstRunHint');
   } else {
-    status.textContent = '資源已是最新';
+    status.textContent = t('dl.upToDate');
     btn.style.display = 'none';
     await new Promise(r => setTimeout(r, 1200));
     downloadPanel.style.display = 'none';
     return;
   }
 
-  btn.textContent = assetInfo.hasAssets ? '更新資源' : '開始下載';
+  btn.textContent = assetInfo.hasAssets ? t('dl.update') : t('dl.start');
   btn.style.display = 'inline-block';
 
   return new Promise((resolve) => {
@@ -3691,15 +3772,15 @@ async function showAssetDownload(assetInfo) {
 
       window.ba.onDownloadProgress?.((p) => {
         if (p.status === 'downloading') {
-          status.textContent = `下載 ${p.package} (${p.index + 1}/${p.total})`;
+          status.textContent = t('dl.downloading', { pkg: p.package, i: p.index + 1, n: p.total });
           fill.style.width = p.percent + '%';
           pctText.textContent = p.percent + '%';
           if (p.bytesTotal) detail.textContent = `${(p.downloaded / 1048576).toFixed(0)} MB / ${(p.bytesTotal / 1048576).toFixed(0)} MB`;
         } else if (p.status === 'extracting') {
-          status.textContent = `解壓縮 ${p.package}…`;
+          status.textContent = t('dl.extracting', { pkg: p.package });
           detail.textContent = '';
         } else if (p.status === 'done') {
-          status.textContent = `${p.package} 完成`;
+          status.textContent = t('dl.packDone', { pkg: p.package });
         } else if (p.status === 'error') {
           detail.textContent = `⚠ ${p.error}`;
         }
@@ -3708,7 +3789,7 @@ async function showAssetDownload(assetInfo) {
       const version = assetInfo.remoteVersion || '1.0.0';
       await window.ba.downloadAssets({ version, packages: assetInfo.packages });
 
-      status.textContent = '資源準備完成';
+      status.textContent = t('dl.finished');
       fill.style.width = '100%';
       pctText.textContent = '100%';
       detail.textContent = '';
@@ -3721,6 +3802,12 @@ async function showAssetDownload(assetInfo) {
 }
 
 async function init() {
+  // ---- i18n: load UI dictionary first so the asset-check panel and every
+  // later message renders in the user's language. Falls back to zh-TW source
+  // strings when the dict is missing (dev without assets/data).
+  await loadI18n();
+  applyI18n();
+
   // ---- Asset check: show download UI if assets missing ----
   // loadingScreen 保持顯示（spinner），檢查／下載完成後才換成 TAP TO START。
   if (window.ba?.checkAssets) {
@@ -3731,7 +3818,8 @@ async function init() {
         new Promise((_, rej) => setTimeout(() => rej(new Error('checkAssets timeout')), 10000)),
       ]);
       _assetInfo = assetInfo;
-      if (assetInfo.needsDownload) {
+      // skipUpdate=1（headless 自動化）跳過下載面板，直接進入 lobby。
+      if (assetInfo.needsDownload && !/(?:^|&)skipUpdate=1/.test(location.search + location.hash)) {
         await showAssetDownload(assetInfo);
         try { _assetInfo = await window.ba.checkAssets(); } catch {}
       }
@@ -3854,9 +3942,11 @@ async function init() {
     const i = LANG_MODES.findIndex(l => l[0] === langMode);
     langMode = LANG_MODES[(i + 1) % LANG_MODES.length][0];
     try { localStorage.setItem('ba_lang', langMode); } catch {}
+    uiLang = langMode;                 // UI language follows the name-language cycle
+    applyI18n();
     if (currentLobby) renderStudentName(currentLobby);
     if (sidePanel.classList.contains('open')) renderSidebar();
-    log(`名稱語言: ${langLabel(langMode)}`);
+    log(t('log.lang', { label: langLabel(langMode), ui: i18nTag(langMode) }));
   });
 
   btnStudents.addEventListener('click', () => toggleSidebar());
@@ -3895,7 +3985,7 @@ async function init() {
   const updateFullBtn = () => {
     const on = !!document.fullscreenElement;
     btnFull.textContent = on ? '⤡' : '⤢';
-    btnFull.title = on ? '結束全螢幕' : '全螢幕';
+    btnFull.title = on ? t('hud.fullscreenExit') : t('hud.fullscreen');
     btnFull.classList.toggle('off', false);
   };
   const toggleFullscreen = () => {
@@ -3923,8 +4013,30 @@ async function init() {
     const first = m && LOBBY_INDEX[m[1]] ? m[1] : ORDER[0];
     await loadLobby(first);
   } else {
-    showErr('assets/lobby_index.json 為空');
+    showErr(t('msg.emptyIndex'));
   }
+}
+
+// Headless self-test: with PROBE=1 the renderer dumps i18n state to the console
+// (main relays [renderer] lines). Must run before CAPTURE_DELAY elapses.
+if (/PROBE=1/.test(location.search + location.hash)) {
+  setTimeout(() => {
+    const probe = {
+      uiLang,
+      dictLoaded: !!i18nDict,
+      btnLangLabel: document.getElementById('btnLang')?.textContent,
+      loadingText: loadingText?.textContent,
+      expTitle: document.querySelector('#exportPanel .panel-title')?.childNodes[0]?.textContent?.trim(),
+      resWin: document.querySelector('[data-r="win"]')?.textContent,
+      voiceCk: document.querySelector('label.ck span[data-i18n="exp.voice"]')?.textContent,
+      searchPh: sbSearch.placeholder,
+      prevTitle: btnPrev.title,
+      langTitle: btnLang.title,
+      charName: charNameEl.textContent,
+      lobbyCount: ORDER.length,
+    };
+    console.log('[i18n-probe] ' + JSON.stringify(probe));
+  }, 9000);
 }
 
 init().catch(showErr);
