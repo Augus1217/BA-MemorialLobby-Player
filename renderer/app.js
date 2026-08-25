@@ -3471,35 +3471,64 @@ function onTrackComplete(entry) {
   }
 }
 
-// Background + closeup sequence (BA 原生三獨立 spine 模式). Akari_home 現為三個
-// 獨立物件：spine=角色本體、bg=背景骨架、scene=開場壽司特寫。依 BA PlayableDirector
-// (Akari_Timeline) 的時間軸：
+// Background + closeup sequence. Akari_home 為三個獨立物件：spine=角色本體、
+// bg=背景骨架、scene=開場壽司特寫。時間軸還原自各 lobby 的 SpineClip 資產
+// （spinelobbies-<char>_home dependency-assets，非猜測）：
 //   - scene(特寫): Start_Idle_01 @0s，播完本體進場（白閃）時移除
-//   - bg(背景)   : Start_Idle_01 @3s（與本體同 delay），接 Idle_01 迴圈
-//   - spine(本體): 由 playStart 驅動（Start_Idle_01 @3s → Idle_01）
+//   - bg(背景)   : track0 = main idle（IsTrackMainIdle=1）立即循環；
+//                  若有 BaseRandom clip（Akari_bg: Start_Idle_01 IntroDelay=3.0 → Next=Idle_01）
+//                  則以「Start_X 延遲 → X 迴圈」取代 track0 播法。
+//   - spine(本體): 由 playStart 驅動（HoshinoTimeline/Akari_Timeline 的 Spine Animation State Track）
+// 星野（Hoshino_home_background）特殊：Idle_01 是 main idle（水族館常駐循環），
+// 鯨魚序列在 track1 疊加——Start_WhaleMove_01_R 於 RandomTiming delay 3~4s 後播一次，
+// FinishType=PlayNext 接 WhaleMove_01_R（loop）。此為遊戲 Hoshino_home_background
+// SpineClip 的 PlayMode/Track/IntroDelay 實際欄位值。
 function startBgSequence({ skip = false } = {}) {
   // ---- BG（獨立 spine 物件）----
   if (bg && bg.state) {
-    // bg 的進場/迴圈動畫名各 lobby 不同：Idle_01（多數）、
-    // Start_WhaleMove_01_R → WhaleMove_01_R（星野鯨魚）……
-    // 依骨架實際擁有的動畫以「Start_X → X」配對，退回 Idle_01 迴圈。
     const bgAnims = bg.state.data.skeletonData.animations.map(a => a.name);
-    const bgIntro = bgAnims.find(n => n.startsWith('Start_') && bgAnims.includes(n.slice(6)));
-    const bgLoop = bgIntro ? bgIntro.slice(6) : (bgAnims.includes('Idle_01') ? 'Idle_01' : bgAnims[0]);
+    const has = n => bgAnims.includes(n);
+    const bgLoopMain = has('Idle_01') ? 'Idle_01' : bgAnims[0];
+    // 星野鯨魚序列（track1 疊加）：僅當骨架同時具備三者才走此路徑
+    const whaleIntro = has('Start_WhaleMove_01_R') && has('WhaleMove_01_R') && has('Idle_01');
     if (!skip) {
-      // 冪等：已在目標迴圈中就別重啟——setAnimation 會從 t=0 重播造成頓挫。
-      const cur = bg.state.getCurrent(0);
-      if (cur && cur.animation && cur.animation.name === bgLoop && cur.loop) return;
-      // 依 BA：bg 與本體同在 bodyStart(3s) 進場，0-3s 靜止於 setup pose（避免背景取景偏移）。
-      if (bgIntro) {
-        const bgEntry = bg.state.setAnimation(0, bgIntro, false);
-        bgEntry.delay = introBodyStart();
-        bg.state.addAnimation(0, bgLoop, true, 0);
+      // 冪等：已在目標狀態就別重啟——setAnimation 會從 t=0 重播造成頓挫。
+      const cur = bg.state.getCurrent(whaleIntro ? 1 : 0);
+      if (cur && cur.animation &&
+          cur.animation.name === (whaleIntro ? 'Start_WhaleMove_01_R' : bgLoopMain) &&
+          (whaleIntro || cur.loop)) return;
+      if (whaleIntro) {
+        // track0：水族館常駐 idle 立即循環（遊戲 IsTrackMainIdle 行為）
+        bg.state.setAnimation(0, 'Idle_01', true);
+        // track1：鯨魚進場事件——RandomTimingIntroDelayMode=Random(1), 3~4s
+        const delay = 3 + Math.random();
+        const wEntry = bg.state.setAnimation(1, 'Start_WhaleMove_01_R', false);
+        wEntry.delay = delay;
+        // FinishType=PlayNext(3)：接 WhaleMove_01_R loop
+        bg.state.addAnimation(1, 'WhaleMove_01_R', true, 0);
+        log(`bg: Idle_01@0 + 鯨魚序列 track1 (+${delay.toFixed(2)}s)`);
       } else {
-        bg.state.setAnimation(0, bgLoop, true);
+        // 一般 lobby：Start_X 延遲 introBodyStart() 後播一次 → X 迴圈
+        const bgIntro = bgAnims.find(n => n.startsWith('Start_') && bgAnims.includes(n.slice(6)));
+        const bgLoop = bgIntro ? bgIntro.slice(6) : bgLoopMain;
+        if (bgIntro) {
+          const bgEntry = bg.state.setAnimation(0, bgIntro, false);
+          bgEntry.delay = introBodyStart();
+          bg.state.addAnimation(0, bgLoop, true, 0);
+        } else {
+          bg.state.setAnimation(0, bgLoop, true);
+        }
       }
     } else {
-      bg.state.setAnimation(0, bgLoop, true);
+      // skip（略過開場）：直接進入穩定態。鯨魚序列維持完整（遊戲 skip 只跳 timeline，
+      // bg 的 BaseRandom 事件照常排程），但為了畫面即時穩定，直接把鯨魚放到 loop。
+      if (whaleIntro) {
+        bg.state.setAnimation(0, 'Idle_01', true);
+        bg.state.setAnimation(1, 'WhaleMove_01_R', true);
+      } else {
+        const bgIntro = bgAnims.find(n => n.startsWith('Start_') && bgAnims.includes(n.slice(6)));
+        bg.state.setAnimation(0, bgIntro ? bgIntro.slice(6) : bgLoopMain, true);
+      }
     }
   }
   // ---- SCENE（開場壽司特寫，獨立 spine 物件）----
