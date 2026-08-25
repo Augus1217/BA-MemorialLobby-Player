@@ -10,8 +10,11 @@ contextBridge.exposeInMainWorld('ba', {
   abortAnimVideo: () => ipcRenderer.send('anim-abort'),
   exportBgm: (payload) => ipcRenderer.invoke('bgm-export', payload),
   screenSize: () => ipcRenderer.invoke('screen-size'),
-  // Asset download
+  // Asset download (增量 + 串流)
   checkAssets: () => ipcRenderer.invoke('check-assets'),
   downloadAssets: (payload) => ipcRenderer.invoke('download-assets', payload),
   onDownloadProgress: (cb) => ipcRenderer.on('download-progress', (_, data) => cb(data)),
+  getStreamingMode: () => ipcRenderer.invoke('get-streaming-mode'),
+  setStreamingMode: (v) => ipcRenderer.invoke('set-streaming-mode', v),
+  ensureLobby: (payload) => ipcRenderer.invoke('ensure-lobby', payload),
 });

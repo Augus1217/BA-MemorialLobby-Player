@@ -3279,6 +3279,10 @@ async function loadLobby(name) {
 
   const entry = LOBBY_INDEX[name];
   if (!entry) { showErr(`索引中無 ${name}`); return; }
+  // 串流模式：確保該 lobby 的資源已在本地（隨播隨下）
+  if (_assetInfo?.lobbies?.[name]) {
+    try { await ensureLobbyAssets(name); } catch (e) { console.warn('[lobby] 串流下載失敗', e.message); }
+  }
   loadIdleClip(entry);
   loadingEl.classList.add('show');
   loadingText.textContent = `載入 ${prettyName(name)}`;
@@ -3568,6 +3572,41 @@ function fadeOutLoadingScreen() {
   setTimeout(() => ls.classList.add('hidden'), 900);
 }
 
+let _assetInfo = null; // 全域快取（供串流模式隨播隨下）
+
+async function ensureLobbyAssets(lobbyName) {
+  if (!window.ba?.ensureLobby || !_assetInfo?.packages || !_assetInfo?.lobbies) return;
+  const need = _assetInfo.lobbies[lobbyName];
+  if (!need) return;
+  // 快速檢查：若本地已齊，ensureLobby 會立刻返回 cached
+  const loading = document.getElementById('loading');
+  const loadingText = document.getElementById('loadingText');
+  let shown = false;
+  const showLoading = (msg) => {
+    if (!shown) { loading.classList.add('show'); shown = true; }
+    if (loadingText) loadingText.textContent = msg;
+  };
+  window.ba.onDownloadProgress?.((p) => {
+    showLoading(`下載 ${p.package} (${p.index + 1}/${p.total}) ${p.percent || 0}%`);
+  });
+  try {
+    const res = await window.ba.ensureLobby({
+      lobby: lobbyName,
+      version: _assetInfo.remoteVersion,
+      packages: _assetInfo.packages,
+      lobbies: _assetInfo.lobbies,
+    });
+    if (res && !res.cached && res.results) {
+      const failed = res.results.filter(r => !r.ok);
+      if (failed.length) console.warn('[lobby] 部分資源下載失敗', failed);
+    }
+  } catch (e) {
+    console.warn('[lobby] ensureLobby 失敗:', e.message);
+  } finally {
+    if (shown) { loading.classList.remove('show'); if (loadingText) loadingText.textContent = '載入中'; }
+  }
+}
+
 async function showAssetDownload(assetInfo) {
   const downloadPanel = document.getElementById('downloadPanel');
   const status = document.getElementById('assetStatus');
@@ -3576,21 +3615,58 @@ async function showAssetDownload(assetInfo) {
   const pctText = document.getElementById('assetProgressText');
   const detail = document.getElementById('assetDetail');
   const btn = document.getElementById('assetBtn');
+  const streamingRow = document.getElementById('streamingRow');
+  const streamingCk = document.getElementById('streamingCk');
 
   downloadPanel.style.display = 'block';
   progress.style.display = 'none';
   btn.style.display = 'none';
+  if (streamingRow) streamingRow.style.display = 'flex';
+
+  // 串流模式勾選框（僅打包模式有效，dev 模式提示）
+  let isStreaming = false;
+  try { isStreaming = await window.ba?.getStreamingMode?.(); } catch {}
+  if (streamingCk) {
+    streamingCk.checked = !!isStreaming;
+    streamingCk.onchange = async () => {
+      try { await window.ba?.setStreamingMode?.(streamingCk.checked); } catch {}
+      // 切換後重算顯示
+      isStreaming = streamingCk.checked;
+      updateDetail();
+    };
+  }
+
+  const isIncremental = assetInfo.schema === 2 && assetInfo.needsDownloadPacks;
+  const packsToShow = isIncremental
+    ? assetInfo.needsDownloadPacks.map(k => assetInfo.packages[k]).filter(Boolean)
+    : (assetInfo.packages ? Object.values(assetInfo.packages) : []);
+  const namesToShow = isIncremental ? assetInfo.needsDownloadPacks : (assetInfo.packages ? Object.keys(assetInfo.packages) : []);
+
+  const totalBytes = packsToShow.reduce((s, p) => s + (p.size || 0), 0);
+  const totalGB = (totalBytes / 1073741824).toFixed(1);
+
+  const updateDetail = () => {
+    if (isIncremental) {
+      if (namesToShow.length === 0) {
+        status.textContent = '資源已是最新';
+        detail.textContent = `已安裝 ${Object.keys(assetInfo.packages).length} 個包，全部為最新`;
+        if (streamingCk?.checked) detail.textContent += '（串流模式：僅核心需更新）';
+      } else {
+        const modeNote = isStreaming ? '（串流模式：僅核心）' : '';
+        detail.textContent = `${namesToShow.length} 個包待更新（約 ${totalGB} GB）${modeNote}：` + namesToShow.slice(0, 8).join('、') + (namesToShow.length > 8 ? '…' : '');
+      }
+    } else {
+      detail.textContent = namesToShow.length ? namesToShow.join('、') : '';
+    }
+  };
 
   if (assetInfo.hasAssets && assetInfo.remoteVersion) {
     status.textContent = `發現新版本 v${assetInfo.remoteVersion}（目前 v${assetInfo.localVersion || '無'}）`;
-    detail.textContent = '將更新以下資源：' + Object.keys(assetInfo.packages).join('、');
+    updateDetail();
   } else if (!assetInfo.hasAssets) {
-    const pkgNames = assetInfo.packages ? Object.keys(assetInfo.packages) : [];
-    const totalGB = assetInfo.packages
-      ? (Object.values(assetInfo.packages).reduce((s, p) => s + (p.size || 0), 0) / 1073741824).toFixed(1)
-      : '?';
     status.textContent = '首次使用需下載遊戲資源';
-    detail.textContent = `${pkgNames.length} 個套件（約 ${totalGB} GB）：` + pkgNames.join('、');
+    updateDetail();
+    if (streamingCk) detail.textContent += '\n勾選「串流模式」可先只下載核心（約 30MB），每選一位角色時再下載她的資源。';
   } else {
     status.textContent = '資源已是最新';
     btn.style.display = 'none';
@@ -3605,9 +3681,13 @@ async function showAssetDownload(assetInfo) {
   return new Promise((resolve) => {
     btn.onclick = async () => {
       btn.style.display = 'none';
+      if (streamingRow) streamingRow.style.display = 'none';
       progress.style.display = 'block';
       fill.style.width = '0%';
       pctText.textContent = '0%';
+      if (streamingCk) {
+        try { await window.ba?.setStreamingMode?.(streamingCk.checked); } catch {}
+      }
 
       window.ba.onDownloadProgress?.((p) => {
         if (p.status === 'downloading') {
@@ -3650,8 +3730,10 @@ async function init() {
         window.ba.checkAssets(),
         new Promise((_, rej) => setTimeout(() => rej(new Error('checkAssets timeout')), 10000)),
       ]);
+      _assetInfo = assetInfo;
       if (assetInfo.needsDownload) {
         await showAssetDownload(assetInfo);
+        try { _assetInfo = await window.ba.checkAssets(); } catch {}
       }
     } catch (e) {
       console.warn('[lobby] Asset check failed/skipped:', e.message);

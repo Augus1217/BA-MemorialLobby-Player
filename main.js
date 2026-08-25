@@ -313,6 +313,30 @@ function getAssetsVersionPath() {
   return path.join(getAssetsDir(), '.version');
 }
 
+function getInstalledPath() {
+  return path.join(getAssetsDir(), '.installed.json');
+}
+function readInstalled() {
+  try { return JSON.parse(fs.readFileSync(getInstalledPath(), 'utf-8')); }
+  catch { return {}; }
+}
+function writeInstalled(map) {
+  fs.mkdirSync(getAssetsDir(), { recursive: true });
+  fs.writeFileSync(getInstalledPath(), JSON.stringify(map, null, 2));
+}
+function getStreamingFlagPath() {
+  return path.join(getAssetsDir(), '.streaming');
+}
+function isStreamingMode() {
+  try { return fs.readFileSync(getStreamingFlagPath(), 'utf-8').trim() === '1'; }
+  catch { return false; }
+}
+function setStreamingMode(v) {
+  fs.mkdirSync(getAssetsDir(), { recursive: true });
+  if (v) fs.writeFileSync(getStreamingFlagPath(), '1');
+  else try { fs.unlinkSync(getStreamingFlagPath()); } catch {}
+}
+
 function readLocalVersion() {
   try {
     return fs.readFileSync(getAssetsVersionPath(), 'utf-8').trim();
@@ -368,15 +392,24 @@ function downloadFile(url, dest, onProgress) {
 }
 
 async function extractTarGz(tarPath, destDir) {
-  // tar 內容路徑為 "assets/<pkg>/..."（見上游 build_assets.py step_package 的
-  // arcname），剝掉兩層後檔案才會直接落在 destDir（= assets/<pkg>）。
-  // 先前 strip:1 會解成 assets/<pkg>/<pkg>/... 多套一層。
-  await tar.x({ file: tarPath, cwd: destDir, strip: 2 });
+  // v1 舊包：arcname "assets/<pkg>/..."，曾用 strip:2 到 assets/<pkg>
+  // v2 增量包：同樣 "assets/..."，統一 strip:1 到 assets/ 根目錄即正確
+  // 為相容兩者：嘗試 strip:1 到 assets 根；若 destDir 是子目錄則退回 strip:2
+  try {
+    await tar.x({ file: tarPath, cwd: destDir, strip: 2 });
+  } catch {
+    await tar.x({ file: tarPath, cwd: getAssetsDir(), strip: 1 });
+  }
+}
+async function extractTarGzToAssets(tarPath) {
+  await tar.x({ file: tarPath, cwd: getAssetsDir(), strip: 1 });
 }
 
 ipcMain.handle('check-assets', async () => {
   const localVersion = readLocalVersion();
+  const installed = readInstalled();
   const assetsDir = getAssetsDir();
+  const streaming = isStreamingMode();
   const hasAssets = fs.existsSync(assetsDir) && fs.existsSync(path.join(assetsDir, 'spine'));
 
   let remoteVersion = null;
@@ -386,54 +419,92 @@ ipcMain.handle('check-assets', async () => {
     console.warn('[assets] 無法取得遠端版本:', e.message);
   }
 
+  // 計算需要下載的包（schema 2 增量；schema 1 回退為整版）
+  let needsDownloadPacks = [];
+  if (remoteVersion?.packages) {
+    if (remoteVersion.schema === 2) {
+      for (const [k, v] of Object.entries(remoteVersion.packages)) {
+        if (installed[k] !== v.sha256) needsDownloadPacks.push(k);
+      }
+      // 串流模式：初始只需 core
+      if (streaming) {
+        const coreNeeds = needsDownloadPacks.filter(k => k === 'core' || k === 'intro');
+        // 若 core 已齊，即使其他 lobby 缺也不阻擋進入
+        if (coreNeeds.length === 0 && hasAssets) needsDownloadPacks = [];
+        else needsDownloadPacks = coreNeeds;
+      }
+    } else {
+      if (!hasAssets || (remoteVersion && localVersion !== remoteVersion.version)) {
+        needsDownloadPacks = Object.keys(remoteVersion.packages);
+      }
+    }
+  }
+
   return {
     localVersion,
     hasAssets,
     remoteVersion: remoteVersion?.version || null,
-    needsDownload: !hasAssets || (remoteVersion && localVersion !== remoteVersion.version),
+    schema: remoteVersion?.schema || 1,
+    needsDownload: needsDownloadPacks.length > 0 || !hasAssets,
+    needsDownloadPacks,
     packages: remoteVersion?.packages || null,
+    lobbies: remoteVersion?.lobbies || null,
+    streaming,
+    installed,
   };
 });
 
-ipcMain.handle('download-assets', async (event, { version, packages }) => {
+ipcMain.handle('get-streaming-mode', async () => isStreamingMode());
+ipcMain.handle('set-streaming-mode', async (event, v) => {
+  setStreamingMode(!!v);
+  return isStreamingMode();
+});
+
+ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks }) => {
   const assetsDir = getAssetsDir();
+  const installed = readInstalled();
+  const remotePackages = packages || {};
+  // 僅下載需要的包（增量）：sha 不同的才下；若呼叫端指定 onlyPacks 則限於該清單
+  let pkgNames;
+  if (onlyPacks && Array.isArray(onlyPacks)) {
+    pkgNames = onlyPacks.filter(k => remotePackages[k] && installed[k] !== remotePackages[k].sha256);
+    if (pkgNames.length === 0) pkgNames = onlyPacks.filter(k => remotePackages[k]); // 串流：即使 sha 相同但本地檔案遺失也補下
+  } else {
+    pkgNames = Object.keys(remotePackages).filter(k => installed[k] !== remotePackages[k].sha256);
+    // 舊版 schema 1 無 per-pack sha 回退為全量
+    if (pkgNames.length === 0 && !Object.keys(installed).length) pkgNames = Object.keys(remotePackages);
+  }
+  if (pkgNames.length === 0) {
+    try { fs.writeFileSync(getAssetsVersionPath(), version); } catch {}
+    return [];
+  }
   const tmpDir = path.join(os.tmpdir(), 'ba_download_' + Date.now());
   fs.mkdirSync(tmpDir, { recursive: true });
-
-  const pkgNames = Object.keys(packages);
   const results = [];
-
   for (let i = 0; i < pkgNames.length; i++) {
     const name = pkgNames[i];
-    const pkg = packages[name];
-    const tarName = `assets-${name}-v${version}.tar.gz`;
+    const pkg = remotePackages[name];
+    if (!pkg) { results.push({ name, ok: false, error: 'not in remote' }); continue; }
+    const tarName = `assets-${name.replace(/\//g, '_')}-v${version}.tar.gz`;
     const tarPath = path.join(tmpDir, tarName);
-    const pkgDir = path.join(assetsDir, name);
-
-    // Send progress to renderer
     const sendProgress = (p) => {
       if (win && !win.isDestroyed()) {
-        win.webContents.send('download-progress', {
-          package: name,
-          index: i,
-          total: pkgNames.length,
-          ...p,
-        });
+        win.webContents.send('download-progress', { package: name, index: i, total: pkgNames.length, ...p });
       }
     };
-
     try {
       sendProgress({ status: 'downloading', percent: 0 });
       const url = pkg.url || `${ASSETS_PACKAGES_URL}/v${version}/${tarName}`;
       await downloadFile(url, tarPath, (dl, total) => {
         sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total });
       });
-
       sendProgress({ status: 'extracting', percent: 0 });
-      fs.mkdirSync(pkgDir, { recursive: true });
-      await extractTarGz(tarPath, pkgDir);
+      // v2：arcname "assets/..." strip:1 到 assets/ 根；兼容舊包
+      try { await extractTarGzToAssets(tarPath); }
+      catch { await extractTarGz(tarPath, path.join(assetsDir, name.split('/')[0])); }
+      installed[name] = pkg.sha256;
+      writeInstalled(installed);
       sendProgress({ status: 'done', percent: 100 });
-
       results.push({ name, ok: true });
     } catch (e) {
       console.error(`[assets] ${name} 失敗:`, e.message);
@@ -441,17 +512,71 @@ ipcMain.handle('download-assets', async (event, { version, packages }) => {
       results.push({ name, ok: false, error: e.message });
     }
   }
-
-  // Write .version file
-  try {
-    fs.mkdirSync(assetsDir, { recursive: true });
-    fs.writeFileSync(getAssetsVersionPath(), version);
-  } catch {}
-
-  // Cleanup
+  try { fs.mkdirSync(assetsDir, { recursive: true }); fs.writeFileSync(getAssetsVersionPath(), version); } catch {}
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-
   return results;
+});
+
+// 串流模式：確保某個 lobby 的資源已就緒（core + 該 lobby 需要的包）
+ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies }) => {
+  const assetsDir = getAssetsDir();
+  const installed = readInstalled();
+  // lobby 需要哪些包（由 assets_version.json 的 lobbies 表提供）
+  let packs = [];
+  if (lobbies?.[lobby]?.packs) packs = [...lobbies[lobby].packs];
+  else {
+    // 回退：至少確保 lobby 本身
+    const k = 'lobby/' + lobby;
+    if (packages?.[k]) packs = [k];
+  }
+  // core 必須先有
+  if (packages?.['core'] && installed['core'] !== packages['core'].sha256) packs.unshift('core');
+  packs = [...new Set(packs)];
+  const missing = packs.filter(k => installed[k] !== packages[k]?.sha256);
+  // 額外檢查：即使 sha 相同但目錄其實不存在也視為缺失
+  const actuallyMissing = missing.length ? missing : packs.filter(k => {
+    const p = packages[k];
+    if (!p) return false;
+    // 檢查代表性路徑是否存在
+    if (k.startsWith('lobby/')) return !fs.existsSync(path.join(assetsDir, 'spine', k.split('/')[1]));
+    if (k.startsWith('voice/')) return !fs.existsSync(path.join(assetsDir, 'voice', k.split('/')[1]));
+    return false;
+  });
+  if (actuallyMissing.length === 0) return { ok: true, cached: true };
+  // 下載指定 packs
+  const tmpDir = path.join(os.tmpdir(), 'ba_download_' + Date.now());
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const results = [];
+  for (let i = 0; i < actuallyMissing.length; i++) {
+    const name = actuallyMissing[i];
+    const pkg = packages[name];
+    const tarName = `assets-${name.replace(/\//g, '_')}-v${version}.tar.gz`;
+    const tarPath = path.join(tmpDir, tarName);
+    const sendProgress = (p) => {
+      if (win && !win.isDestroyed()) win.webContents.send('download-progress', { package: name, index: i, total: actuallyMissing.length, ...p });
+    };
+    try {
+      sendProgress({ status: 'downloading', percent: 0 });
+      const url = pkg.url || `${ASSETS_PACKAGES_URL}/v${version}/${tarName}`;
+      await downloadFile(url, tarPath, (dl, total) => {
+        sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total });
+      });
+      sendProgress({ status: 'extracting', percent: 0 });
+      await extractTarGzToAssets(tarPath);
+      installed[name] = pkg.sha256;
+      writeInstalled(installed);
+      sendProgress({ status: 'done', percent: 100 });
+      results.push({ name, ok: true });
+    } catch (e) {
+      console.error(`[assets] ${name} 串流失敗:`, e.message);
+      sendProgress({ status: 'error', error: e.message });
+      results.push({ name, ok: false, error: e.message });
+    }
+  }
+  try { fs.writeFileSync(getAssetsVersionPath(), version); } catch {}
+  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  const failed = results.filter(r => !r.ok);
+  return failed.length ? { ok: false, results } : { ok: true, results };
 });
 
 app.whenReady().then(async () => {
