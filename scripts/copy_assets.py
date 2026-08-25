@@ -297,7 +297,7 @@ def main():
                     continue
                 if f.endswith(".png") and re.search(r"_(1|2|3)\.png$", f) and f not in main_atlas_refs:
                     continue
-                if "_scene" in f or "_bg" in f:
+                if "_scene" in f or "_bg" in f or "_background" in f:
                     continue
                 if f.endswith((".skel", ".atlas", ".png", ".json")):
                     sub = os.path.join(dst, rel) if rel != "." else dst
@@ -320,18 +320,20 @@ def main():
         if not os.path.isdir(src_lobby):
             continue
         for sub in os.listdir(src_lobby):
-            if "Scene" not in sub:
+            low = sub.lower()
+            if "scene" not in low and "_bg" not in low and "_background" not in low:
                 continue
             src = os.path.join(src_lobby, sub)
             if not os.path.isdir(src):
                 continue
             dst = os.path.join(DST_SCENE, name)
             os.makedirs(dst, exist_ok=True)
+            existing = {e.lower() for e in os.listdir(dst)}
             copied = 0
             for f in os.listdir(src):
                 if re.search(r"_(1|2|3)\.(skel|atlas|png)$", f):
                     continue
-                if f.endswith((".skel", ".atlas", ".png")):
+                if f.endswith((".skel", ".atlas", ".png")) and f.lower() not in existing:
                     shutil.copy2(os.path.join(src, f), os.path.join(dst, f))
                     copied += 1
             if copied:
@@ -537,30 +539,29 @@ def gen_manifest():
                          if f.endswith(".atlas") and not re.search(r"_[1-3]\.atlas$", f))
         if not skels or not atlases:
             continue
-        # 場景疊加層（assets/scene/<name>）：
-        #   - 含 _scene 的是「前景特寫」（開場閃白時移除），放 "scene" 鍵；
-        #   - 含 _bg 的是「背景」（持續繪製於本體之後），放 "bg" 鍵。
-        # Akari 等 lobby 的 scene 目錄可能同時有 _bg（已併入主骨架，應忽略）與
-        # _scene（特寫）兩組——優先選 _scene，因此只有 _bg 孤身出現（如 Yuzu 的
-        # yuzu_bg）時才當背景處理，避免重疊繪製。
-        def scene_rank(f):
-            return (1 if "_bg" in f.lower() else 0, f)
-        skels = sorted(skels, key=scene_rank)
-        atlases = sorted(atlases, key=scene_rank)
-        atlas = atlases[0]
-        atlas_base = os.path.splitext(atlas)[0].lower()
-        skel = next((s for s in skels
-                     if os.path.splitext(s)[0].lower() == atlas_base), skels[0])
-        pages = []
-        atxt = os.path.join(d, atlas)
-        if os.path.exists(atxt):
-            with open(atxt) as fh:
-                pages = [l.strip() for l in fh.read().splitlines() if l.strip().endswith(".png")]
-        # _bg／<數字>BG 背景 → "bg"（含 CH0060BG_home 這種無底線的 <ID>BG 命名）；
-        # 其餘（_scene 特寫或一般疊加）→ "scene"
-        low_skel = skel.lower()
-        key = "bg" if ("_bg" in low_skel or re.search(r"\dbg_", low_skel)) else "scene"
-        idx.setdefault(name, {})[key] = {"skel": skel, "atlas": atlas, "png": pages}
+        # 場景疊加層（assets/scene/<name>）分兩組「各自獨立播出」：
+        #   - 含 _bg／_background：「背景」，持續繪製於本體之後 → "bg" 鍵；
+        #   - 其餘（_scene 特寫或一般疊加）→ "scene" 鍵（開場閃白時移除）。
+        # 兩組可並存（如 Akari：akari_bg 背景 + akari_scene 特寫），分別對應
+        # BA 的獨立 GameObject，以人物同一變換分開繪製。
+        def is_bg(f):
+            low = f.lower()
+            return "_bg" in low or "_background" in low or bool(re.search(r"\dbg_", low))
+        def emit_overlay(key, skel_list, atlas_list):
+            if not skel_list or not atlas_list:
+                return
+            atlas = atlas_list[0]
+            atlas_base = os.path.splitext(atlas)[0].lower()
+            skel = next((s for s in skel_list
+                         if os.path.splitext(s)[0].lower() == atlas_base), skel_list[0])
+            pages = []
+            atxt = os.path.join(d, atlas)
+            if os.path.exists(atxt):
+                with open(atxt) as fh:
+                    pages = [l.strip() for l in fh.read().splitlines() if l.strip().endswith(".png")]
+            idx.setdefault(name, {})[key] = {"skel": skel, "atlas": atlas, "png": pages}
+        emit_overlay("bg", [f for f in skels if is_bg(f)], [f for f in atlases if is_bg(f)])
+        emit_overlay("scene", [f for f in skels if not is_bg(f)], [f for f in atlases if not is_bg(f)])
     # manifest 同時寫到 assets/ 根目錄（開發模式）與 assets/data/
     # （打包模式：lobby_index.json 必須進 data 包，否則純下載的
     # Player fetch assets/lobby_index.json 會 404 起不來）
