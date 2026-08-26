@@ -39,6 +39,20 @@ export default defineConfig({
       });
     },
   }, {
+    name: 'copy-sw-root',
+    // ba-web 的 Service Worker 必須在站點根（scope 涵蓋整個 Pages 子路徑）
+    generateBundle() {
+      try {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'sw.js',
+          source: readFileSync(resolve(__dirname, 'renderer', 'sw.js'), 'utf-8'),
+        });
+      } catch (e) {
+        console.warn('[build] copy sw.js failed:', e.message);
+      }
+    },
+  }, {
     name: 'copy-root-index',
     closeBundle() {
       const src = resolve(__dirname, 'dist', 'index.html');

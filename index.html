@@ -151,16 +151,34 @@
     .sb-empty { color: rgba(210,220,255,.5); font-size: 13px; padding: 22px 8px; text-align: center; }
 
     /* export panel (video export) */
-    #exportPanel {
+    #exportPanel, #settingsPanel {
       position: fixed; z-index: 60; left: 50%; top: 50%; transform: translate(-50%, -50%);
-      width: 360px; background: rgba(10,12,28,.96); border: 1px solid rgba(255,255,255,.16);
-      border-radius: 14px; padding: 18px 20px; box-shadow: 0 20px 60px rgba(0,0,0,.6);
-      display: none; color: #e8ecff; backdrop-filter: blur(10px);
+      width: 360px; background:
+        linear-gradient(165deg, rgba(28,42,88,.97) 0%, rgba(12,16,38,.98) 55%, rgba(8,10,26,.98) 100%);
+      border: 1px solid rgba(120,160,255,.32);
+      border-radius: 14px; padding: 18px 20px; box-shadow:
+        0 24px 70px rgba(0,0,0,.65),
+        inset 0 1px 0 rgba(160,190,255,.18),
+        0 0 0 1px rgba(76,167,255,.08);
+      display: none; color: #e8ecff; backdrop-filter: blur(12px);
     }
-    #exportPanel.open { display: block; }
-    .panel-title { font-size: 15px; font-weight: 600; letter-spacing: .1em; margin-bottom: 14px;
-      display: flex; justify-content: space-between; align-items: baseline; }
-    #expChar { font-size: 12px; color: #9aa4e0; letter-spacing: .04em; }
+    #exportPanel.open, #settingsPanel.open { display: block; animation: panelIn .22s ease-out; }
+    @keyframes panelIn {
+      from { opacity: 0; transform: translate(-50%, -48%) scale(.96); }
+      to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    }
+    .panel-title {
+      font-size: 15px; font-weight: 600; letter-spacing: .14em; margin-bottom: 15px;
+      display: flex; align-items: center; gap: 10px; color: #dbe6ff;
+    }
+    .panel-title::before, .panel-title::after {
+      content: ''; height: 2px; flex: none;
+      background: linear-gradient(90deg, transparent, rgba(108,166,255,.85));
+      border-radius: 1px;
+    }
+    .panel-title::before { width: 22px; }
+    .panel-title::after { flex: 1; opacity: .45; }
+    #expChar { font-size: 12px; color: #9aa4e0; letter-spacing: .04em; margin-left: auto; }
     .panel-row { display: flex; align-items: center; justify-content: space-between; margin: 11px 0; }
     .panel-row .lbl { font-size: 12px; color: #9aa4e0; letter-spacing: .08em; }
     .segs { display: flex; gap: 4px; }
@@ -169,7 +187,11 @@
       border-radius: 6px; padding: 5px 11px; font-size: 12px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; transition: background .2s;
     }
     .segs button:hover { background: rgba(255,255,255,.13); }
-    .segs button.on { background: rgba(120,140,255,.35); border-color: rgba(169,182,255,.7); color: #fff; }
+    .segs button.on {
+      background: linear-gradient(135deg, rgba(96,150,255,.5), rgba(76,120,240,.42));
+      border-color: rgba(140,180,255,.8); color: #fff;
+      box-shadow: 0 0 10px rgba(96,150,255,.3), inset 0 1px 0 rgba(200,220,255,.25);
+    }
     .segs button.dis { opacity: .35; pointer-events: none; }
     #expTalkSel {
       background: rgba(255,255,255,.07); color: #e8ecff; border: 1px solid rgba(255,255,255,.14);
@@ -183,16 +205,43 @@
     }
     #expCustomRow input::-webkit-outer-spin-button, #expCustomRow input::-webkit-inner-spin-button { -webkit-appearance: none; }
     .ck { font-size: 12px; color: #cfd6ff; display: flex; align-items: center; gap: 6px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; }
-    .ck input { accent-color: #8fa0ff; }
+    .ck input { accent-color: #4c8dff; }
     .ck.dis { opacity: .35; pointer-events: none; }
     .panel-btns { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
     .btnTxt {
       background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); color: #e8ecff;
       border-radius: 8px; padding: 8px 16px; font-size: 13px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; transition: background .2s;
     }
-    .btnTxt:hover { background: rgba(255,255,255,.15); }
-    .btnTxt.primary { background: rgba(120,140,255,.4); border-color: rgba(169,182,255,.7); }
-    .btnTxt.primary:hover { background: rgba(140,158,255,.55); }
+    .btnTxt:hover { background: rgba(255,255,255,.15); border-color: rgba(169,182,255,.45); }
+    .btnTxt.primary {
+      background: linear-gradient(135deg, rgba(96,150,255,.55), rgba(76,120,240,.5));
+      border-color: rgba(140,180,255,.75);
+      box-shadow: 0 2px 12px rgba(76,140,255,.25);
+    }
+    .btnTxt.primary:hover { background: linear-gradient(135deg, rgba(116,168,255,.7), rgba(90,136,250,.62)); }
+
+    /* settings panel */
+    #settingsPanel { width: 400px; max-height: 82vh; overflow-y: auto; }
+    #settingsPanel::-webkit-scrollbar { width: 8px; }
+    #settingsPanel::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 4px; }
+    .set-section { border-top: 1px solid rgba(130,160,255,.14); padding-top: 12px; margin-top: 14px; }
+    .set-section:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+    .set-head {
+      font-size: 12px; color: #8fb4ff; letter-spacing: .16em; font-weight: 600; margin-bottom: 9px;
+      display: flex; align-items: center; gap: 7px;
+    }
+    .set-head::before {
+      content: ''; width: 3px; height: 11px; border-radius: 2px;
+      background: linear-gradient(180deg, #6ca6ff, #4c7cff);
+      box-shadow: 0 0 6px rgba(108,166,255,.6);
+    }
+    #setLangSegs button { min-width: 52px; }
+    #setStreamingRow { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    #setStreamingDesc { font-size: 11px; color: rgba(200,210,255,.55); line-height: 1.5; margin-top: 6px; }
+    #setAssetsStatus { font-size: 12px; color: #cfd6ff; line-height: 1.7; }
+    #setAssetsStatus .ok { color: #8fd49c; }
+    #setAssetsStatus .warn { color: #e8c268; }
+    #setDownloadBtn { width: 100%; margin-top: 10px; }
 
     /* REC badge */
     #recBadge {
@@ -292,7 +341,7 @@
 
     /* recording: keep the window as clean as the captured canvas */
     body.recording #hud, body.recording #fx, body.recording #btnStudents,
-    body.recording #sidePanel, body.recording #exportPanel, body.recording #chatDialog { display: none !important; }
+    body.recording #sidePanel, body.recording #exportPanel, body.recording #settingsPanel, body.recording #chatDialog { display: none !important; }
 
     /* Loading screen: intro + spinner + 確認中です…… */
     #loadingScreen {
@@ -384,10 +433,15 @@
       --cur-img: url('assets/ui/PCIcon_MousePoint.png');
       --cur-hx: 2; --cur-hy: 2;
     }
+    html.ba-cursor-off, html.ba-cursor-off * { cursor: auto !important; }
   </style>
   <script>
     // Scale the BA cursor image with the window (3840-wide design reference).
     function updateCursor() {
+      let cursorOn = true;
+      try { cursorOn = localStorage.getItem('ba_cursor') !== '0'; } catch {}
+      document.documentElement.classList.toggle('ba-cursor-off', !cursorOn);
+      if (!cursorOn) return;
       const img = updateCursor._img;
       if (!img || !img.complete) return;
       const scale = Math.max(0.45, window.innerWidth / 3840);
@@ -429,6 +483,7 @@
       <button id="btnFull" class="btn" style="margin-left:10px" data-i18n-title="hud.fullscreen" title="全螢幕">⤢</button>
       <button id="btnBgm" class="btn" style="margin-left:10px" data-i18n-title="hud.bgm" title="音樂">♪</button>
       <button id="btnExport" class="btn" style="margin-left:10px" data-i18n-title="hud.export" title="匯出影片">⏺</button>
+      <button id="btnSettings" class="btn" style="margin-left:10px" data-i18n-title="hud.settings" title="設定">⚙</button>
     </div>
   </div>
 
@@ -496,6 +551,53 @@
     </div>
   </div>
 
+  <!-- Settings panel: language / download mode / assets -->
+  <div id="settingsPanel">
+    <div class="panel-title" data-i18n="set.title">設定</div>
+
+    <div class="set-section">
+      <div class="set-head" data-i18n="set.lang">語言</div>
+      <div class="panel-row">
+        <span class="lbl" data-i18n="set.uiLang">介面與名稱語言</span>
+        <div class="segs" id="setLangSegs"></div>
+      </div>
+    </div>
+
+    <div class="set-section">
+      <div class="set-head" data-i18n="set.download">資源下載</div>
+      <div id="setStreamingRow">
+        <span class="lbl" data-i18n="set.mode">下載模式</span>
+        <div class="segs" id="setModeSegs">
+          <button data-m="full" data-i18n="set.modeFull">完整安裝</button>
+          <button data-m="streaming" data-i18n="set.modeStreaming">串流模式</button>
+        </div>
+      </div>
+      <div id="setStreamingDesc" data-i18n="set.modeStreamingDesc">串流模式：初始只下載核心資源，進入大廳時才下載該角色的資料。可離線播放已下載過的大廳。</div>
+    </div>
+
+    <div class="set-section">
+      <div class="set-head" data-i18n="set.effects">視覺效果</div>
+      <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setCursorCk"> <span data-i18n="set.cursor">BA 遊標</span></label>
+      <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setClickFxCk"> <span data-i18n="set.clickfx">點擊特效 (Click FX)</span></label>
+    </div>
+
+    <div class="set-section">
+      <div class="set-head" data-i18n="set.assets">資源狀態</div>
+      <div id="setAssetsStatus"></div>
+      <button id="setDownloadBtn" class="btnTxt primary" style="display:none" data-i18n="dl.start">開始下載</button>
+      <div id="setAssetsProgress" style="display:none; margin-top:10px;">
+        <div style="background:rgba(255,255,255,.08); border-radius:6px; height:14px; overflow:hidden;">
+          <div id="setProgressFill" style="height:100%; width:0%; background:rgba(120,140,255,.55); transition:width .3s;"></div>
+        </div>
+        <div id="setProgressText" style="font-size:11px; color:#9aa4e0; margin-top:5px;">0%</div>
+      </div>
+    </div>
+
+    <div class="panel-btns">
+      <button id="setClose" class="btnTxt primary" data-i18n="set.close">關閉</button>
+    </div>
+  </div>
+
   <div id="recBadge">
     <span class="rec-dot"></span> REC <span id="recTime">0:00</span>
     <span class="rec-sep">/</span> <span id="recDur">0:10</span>
@@ -540,6 +642,7 @@
       console.log('[errhook-reject]', e.reason && e.reason.stack ? e.reason.stack : String(e.reason));
     });
   </script>
+  <script type="module" src="/renderer/ba-web.js"></script>
   <script type="module" src="/renderer/app.js"></script>
 </body>
 </html>

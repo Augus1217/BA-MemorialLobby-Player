@@ -1,0 +1,2408 @@
+{
+ "Airi0_home": {
+  "skel": "./Airi_home.skel",
+  "atlas": "./Airi_home.atlas",
+  "png": [
+   "Airi_home.png",
+   "Airi_home2.png"
+  ]
+ },
+ "Airi_home": {
+  "skel": "./Airi_home.skel",
+  "atlas": "./Airi_home.atlas",
+  "png": [
+   "Airi_home.png",
+   "Airi_home2.png"
+  ]
+ },
+ "Akane_home": {
+  "skel": "./Akane_home.skel",
+  "atlas": "./Akane_home.atlas",
+  "png": [
+   "Akane_home.png"
+  ]
+ },
+ "Akari_home": {
+  "skel": "Akari_home/akari_home.skel",
+  "atlas": "Akari_home/akari_home.atlas",
+  "png": [
+   "akari_home.png"
+  ],
+  "scene": {
+   "skel": "akari_scene.skel",
+   "atlas": "akari_scene.atlas",
+   "png": [
+    "akari_scene.png"
+   ]
+  },
+  "bg": {
+   "skel": "akari_bg.skel",
+   "atlas": "akari_bg.atlas",
+   "png": [
+    "akari_bg.png"
+   ]
+  }
+ },
+ "Ako_home": {
+  "skel": "./Ako_home.skel",
+  "atlas": "./Ako_home.atlas",
+  "png": [
+   "Ako_home.png",
+   "Ako_home2.png"
+  ]
+ },
+ "Aris_home": {
+  "skel": "./Aris_home.skel",
+  "atlas": "./Aris_home.atlas",
+  "png": [
+   "Aris_home.png",
+   "Aris_home2.png"
+  ]
+ },
+ "Aru_home": {
+  "skel": "Aru_home/Aru_home.skel",
+  "atlas": "Aru_home/Aru_home.atlas",
+  "png": [
+   "Aru_home.png",
+   "Aru_home2.png",
+   "Aru_home3.png"
+  ],
+  "scene": {
+   "skel": "Aru_scene.skel",
+   "atlas": "Aru_scene.atlas",
+   "png": [
+    "Aru_scene.png"
+   ]
+  }
+ },
+ "Aru_newyear_home": {
+  "skel": "./Aru_newyear_home.skel",
+  "atlas": "./Aru_newyear_home.atlas",
+  "png": [
+   "Aru_newyear_home.png",
+   "Aru_newyear_home2.png",
+   "Aru_newyear_home3.png"
+  ]
+ },
+ "Asuna_home": {
+  "skel": "./Asuna_home.skel",
+  "atlas": "./Asuna_home.atlas",
+  "png": [
+   "Asuna_home.png",
+   "Asuna_home2.png"
+  ]
+ },
+ "Atsuko_home": {
+  "skel": "./Atsuko_home.skel",
+  "atlas": "./Atsuko_home.atlas",
+  "png": [
+   "Atsuko_home.png",
+   "Atsuko_home2.png"
+  ]
+ },
+ "Ayane_home": {
+  "skel": "./Ayane_home.skel",
+  "atlas": "./Ayane_home.atlas",
+  "png": [
+   "Ayane_home.png",
+   "Ayane_home2.png",
+   "Ayane_home3.png"
+  ]
+ },
+ "Azusa_home": {
+  "skel": "./Azusa_home.skel",
+  "atlas": "./Azusa_home.atlas",
+  "png": [
+   "Azusa_home.png",
+   "Azusa_home2.png"
+  ]
+ },
+ "Azusa_swimsuit_home": {
+  "skel": "./Azusa_swimsuit_home.skel",
+  "atlas": "./Azusa_swimsuit_home.atlas",
+  "png": [
+   "Azusa_swimsuit_home.png",
+   "Azusa_swimsuit_home2.png"
+  ]
+ },
+ "CH0058_home": {
+  "skel": "./CH0058_home.skel",
+  "atlas": "./CH0058_home.atlas",
+  "png": [
+   "CH0058_home.png",
+   "CH0058_home2.png"
+  ]
+ },
+ "CH0060_home": {
+  "skel": "CH0060_home/CH0060_home.skel",
+  "atlas": "CH0060_home/CH0060_home.atlas",
+  "png": [
+   "CH0060_home.png"
+  ],
+  "bg": {
+   "skel": "CH0060BG_home.skel",
+   "atlas": "CH0060BG_home.atlas",
+   "png": [
+    "CH0060BG_home.png"
+   ]
+  }
+ },
+ "CH0063_home": {
+  "skel": "./CH0063_home.skel",
+  "atlas": "./CH0063_home.atlas",
+  "png": [
+   "CH0063_home.png",
+   "CH0063_home2.png"
+  ]
+ },
+ "CH0064_home": {
+  "skel": "./CH0064_home.skel",
+  "atlas": "./CH0064_home.atlas",
+  "png": [
+   "CH0064_home.png",
+   "CH0064_home2.png"
+  ]
+ },
+ "CH0066_home": {
+  "skel": "./CH0066_home.skel",
+  "atlas": "./CH0066_home.atlas",
+  "png": [
+   "CH0066_home.png",
+   "CH0066_home2.png"
+  ]
+ },
+ "CH0069_home": {
+  "skel": "./CH0069_home.skel",
+  "atlas": "./CH0069_home.atlas",
+  "png": [
+   "CH0069_home.png",
+   "CH0069_home2.png",
+   "CH0069_home3.png",
+   "CH0069_home4.png"
+  ]
+ },
+ "CH0070_home": {
+  "skel": "./CH0070_home.skel",
+  "atlas": "./CH0070_home.atlas",
+  "png": [
+   "CH0070_home.png",
+   "CH0070_home_2.png",
+   "CH0070_home_3.png"
+  ]
+ },
+ "CH0071_home": {
+  "skel": "./CH0071_home.skel",
+  "atlas": "./CH0071_home.atlas",
+  "png": [
+   "CH0071_home.png",
+   "CH0071_home2.png",
+   "CH0071_home3.png"
+  ]
+ },
+ "CH0079_home": {
+  "skel": "./CH0079_home.skel",
+  "atlas": "./CH0079_home.atlas",
+  "png": [
+   "CH0079_home.png",
+   "CH0079_home2.png",
+   "CH0079_home3.png"
+  ]
+ },
+ "CH0080_home": {
+  "skel": "./CH0080_home.skel",
+  "atlas": "./CH0080_home.atlas",
+  "png": [
+   "CH0080_home.png",
+   "CH0080_home_2.png",
+   "CH0080_home_3.png"
+  ]
+ },
+ "CH0081_home": {
+  "skel": "./CH0081_home.skel",
+  "atlas": "./CH0081_home.atlas",
+  "png": [
+   "CH0081_home.png",
+   "CH0081_home2.png"
+  ]
+ },
+ "CH0082_home": {
+  "skel": "./CH0082_home.skel",
+  "atlas": "./CH0082_home.atlas",
+  "png": [
+   "CH0082_home.png",
+   "CH0082_home_2.png"
+  ]
+ },
+ "CH0086_home": {
+  "skel": "./CH0086_home.skel",
+  "atlas": "./CH0086_home.atlas",
+  "png": [
+   "CH0086_home.png",
+   "CH0086_home2.png",
+   "CH0086_home3.png"
+  ]
+ },
+ "CH0087_home": {
+  "skel": "./CH0087_home.skel",
+  "atlas": "./CH0087_home.atlas",
+  "png": [
+   "CH0087_home.png",
+   "CH0087_home2.png",
+   "CH0087_home3.png"
+  ]
+ },
+ "CH0088_home": {
+  "skel": "./CH0088_home.skel",
+  "atlas": "./CH0088_home.atlas",
+  "png": [
+   "CH0088_home.png",
+   "CH0088_home2.png",
+   "CH0088_home3.png"
+  ]
+ },
+ "CH0089_home": {
+  "skel": "./CH0089_home.skel",
+  "atlas": "./CH0089_home.atlas",
+  "png": [
+   "CH0089_home.png",
+   "CH0089_home2.png",
+   "CH0089_home3.png"
+  ]
+ },
+ "CH0092_home": {
+  "skel": "./CH0092_home.skel",
+  "atlas": "./CH0092_home.atlas",
+  "png": [
+   "CH0092_home.png",
+   "CH0092_home2.png",
+   "CH0092_home3.png"
+  ]
+ },
+ "CH0095_home": {
+  "skel": "./CH0095_home.skel",
+  "atlas": "./CH0095_home.atlas",
+  "png": [
+   "CH0095_home.png",
+   "CH0095_home2.png"
+  ]
+ },
+ "CH0098_home": {
+  "skel": "./CH0098_home.skel",
+  "atlas": "./CH0098_home.atlas",
+  "png": [
+   "CH0098_home.png",
+   "CH0098_home2.png"
+  ]
+ },
+ "CH0099_home": {
+  "skel": "./CH0099_home.skel",
+  "atlas": "./CH0099_home.atlas",
+  "png": [
+   "CH0099_home.png",
+   "CH0099_home2.png"
+  ]
+ },
+ "CH0100_home": {
+  "skel": "./CH0100_home.skel",
+  "atlas": "./CH0100_home.atlas",
+  "png": [
+   "CH0100_home.png",
+   "CH0100_home_2.png"
+  ]
+ },
+ "CH0101_home": {
+  "skel": "./CH0101_home.skel",
+  "atlas": "./CH0101_home.atlas",
+  "png": [
+   "CH0101_home.png",
+   "CH0101_home2.png"
+  ]
+ },
+ "CH0107_home": {
+  "skel": "./CH0107_home.skel",
+  "atlas": "./CH0107_home.atlas",
+  "png": [
+   "CH0107_home.png",
+   "CH0107_home2.png",
+   "CH0107_home3.png"
+  ]
+ },
+ "CH0109_home": {
+  "skel": "./CH0109_home.skel",
+  "atlas": "./CH0109_home.atlas",
+  "png": [
+   "CH0109_home.png",
+   "CH0109_home_2.png"
+  ]
+ },
+ "CH0110_home": {
+  "skel": "./CH0110_home.skel",
+  "atlas": "./CH0110_home.atlas",
+  "png": [
+   "CH0110_home.png",
+   "CH0110_home2.png",
+   "CH0110_home3.png",
+   "CH0110_home4.png"
+  ]
+ },
+ "CH0113_home": {
+  "skel": "./CH0113_home.skel",
+  "atlas": "./CH0113_home.atlas",
+  "png": [
+   "CH0113_home.png",
+   "CH0113_home2.png",
+   "CH0113_home3.png"
+  ]
+ },
+ "CH0114_home": {
+  "skel": "./CH0114_home.skel",
+  "atlas": "./CH0114_home.atlas",
+  "png": [
+   "CH0114_home.png",
+   "CH0114_home2.png"
+  ]
+ },
+ "CH0123_home": {
+  "skel": "./CH0123_home.skel",
+  "atlas": "./CH0123_home.atlas",
+  "png": [
+   "CH0123_home.png",
+   "CH0123_home2.png",
+   "CH0123_home3.png"
+  ]
+ },
+ "CH0124_home": {
+  "skel": "./CH0124_home.skel",
+  "atlas": "./CH0124_home.atlas",
+  "png": [
+   "CH0124_home.png",
+   "CH0124_home2.png",
+   "CH0124_home3.png"
+  ]
+ },
+ "CH0135_home": {
+  "skel": "./CH0135_home.skel",
+  "atlas": "./CH0135_home.atlas",
+  "png": [
+   "CH0135_home.png",
+   "CH0135_home2.png"
+  ]
+ },
+ "CH0137_home": {
+  "skel": "./CH0137_home.skel",
+  "atlas": "./CH0137_home.atlas",
+  "png": [
+   "CH0137_home.png",
+   "CH0137_home2.png"
+  ]
+ },
+ "CH0138_home": {
+  "skel": "./CH0138_home.skel",
+  "atlas": "./CH0138_home.atlas",
+  "png": [
+   "CH0138_home.png",
+   "CH0138_home2.png",
+   "CH0138_home3.png"
+  ]
+ },
+ "CH0139_home": {
+  "skel": "./CH0139_home.skel",
+  "atlas": "./CH0139_home.atlas",
+  "png": [
+   "CH0139_home.png",
+   "CH0139_home2.png"
+  ]
+ },
+ "CH0141_home": {
+  "skel": "./CH0141_home.skel",
+  "atlas": "./CH0141_home.atlas",
+  "png": [
+   "CH0141_home.png",
+   "CH0141_home_2.png"
+  ]
+ },
+ "CH0144_home": {
+  "skel": "./CH0144_home.skel",
+  "atlas": "./CH0144_home.atlas",
+  "png": [
+   "CH0144_home.png",
+   "CH0144_home2.png"
+  ]
+ },
+ "CH0145_home": {
+  "skel": "./CH0145_home.skel",
+  "atlas": "./CH0145_home.atlas",
+  "png": [
+   "CH0145_home.png",
+   "CH0145_home2.png"
+  ]
+ },
+ "CH0152_home": {
+  "skel": "./CH0152_home.skel",
+  "atlas": "./CH0152_home.atlas",
+  "png": [
+   "CH0152_home.png",
+   "CH0152_home2.png",
+   "CH0152_home3.png",
+   "CH0152_home4.png"
+  ]
+ },
+ "CH0155_home": {
+  "skel": "./CH0155_home.skel",
+  "atlas": "./CH0155_home.atlas",
+  "png": [
+   "CH0155_home.png",
+   "CH0155_home2.png"
+  ]
+ },
+ "CH0156_home": {
+  "skel": "./CH0156_home.skel",
+  "atlas": "./CH0156_home.atlas",
+  "png": [
+   "CH0156_home.png",
+   "CH0156_home2.png"
+  ]
+ },
+ "CH0158_home": {
+  "skel": "./CH0158_home.skel",
+  "atlas": "./CH0158_home.atlas",
+  "png": [
+   "CH0158_home.png",
+   "CH0158_home_2.png"
+  ]
+ },
+ "CH0159_home": {
+  "skel": "./CH0159_home.skel",
+  "atlas": "./CH0159_home.atlas",
+  "png": [
+   "CH0159_home.png",
+   "CH0159_home2.png",
+   "CH0159_home3.png"
+  ]
+ },
+ "CH0160_home": {
+  "skel": "./CH0160_home.skel",
+  "atlas": "./CH0160_home.atlas",
+  "png": [
+   "CH0160_home.png",
+   "CH0160_home2.png"
+  ]
+ },
+ "CH0161_home": {
+  "skel": "./CH0161_home.skel",
+  "atlas": "./CH0161_home.atlas",
+  "png": [
+   "CH0161_home.png",
+   "CH0161_home2.png",
+   "CH0161_home3.png",
+   "CH0161_home4.png"
+  ]
+ },
+ "CH0163_home": {
+  "skel": "./CH0163_home.skel",
+  "atlas": "./CH0163_home.atlas",
+  "png": [
+   "CH0163_home.png",
+   "CH0163_home2.png"
+  ]
+ },
+ "CH0164_home": {
+  "skel": "./CH0164_home.skel",
+  "atlas": "./CH0164_home.atlas",
+  "png": [
+   "CH0164_home.png",
+   "CH0164_home_2.png"
+  ]
+ },
+ "CH0165_home": {
+  "skel": "./CH0165_home.skel",
+  "atlas": "./CH0165_home.atlas",
+  "png": [
+   "CH0165_home.png",
+   "CH0165_home2.png"
+  ]
+ },
+ "CH0166_home": {
+  "skel": "./CH0166_home.skel",
+  "atlas": "./CH0166_home.atlas",
+  "png": [
+   "CH0166_home.png",
+   "CH0166_home_2.png"
+  ]
+ },
+ "CH0167_home": {
+  "skel": "./CH0167_home.skel",
+  "atlas": "./CH0167_home.atlas",
+  "png": [
+   "CH0167_home.png",
+   "CH0167_home2.png",
+   "CH0167_home3.png"
+  ]
+ },
+ "CH0169_home": {
+  "skel": "./CH0169_home.skel",
+  "atlas": "./CH0169_home.atlas",
+  "png": [
+   "CH0169_home.png",
+   "CH0169_home2.png"
+  ]
+ },
+ "CH0170_home": {
+  "skel": "./CH0170_home.skel",
+  "atlas": "./CH0170_home.atlas",
+  "png": [
+   "CH0170_home.png",
+   "CH0170_home2.png"
+  ]
+ },
+ "CH0172_home": {
+  "skel": "./CH0172_home.skel",
+  "atlas": "./CH0172_home.atlas",
+  "png": [
+   "CH0172_home.png",
+   "CH0172_home_2.png"
+  ]
+ },
+ "CH0173_home": {
+  "skel": "./CH0173_home.skel",
+  "atlas": "./CH0173_home.atlas",
+  "png": [
+   "CH0173_home.png",
+   "CH0173_home_2.png",
+   "CH0173_home_3.png"
+  ]
+ },
+ "CH0174_home": {
+  "skel": "./CH0174_home.skel",
+  "atlas": "./CH0174_home.atlas",
+  "png": [
+   "CH0174_home.png",
+   "CH0174_home_2.png",
+   "CH0174_home_3.png"
+  ]
+ },
+ "CH0175_home": {
+  "skel": "./CH0175_home.skel",
+  "atlas": "./CH0175_home.atlas",
+  "png": [
+   "CH0175_home.png",
+   "CH0175_home2.png"
+  ]
+ },
+ "CH0176_home": {
+  "skel": "./CH0176_home.skel",
+  "atlas": "./CH0176_home.atlas",
+  "png": [
+   "CH0176_home.png",
+   "CH0176_home2.png"
+  ]
+ },
+ "CH0177_home": {
+  "skel": "./CH0177_home.skel",
+  "atlas": "./CH0177_home.atlas",
+  "png": [
+   "CH0177_home.png",
+   "CH0177_home2.png"
+  ]
+ },
+ "CH0178_home": {
+  "skel": "./CH0178_home.skel",
+  "atlas": "./CH0178_home.atlas",
+  "png": [
+   "CH0178_home.png",
+   "CH0178_home2.png",
+   "CH0178_home3.png"
+  ]
+ },
+ "CH0179_home": {
+  "skel": "./CH0179_home.skel",
+  "atlas": "./CH0179_home.atlas",
+  "png": [
+   "CH0179_home.png",
+   "CH0179_home2.png",
+   "CH0179_home3.png"
+  ]
+ },
+ "CH0180_home": {
+  "skel": "./CH0180_home.skel",
+  "atlas": "./CH0180_home.atlas",
+  "png": [
+   "CH0180_home.png",
+   "CH0180_home2.png"
+  ]
+ },
+ "CH0181_home": {
+  "skel": "./CH0181_home.skel",
+  "atlas": "./CH0181_home.atlas",
+  "png": [
+   "CH0181_home.png",
+   "CH0181_home2.png"
+  ]
+ },
+ "CH0182_home": {
+  "skel": "./CH0182_home.skel",
+  "atlas": "./CH0182_home.atlas",
+  "png": [
+   "CH0182_home.png",
+   "CH0182_home2.png"
+  ]
+ },
+ "CH0183_home": {
+  "skel": "./CH0183_home.skel",
+  "atlas": "./CH0183_home.atlas",
+  "png": [
+   "CH0183_home.png",
+   "CH0183_home2.png"
+  ]
+ },
+ "CH0184_home": {
+  "skel": "./CH0184_home.skel",
+  "atlas": "./CH0184_home.atlas",
+  "png": [
+   "CH0184_home.png",
+   "CH0184_home2.png",
+   "CH0184_home3.png"
+  ]
+ },
+ "CH0185_home": {
+  "skel": "./CH0185_home.skel",
+  "atlas": "./CH0185_home.atlas",
+  "png": [
+   "CH0185_home.png",
+   "CH0185_home2.png"
+  ]
+ },
+ "CH0186_home": {
+  "skel": "./CH0186_home.skel",
+  "atlas": "./CH0186_home.atlas",
+  "png": [
+   "CH0186_home.png",
+   "CH0186_home2.png"
+  ]
+ },
+ "CH0187_home": {
+  "skel": "./CH0187_home.skel",
+  "atlas": "./CH0187_home.atlas",
+  "png": [
+   "CH0187_home.png",
+   "CH0187_home2.png",
+   "CH0187_home3.png"
+  ]
+ },
+ "CH0188_home": {
+  "skel": "./CH0188_home.skel",
+  "atlas": "./CH0188_home.atlas",
+  "png": [
+   "CH0188_home.png",
+   "CH0188_home2.png",
+   "CH0188_home3.png",
+   "CH0188_home4.png"
+  ]
+ },
+ "CH0189_home": {
+  "skel": "./CH0189_home.skel",
+  "atlas": "./CH0189_home.atlas",
+  "png": [
+   "CH0189_home.png",
+   "CH0189_home2.png",
+   "CH0189_home3.png"
+  ]
+ },
+ "CH0190_home": {
+  "skel": "./CH0190_home.skel",
+  "atlas": "./CH0190_home.atlas",
+  "png": [
+   "CH0190_home.png",
+   "CH0190_home2.png"
+  ]
+ },
+ "CH0191_home": {
+  "skel": "./CH0191_home.skel",
+  "atlas": "./CH0191_home.atlas",
+  "png": [
+   "CH0191_home.png",
+   "CH0191_home2.png"
+  ]
+ },
+ "CH0192_home": {
+  "skel": "./CH0192_home.skel",
+  "atlas": "./CH0192_home.atlas",
+  "png": [
+   "CH0192_home.png",
+   "CH0192_home2.png"
+  ]
+ },
+ "CH0193_home": {
+  "skel": "./CH0193_home.skel",
+  "atlas": "./CH0193_home.atlas",
+  "png": [
+   "CH0193_home.png",
+   "CH0193_home2.png"
+  ]
+ },
+ "CH0194_home": {
+  "skel": "./CH0194_home.skel",
+  "atlas": "./CH0194_home.atlas",
+  "png": [
+   "CH0194_home.png",
+   "CH0194_home2.png"
+  ]
+ },
+ "CH0195_home": {
+  "skel": "./CH0195_home.skel",
+  "atlas": "./CH0195_home.atlas",
+  "png": [
+   "CH0195_home.png",
+   "CH0195_home2.png"
+  ]
+ },
+ "CH0196_home": {
+  "skel": "./CH0196_home.skel",
+  "atlas": "./CH0196_home.atlas",
+  "png": [
+   "CH0196_home.png",
+   "CH0196_home2.png",
+   "CH0196_home3.png"
+  ]
+ },
+ "CH0197_home": {
+  "skel": "./CH0197_home.skel",
+  "atlas": "./CH0197_home.atlas",
+  "png": [
+   "CH0197_home.png",
+   "CH0197_home_2.png"
+  ]
+ },
+ "CH0198_home": {
+  "skel": "./CH0198_home.skel",
+  "atlas": "./CH0198_home.atlas",
+  "png": [
+   "CH0198_home.png",
+   "CH0198_home2.png",
+   "CH0198_home3.png"
+  ]
+ },
+ "CH0200_home": {
+  "skel": "./CH0200_home.skel",
+  "atlas": "./CH0200_home.atlas",
+  "png": [
+   "CH0200_home.png",
+   "CH0200_home2.png"
+  ]
+ },
+ "CH0201_home": {
+  "skel": "./CH0201_home.skel",
+  "atlas": "./CH0201_home.atlas",
+  "png": [
+   "CH0201_home.png",
+   "CH0201_home2.png",
+   "CH0201_home3.png"
+  ]
+ },
+ "CH0202_home": {
+  "skel": "./CH0202_home.skel",
+  "atlas": "./CH0202_home.atlas",
+  "png": [
+   "CH0202_home.png",
+   "CH0202_home2.png",
+   "CH0202_home3.png"
+  ]
+ },
+ "CH0203_home": {
+  "skel": "./CH0203_home.skel",
+  "atlas": "./CH0203_home.atlas",
+  "png": [
+   "CH0203_home.png",
+   "CH0203_home2.png",
+   "CH0203_home3.png"
+  ]
+ },
+ "CH0204_home": {
+  "skel": "./CH0204_home.skel",
+  "atlas": "./CH0204_home.atlas",
+  "png": [
+   "CH0204_home.png",
+   "CH0204_home2.png",
+   "CH0204_home3.png"
+  ]
+ },
+ "CH0205_home": {
+  "skel": "./CH0205_home.skel",
+  "atlas": "./CH0205_home.atlas",
+  "png": [
+   "CH0205_home.png",
+   "CH0205_home2.png",
+   "CH0205_home3.png"
+  ]
+ },
+ "CH0209_home": {
+  "skel": "./CH0209_home.skel",
+  "atlas": "./CH0209_home.atlas",
+  "png": [
+   "CH0209_home.png",
+   "CH0209_home2.png",
+   "CH0209_home3.png"
+  ]
+ },
+ "CH0210_home": {
+  "skel": "./CH0210_home.skel",
+  "atlas": "./CH0210_home.atlas",
+  "png": [
+   "CH0210_home.png",
+   "CH0210_home2.png",
+   "CH0210_home3.png"
+  ]
+ },
+ "CH0211_home": {
+  "skel": "./CH0211_home.skel",
+  "atlas": "./CH0211_home.atlas",
+  "png": [
+   "CH0211_home.png",
+   "CH0211_home2.png"
+  ]
+ },
+ "CH0214_home": {
+  "skel": "./CH0214_home.skel",
+  "atlas": "./CH0214_home.atlas",
+  "png": [
+   "CH0214_home.png",
+   "CH0214_home2.png",
+   "CH0214_home3.png"
+  ]
+ },
+ "CH0215_home": {
+  "skel": "./CH0215_home.skel",
+  "atlas": "./CH0215_home.atlas",
+  "png": [
+   "CH0215_home.png",
+   "CH0215_home2.png",
+   "CH0215_home3.png"
+  ]
+ },
+ "CH0216_home": {
+  "skel": "./CH0216_home.skel",
+  "atlas": "./CH0216_home.atlas",
+  "png": [
+   "CH0216_home.png",
+   "CH0216_home2.png",
+   "CH0216_home3.png"
+  ]
+ },
+ "CH0217_home": {
+  "skel": "./CH0217_home.skel",
+  "atlas": "./CH0217_home.atlas",
+  "png": [
+   "CH0217_home.png",
+   "CH0217_home2.png",
+   "CH0217_home3.png"
+  ]
+ },
+ "CH0218_home": {
+  "skel": "./CH0218_home.skel",
+  "atlas": "./CH0218_home.atlas",
+  "png": [
+   "CH0218_home.png",
+   "CH0218_home2.png",
+   "CH0218_home3.png"
+  ]
+ },
+ "CH0219_home": {
+  "skel": "./CH0219_home.skel",
+  "atlas": "./CH0219_home.atlas",
+  "png": [
+   "CH0219_home.png",
+   "CH0219_home2.png"
+  ]
+ },
+ "CH0220_home": {
+  "skel": "./CH0220_home.skel",
+  "atlas": "./CH0220_home.atlas",
+  "png": [
+   "CH0220_home.png",
+   "CH0220_home2.png",
+   "CH0220_home3.png"
+  ]
+ },
+ "CH0221_home": {
+  "skel": "./CH0221_home.skel",
+  "atlas": "./CH0221_home.atlas",
+  "png": [
+   "CH0221_home.png",
+   "CH0221_home_2.png"
+  ]
+ },
+ "CH0222_home": {
+  "skel": "./CH0222_home.skel",
+  "atlas": "./CH0222_home.atlas",
+  "png": [
+   "CH0222_home.png",
+   "CH0222_home_2.png",
+   "CH0222_home_3.png"
+  ]
+ },
+ "CH0224_home": {
+  "skel": "./CH0224_home.skel",
+  "atlas": "./CH0224_home.atlas",
+  "png": [
+   "CH0224_home.png",
+   "CH0224_home2.png",
+   "CH0224_home3.png"
+  ]
+ },
+ "CH0225_home": {
+  "skel": "./CH0225_home.skel",
+  "atlas": "./CH0225_home.atlas",
+  "png": [
+   "CH0225_home.png",
+   "CH0225_home2.png",
+   "CH0225_home3.png"
+  ]
+ },
+ "CH0228_home": {
+  "skel": "./CH0228_home.skel",
+  "atlas": "./CH0228_home.atlas",
+  "png": [
+   "CH0228_home.png",
+   "CH0228_home_2.png"
+  ]
+ },
+ "CH0229_home": {
+  "skel": "./CH0229_home.skel",
+  "atlas": "./CH0229_home.atlas",
+  "png": [
+   "CH0229_home.png",
+   "CH0229_home_2.png",
+   "CH0229_home_3.png"
+  ]
+ },
+ "CH0230_home": {
+  "skel": "./CH0230_home.skel",
+  "atlas": "./CH0230_home.atlas",
+  "png": [
+   "CH0230_home.png",
+   "CH0230_home2.png",
+   "CH0230_home3.png",
+   "CH0230_home4.png"
+  ]
+ },
+ "CH0231_home": {
+  "skel": "./CH0231_home.skel",
+  "atlas": "./CH0231_home.atlas",
+  "png": [
+   "CH0231_home.png",
+   "CH0231_home2.png"
+  ]
+ },
+ "CH0232_home": {
+  "skel": "./CH0232_home.skel",
+  "atlas": "./CH0232_home.atlas",
+  "png": [
+   "CH0232_home.png",
+   "CH0232_home_2.png",
+   "CH0232_home_3.png"
+  ]
+ },
+ "CH0233_home": {
+  "skel": "./CH0233_home.skel",
+  "atlas": "./CH0233_home.atlas",
+  "png": [
+   "CH0233_home.png",
+   "CH0233_home2.png",
+   "CH0233_home3.png"
+  ]
+ },
+ "CH0235_home": {
+  "skel": "./CH0235_home.skel",
+  "atlas": "./CH0235_home.atlas",
+  "png": [
+   "CH0235_home.png",
+   "CH0235_home_2.png",
+   "CH0235_home_3.png"
+  ]
+ },
+ "CH0238_home": {
+  "skel": "./CH0238_home.skel",
+  "atlas": "./CH0238_home.atlas",
+  "png": [
+   "CH0238_home.png",
+   "CH0238_home_2.png"
+  ]
+ },
+ "CH0239_home": {
+  "skel": "./CH0239_home.skel",
+  "atlas": "./CH0239_home.atlas",
+  "png": [
+   "CH0239_home.png",
+   "CH0239_home2.png",
+   "CH0239_home3.png",
+   "CH0239_home4.png"
+  ]
+ },
+ "CH0240_home": {
+  "skel": "./CH0240_home.skel",
+  "atlas": "./CH0240_home.atlas",
+  "png": [
+   "CH0240_home.png",
+   "CH0240_home2.png",
+   "CH0240_home3.png"
+  ]
+ },
+ "CH0242_home": {
+  "skel": "./CH0242_home.skel",
+  "atlas": "./CH0242_home.atlas",
+  "png": [
+   "CH0242_home.png",
+   "CH0242_home_2.png",
+   "CH0242_home_3.png"
+  ]
+ },
+ "CH0243_home": {
+  "skel": "./CH0243_home.skel",
+  "atlas": "./CH0243_home.atlas",
+  "png": [
+   "CH0243_home.png",
+   "CH0243_home_2.png",
+   "CH0243_home_3.png"
+  ]
+ },
+ "CH0245_home": {
+  "skel": "./CH0245_home.skel",
+  "atlas": "./CH0245_home.atlas",
+  "png": [
+   "CH0245_home.png",
+   "CH0245_home_2.png"
+  ]
+ },
+ "CH0246_home": {
+  "skel": "./CH0246_home.skel",
+  "atlas": "./CH0246_home.atlas",
+  "png": [
+   "CH0246_home.png",
+   "CH0246_home_2.png"
+  ]
+ },
+ "CH0247_home": {
+  "skel": "./CH0247_home.skel",
+  "atlas": "./CH0247_home.atlas",
+  "png": [
+   "CH0247_home.png",
+   "CH0247_home_2.png",
+   "CH0247_home_3.png"
+  ]
+ },
+ "CH0250_home": {
+  "skel": "./CH0250_home.skel",
+  "atlas": "./CH0250_home.atlas",
+  "png": [
+   "CH0250_home.png",
+   "CH0250_home2.png",
+   "CH0250_home3.png"
+  ]
+ },
+ "CH0251_home": {
+  "skel": "./CH0251_home.skel",
+  "atlas": "./CH0251_home.atlas",
+  "png": [
+   "CH0251_home.png",
+   "CH0251_home2.png"
+  ]
+ },
+ "CH0255_home": {
+  "skel": "./CH0255_home.skel",
+  "atlas": "./CH0255_home.atlas",
+  "png": [
+   "CH0255_home.png",
+   "CH0255_home2.png",
+   "CH0255_home3.png"
+  ]
+ },
+ "CH0257_home": {
+  "skel": "./CH0257_home.skel",
+  "atlas": "./CH0257_home.atlas",
+  "png": [
+   "CH0257_home.png",
+   "CH0257_home_2.png",
+   "CH0257_home_3.png"
+  ]
+ },
+ "CH0258_home": {
+  "skel": "./CH0258_home.skel",
+  "atlas": "./CH0258_home.atlas",
+  "png": [
+   "CH0258_home.png",
+   "CH0258_home2.png",
+   "CH0258_home3.png"
+  ]
+ },
+ "CH0259_home": {
+  "skel": "./CH0259_home.skel",
+  "atlas": "./CH0259_home.atlas",
+  "png": [
+   "CH0259_home.png",
+   "CH0259_home_2.png",
+   "CH0259_home_3.png"
+  ]
+ },
+ "CH0260_home": {
+  "skel": "./CH0260_home.skel",
+  "atlas": "./CH0260_home.atlas",
+  "png": [
+   "CH0260_home.png",
+   "CH0260_home2.png",
+   "CH0260_home3.png"
+  ]
+ },
+ "CH0261_home": {
+  "skel": "./CH0261_home.skel",
+  "atlas": "./CH0261_home.atlas",
+  "png": [
+   "CH0261_home.png",
+   "CH0261_home2.png",
+   "CH0261_home3.png"
+  ]
+ },
+ "CH0262_home": {
+  "skel": "./CH0262_home.skel",
+  "atlas": "./CH0262_home.atlas",
+  "png": [
+   "CH0262_home.png",
+   "CH0262_home2.png"
+  ]
+ },
+ "CH0263_home": {
+  "skel": "./CH0263_home.skel",
+  "atlas": "./CH0263_home.atlas",
+  "png": [
+   "CH0263_home.png",
+   "CH0263_home2.png",
+   "CH0263_home3.png",
+   "CH0263_home4.png"
+  ]
+ },
+ "CH0264_home": {
+  "skel": "./CH0264_home.skel",
+  "atlas": "./CH0264_home.atlas",
+  "png": [
+   "CH0264_home.png",
+   "CH0264_home_2.png"
+  ]
+ },
+ "CH0266_home": {
+  "skel": "./CH0266_home.skel",
+  "atlas": "./CH0266_home.atlas",
+  "png": [
+   "CH0266_home.png",
+   "CH0266_home2.png",
+   "CH0266_home3.png"
+  ]
+ },
+ "CH0267_home": {
+  "skel": "./CH0267_home.skel",
+  "atlas": "./CH0267_home.atlas",
+  "png": [
+   "CH0267_home.png",
+   "CH0267_home2.png",
+   "CH0267_home3.png"
+  ]
+ },
+ "CH0268_home": {
+  "skel": "./CH0268_home.skel",
+  "atlas": "./CH0268_home.atlas",
+  "png": [
+   "CH0268_home.png",
+   "CH0268_home_2.png",
+   "CH0268_home_3.png"
+  ]
+ },
+ "CH0269_home": {
+  "skel": "./CH0269_home.skel",
+  "atlas": "./CH0269_home.atlas",
+  "png": [
+   "CH0269_home.png",
+   "CH0269_home2.png",
+   "CH0269_home3.png"
+  ]
+ },
+ "CH0270_home": {
+  "skel": "./CH0270_home.skel",
+  "atlas": "./CH0270_home.atlas",
+  "png": [
+   "CH0270_home.png",
+   "CH0270_home2.png"
+  ]
+ },
+ "CH0271_home": {
+  "skel": "./CH0271_home.skel",
+  "atlas": "./CH0271_home.atlas",
+  "png": [
+   "CH0271_home.png",
+   "CH0271_home2.png"
+  ]
+ },
+ "CH0273_home": {
+  "skel": "./CH0273_home.skel",
+  "atlas": "./CH0273_home.atlas",
+  "png": [
+   "CH0273_home.png",
+   "CH0273_home_2.png"
+  ]
+ },
+ "CH0274_home": {
+  "skel": "./CH0274_home.skel",
+  "atlas": "./CH0274_home.atlas",
+  "png": [
+   "CH0274_home.png",
+   "CH0274_home2.png",
+   "CH0274_home3.png"
+  ]
+ },
+ "CH0275_home": {
+  "skel": "./CH0275_home.skel",
+  "atlas": "./CH0275_home.atlas",
+  "png": [
+   "CH0275_home.png",
+   "CH0275_home_2.png"
+  ]
+ },
+ "CH0280_home": {
+  "skel": "./CH0280_home.skel",
+  "atlas": "./CH0280_home.atlas",
+  "png": [
+   "CH0280_home.png",
+   "CH0280_home_2.png"
+  ]
+ },
+ "CH0281_home": {
+  "skel": "./CH0281_home.skel",
+  "atlas": "./CH0281_home.atlas",
+  "png": [
+   "CH0281_home.png",
+   "CH0281_home_2.png",
+   "CH0281_home_3.png"
+  ]
+ },
+ "CH0282_home": {
+  "skel": "./CH0282_home.skel",
+  "atlas": "./CH0282_home.atlas",
+  "png": [
+   "CH0282_home.png",
+   "CH0282_home_2.png"
+  ]
+ },
+ "CH0284_home": {
+  "skel": "./CH0284_home.skel",
+  "atlas": "./CH0284_home.atlas",
+  "png": [
+   "CH0284_home.png",
+   "CH0284_home_2.png"
+  ]
+ },
+ "CH0285_home": {
+  "skel": "./CH0285_home.skel",
+  "atlas": "./CH0285_home.atlas",
+  "png": [
+   "CH0285_home.png",
+   "CH0285_home_2.png"
+  ]
+ },
+ "CH0286_home": {
+  "skel": "./CH0286_home.skel",
+  "atlas": "./CH0286_home.atlas",
+  "png": [
+   "CH0286_home.png",
+   "CH0286_home_2.png",
+   "CH0286_home_3.png"
+  ]
+ },
+ "CH0287_home": {
+  "skel": "./CH0287_home.skel",
+  "atlas": "./CH0287_home.atlas",
+  "png": [
+   "CH0287_home.png",
+   "CH0287_home_2.png",
+   "CH0287_home_3.png",
+   "CH0287_home_4.png"
+  ]
+ },
+ "CH0288_home": {
+  "skel": "./CH0288_home.skel",
+  "atlas": "./CH0288_home.atlas",
+  "png": [
+   "CH0288_home.png",
+   "CH0288_home_2.png"
+  ]
+ },
+ "CH0291_home": {
+  "skel": "./CH0291_home.skel",
+  "atlas": "./CH0291_home.atlas",
+  "png": [
+   "CH0291_home.png",
+   "CH0291_home_2.png",
+   "CH0291_home_3.png"
+  ]
+ },
+ "CH0292_home": {
+  "skel": "./CH0292_home.skel",
+  "atlas": "./CH0292_home.atlas",
+  "png": [
+   "CH0292_home.png",
+   "CH0292_home_2.png",
+   "CH0292_home_3.png",
+   "CH0292_home_4.png"
+  ]
+ },
+ "CH0293_home": {
+  "skel": "./CH0293_home.skel",
+  "atlas": "./CH0293_home.atlas",
+  "png": [
+   "CH0293_home.png",
+   "CH0293_home_2.png",
+   "CH0293_home_3.png"
+  ]
+ },
+ "CH0294_home": {
+  "skel": "./CH0294_home.skel",
+  "atlas": "./CH0294_home.atlas",
+  "png": [
+   "CH0294_home.png",
+   "CH0294_home_2.png",
+   "CH0294_home_3.png",
+   "CH0294_home_4.png"
+  ]
+ },
+ "CH0295_home": {
+  "skel": "./CH0295_home.skel",
+  "atlas": "./CH0295_home.atlas",
+  "png": [
+   "CH0295_home.png",
+   "CH0295_home_2.png"
+  ]
+ },
+ "CH0296_home": {
+  "skel": "./CH0296_home.skel",
+  "atlas": "./CH0296_home.atlas",
+  "png": [
+   "CH0296_home.png",
+   "CH0296_home_2.png"
+  ]
+ },
+ "CH0297_home": {
+  "skel": "./CH0297_home.skel",
+  "atlas": "./CH0297_home.atlas",
+  "png": [
+   "CH0297_home.png",
+   "CH0297_home_2.png",
+   "CH0297_home_3.png"
+  ]
+ },
+ "CH0300_home": {
+  "skel": "./CH0300_home.skel",
+  "atlas": "./CH0300_home.atlas",
+  "png": [
+   "CH0300_home.png",
+   "CH0300_home_2.png",
+   "CH0300_home_3.png"
+  ]
+ },
+ "CH0301_home": {
+  "skel": "./CH0301_home.skel",
+  "atlas": "./CH0301_home.atlas",
+  "png": [
+   "CH0301_home.png",
+   "CH0301_home_2.png",
+   "CH0301_home_3.png"
+  ]
+ },
+ "CH0302_home": {
+  "skel": "./CH0302_home.skel",
+  "atlas": "./CH0302_home.atlas",
+  "png": [
+   "CH0302_home.png",
+   "CH0302_home_2.png",
+   "CH0302_home_3.png",
+   "CH0302_home_4.png"
+  ]
+ },
+ "CH0303_home": {
+  "skel": "./CH0303_home.skel",
+  "atlas": "./CH0303_home.atlas",
+  "png": [
+   "CH0303_home.png",
+   "CH0303_home_2.png"
+  ]
+ },
+ "CH0304_home": {
+  "skel": "./CH0304_home.skel",
+  "atlas": "./CH0304_home.atlas",
+  "png": [
+   "CH0304_home.png",
+   "CH0304_home_2.png"
+  ]
+ },
+ "CH0305_home": {
+  "skel": "./CH0305_home.skel",
+  "atlas": "./CH0305_home.atlas",
+  "png": [
+   "CH0305_home.png",
+   "CH0305_home_2.png",
+   "CH0305_home_3.png"
+  ]
+ },
+ "CH0306_home": {
+  "skel": "./CH0306_home.skel",
+  "atlas": "./CH0306_home.atlas",
+  "png": [
+   "CH0306_home.png",
+   "CH0306_home_2.png",
+   "CH0306_home_3.png",
+   "CH0306_home_4.png"
+  ]
+ },
+ "CH0307_home": {
+  "skel": "./CH0307_home.skel",
+  "atlas": "./CH0307_home.atlas",
+  "png": [
+   "CH0307_home.png",
+   "CH0307_home_2.png"
+  ]
+ },
+ "CH0309_home": {
+  "skel": "./CH0309_home.skel",
+  "atlas": "./CH0309_home.atlas",
+  "png": [
+   "CH0309_home.png",
+   "CH0309_home_2.png",
+   "CH0309_home_3.png",
+   "CH0309_home_4.png"
+  ]
+ },
+ "CH0310_home": {
+  "skel": "./CH0310_home.skel",
+  "atlas": "./CH0310_home.atlas",
+  "png": [
+   "CH0310_home.png",
+   "CH0310_home_2.png",
+   "CH0310_home_3.png"
+  ]
+ },
+ "CH0317_home": {
+  "skel": "./CH0317_home.skel",
+  "atlas": "./CH0317_home.atlas",
+  "png": [
+   "CH0317_home.png",
+   "CH0317_home_2.png",
+   "CH0317_home_3.png"
+  ]
+ },
+ "CH0318_home": {
+  "skel": "./CH0318_home.skel",
+  "atlas": "./CH0318_home.atlas",
+  "png": [
+   "CH0318_home.png",
+   "CH0318_home_2.png",
+   "CH0318_home_3.png",
+   "CH0318_home_4.png"
+  ]
+ },
+ "CH0319_home": {
+  "skel": "./CH0319_home.skel",
+  "atlas": "./CH0319_home.atlas",
+  "png": [
+   "CH0319_home.png",
+   "CH0319_home_2.png",
+   "CH0319_home_3.png",
+   "CH0319_home_4.png"
+  ]
+ },
+ "CH0325_home": {
+  "skel": "./CH0325_home.skel",
+  "atlas": "./CH0325_home.atlas",
+  "png": [
+   "CH0325_home.png",
+   "CH0325_home_2.png",
+   "CH0325_home_3.png"
+  ]
+ },
+ "CH0326_home": {
+  "skel": "./CH0326_home.skel",
+  "atlas": "./CH0326_home.atlas",
+  "png": [
+   "CH0326_home.png",
+   "CH0326_home_2.png"
+  ]
+ },
+ "CH0331_home": {
+  "skel": "./CH0331_home.skel",
+  "atlas": "./CH0331_home.atlas",
+  "png": [
+   "CH0331_home.png",
+   "CH0331_home_2.png"
+  ]
+ },
+ "CH0332_home": {
+  "skel": "./CH0332_home.skel",
+  "atlas": "./CH0332_home.atlas",
+  "png": [
+   "CH0332_home.png",
+   "CH0332_home_2.png",
+   "CH0332_home_3.png"
+  ]
+ },
+ "CH0333_home": {
+  "skel": "./CH0333_home.skel",
+  "atlas": "./CH0333_home.atlas",
+  "png": [
+   "CH0333_home.png",
+   "CH0333_home_2.png",
+   "CH0333_home_3.png"
+  ]
+ },
+ "CH0334_home": {
+  "skel": "./CH0334_home.skel",
+  "atlas": "./CH0334_home.atlas",
+  "png": [
+   "CH0334_home.png",
+   "CH0334_home_2.png",
+   "CH0334_home_3.png",
+   "CH0334_home_4.png",
+   "CH0334_home_5.png",
+   "CH0334_home_6.png"
+  ]
+ },
+ "CH0335_home": {
+  "skel": "./CH0335_home.skel",
+  "atlas": "./CH0335_home.atlas",
+  "png": [
+   "CH0335_home.png",
+   "CH0335_home_2.png",
+   "CH0335_home_3.png"
+  ]
+ },
+ "CH0336_home": {
+  "skel": "./CH0336_home.skel",
+  "atlas": "./CH0336_home.atlas",
+  "png": [
+   "CH0336_home.png",
+   "CH0336_home_2.png"
+  ]
+ },
+ "CH0337_home": {
+  "skel": "./CH0337_home.skel",
+  "atlas": "./CH0337_home.atlas",
+  "png": [
+   "CH0337_home.png",
+   "CH0337_home_2.png",
+   "CH0337_home_3.png"
+  ]
+ },
+ "CH0344_home": {
+  "skel": "./CH0344_home.skel",
+  "atlas": "./CH0344_home.atlas",
+  "png": [
+   "CH0344_home.png",
+   "CH0344_home_2.png"
+  ]
+ },
+ "CH0345_home": {
+  "skel": "./CH0345_home.skel",
+  "atlas": "./CH0345_home.atlas",
+  "png": [
+   "CH0345_home.png",
+   "CH0345_home_2.png",
+   "CH0345_home_3.png"
+  ]
+ },
+ "CH0346_home": {
+  "skel": "./CH0346_home.skel",
+  "atlas": "./CH0346_home.atlas",
+  "png": [
+   "CH0346_home.png",
+   "CH0346_home_2.png"
+  ]
+ },
+ "CH0347_home": {
+  "skel": "./CH0347_home.skel",
+  "atlas": "./CH0347_home.atlas",
+  "png": [
+   "CH0347_home.png",
+   "CH0347_home_2.png"
+  ]
+ },
+ "CH0348_home": {
+  "skel": "./CH0348_home.skel",
+  "atlas": "./CH0348_home.atlas",
+  "png": [
+   "CH0348_home.png",
+   "CH0348_home_2.png",
+   "CH0348_home_3.png"
+  ]
+ },
+ "CH0355_home": {
+  "skel": "./CH0355_home.skel",
+  "atlas": "./CH0355_home.atlas",
+  "png": [
+   "CH0355_home.png",
+   "CH0355_home_2.png",
+   "CH0355_home_3.png",
+   "CH0355_home_4.png",
+   "CH0355_home_5.png",
+   "CH0355_home_6.png",
+   "CH0355_home_7.png"
+  ]
+ },
+ "CH0356_home": {
+  "skel": "./CH0356_home.skel",
+  "atlas": "./CH0356_home.atlas",
+  "png": [
+   "CH0356_home.png",
+   "CH0356_home_2.png",
+   "CH0356_home_3.png",
+   "CH0356_home_4.png"
+  ]
+ },
+ "CH9996_home": {
+  "skel": "./CH0996_home_CH0996_home.json",
+  "atlas": "./CH0996_home.atlas",
+  "png": [
+   "CH0996_home.png",
+   "CH0996_home2.png",
+   "CH0996_home3.png"
+  ]
+ },
+ "CH9997_home": {
+  "skel": "./CH9997_home.skel",
+  "atlas": "./CH9997_home.atlas",
+  "png": [
+   "CH9997_home.png",
+   "CH9997_home2.png",
+   "CH9997_home3.png"
+  ]
+ },
+ "CH9998_home": {
+  "skel": "./CH9998_home.skel",
+  "atlas": "./CH9998_home.atlas",
+  "png": [
+   "CH9998_home.png",
+   "CH9998_home2.png"
+  ]
+ },
+ "CH9999_home": {
+  "skel": "./CH9999_home.skel",
+  "atlas": "./CH9999_home.atlas",
+  "png": [
+   "CH9999_home.png",
+   "CH9999_home2.png",
+   "CH9999_home3.png"
+  ]
+ },
+ "Cherino_home": {
+  "skel": "./Cherino_home.skel",
+  "atlas": "./Cherino_home.atlas",
+  "png": [
+   "Cherino_home.png",
+   "Cherino_home_2.png"
+  ]
+ },
+ "Chinatsu_home": {
+  "skel": "./Chinatsu_home.skel",
+  "atlas": "./Chinatsu_home.atlas",
+  "png": [
+   "Chinatsu_home.png",
+   "Chinatsu_home_2.png"
+  ]
+ },
+ "Chise_home": {
+  "skel": "./Chise_home.skel",
+  "atlas": "./Chise_home.atlas",
+  "png": [
+   "Chise_home.png",
+   "Chise_home2.png"
+  ]
+ },
+ "Eimi_home": {
+  "skel": "./Eimi_home.skel",
+  "atlas": "./Eimi_home.atlas",
+  "png": [
+   "Eimi_home.png",
+   "Eimi_home2.png"
+  ]
+ },
+ "Erika_home": {
+  "skel": "./erika_home.skel",
+  "atlas": "./erika_home.atlas",
+  "png": [
+   "erika_home.png",
+   "erika_home_2.png"
+  ]
+ },
+ "Fuuka_home": {
+  "skel": "Fuuka_home/Fuuka_home.skel",
+  "atlas": "Fuuka_home/Fuuka_home.atlas",
+  "png": [
+   "Fuuka_home.png",
+   "Fuuka_home2.png"
+  ],
+  "scene": {
+   "skel": "Fuuka_Scene.skel",
+   "atlas": "Fuuka_Scene.atlas",
+   "png": [
+    "Fuuka_Scene.png"
+   ]
+  }
+ },
+ "Hanae_home": {
+  "skel": "./Hanae_home.skel",
+  "atlas": "./Hanae_home.atlas",
+  "png": [
+   "Hanae_home.png",
+   "Hanae_home2.png"
+  ]
+ },
+ "Hanako_home": {
+  "skel": "./Hanako_home.skel",
+  "atlas": "./Hanako_home.atlas",
+  "png": [
+   "Hanako_home.png",
+   "Hanako_home2.png"
+  ]
+ },
+ "Hare_home": {
+  "skel": "./Hare_home.skel",
+  "atlas": "./Hare_home.atlas",
+  "png": [
+   "Hare_home.png",
+   "Hare_home2.png"
+  ]
+ },
+ "Haruka_home": {
+  "skel": "./Haruka_home.skel",
+  "atlas": "./Haruka_home.atlas",
+  "png": [
+   "Haruka_home.png",
+   "Haruka_home2.png"
+  ]
+ },
+ "Haruna_home": {
+  "skel": "./Haruna_home.skel",
+  "atlas": "./Haruna_home.atlas",
+  "png": [
+   "Haruna_home.png",
+   "Haruna_home2.png"
+  ]
+ },
+ "Hasumi_home": {
+  "skel": "./Hasumi_home.skel",
+  "atlas": "./Hasumi_home.atlas",
+  "png": [
+   "Hasumi_home.png",
+   "Hasumi_home2.png"
+  ]
+ },
+ "Hibiki_home": {
+  "skel": "./Hibiki_home.skel",
+  "atlas": "./Hibiki_home.atlas",
+  "png": [
+   "Hibiki_home.png",
+   "Hibiki_home2.png"
+  ]
+ },
+ "Hihumi_home": {
+  "skel": "./Hihumi_home.skel",
+  "atlas": "./Hihumi_home.atlas",
+  "png": [
+   "Hihumi_home.png",
+   "Hihumi_home_2.png"
+  ]
+ },
+ "Hina_home": {
+  "skel": "./Hina_home.skel",
+  "atlas": "./Hina_home.atlas",
+  "png": [
+   "Hina_home.png",
+   "Hina_home2.png",
+   "Hina_home3.png"
+  ]
+ },
+ "Hinata_home": {
+  "skel": "./Hinata_home.skel",
+  "atlas": "./Hinata_home.atlas",
+  "png": [
+   "Hinata_home.png",
+   "Hinata_home2.png"
+  ]
+ },
+ "Hiyori_home": {
+  "skel": "./Hiyori_home.skel",
+  "atlas": "./Hiyori_home.atlas",
+  "png": [
+   "Hiyori_home.png",
+   "Hiyori_home2.png"
+  ]
+ },
+ "Hoshino_home": {
+  "skel": "Hoshino_home/Hoshino_home.skel",
+  "atlas": "Hoshino_home/Hoshino_home.atlas",
+  "png": [
+   "Hoshino_home.png"
+  ],
+  "bg": {
+   "skel": "Hoshino_home_background.skel",
+   "atlas": "Hoshino_home_background.atlas",
+   "png": [
+    "Hoshino_home_background.png",
+    "Hoshino_home_background2.png"
+   ]
+  }
+ },
+ "Hoshino_swimsuit_home": {
+  "skel": "./Hoshino_swimsuit_home.skel",
+  "atlas": "./Hoshino_swimsuit_home.atlas",
+  "png": [
+   "Hoshino_swimsuit_home.png",
+   "Hoshino_swimsuit_home2.png",
+   "Hoshino_swimsuit_home3.png"
+  ]
+ },
+ "Ibuki_home": {
+  "skel": "./Ibuki_home.skel",
+  "atlas": "./Ibuki_home.atlas",
+  "png": [
+   "Ibuki_home.png",
+   "Ibuki_home2.png",
+   "Ibuki_home3.png"
+  ]
+ },
+ "Iori_home": {
+  "skel": "./Iori_home.skel",
+  "atlas": "./Iori_home.atlas",
+  "png": [
+   "Iori_home.png",
+   "Iori_home2.png"
+  ]
+ },
+ "Izumi_home": {
+  "skel": "./Izumi_home.skel",
+  "atlas": "./Izumi_home.atlas",
+  "png": [
+   "Izumi_home.png",
+   "Izumi_home2.png"
+  ]
+ },
+ "Izumi_swimsuit_home": {
+  "skel": "./Izumi_swimsuit_home.skel",
+  "atlas": "./Izumi_swimsuit_home.atlas",
+  "png": [
+   "Izumi_swimsuit_home.png",
+   "Izumi_swimsuit_home2.png"
+  ]
+ },
+ "Izuna_home": {
+  "skel": "./Izuna_home.skel",
+  "atlas": "./Izuna_home.atlas",
+  "png": [
+   "Izuna_home.png",
+   "Izuna_home2.png"
+  ]
+ },
+ "Juri_home": {
+  "skel": "./juri_home.skel",
+  "atlas": "./Juri_home.atlas",
+  "png": [
+   "Juri_home.png",
+   "Juri_home2.png",
+   "Juri_home3.png"
+  ]
+ },
+ "Kaede_home": {
+  "skel": "./Kaede_home.skel",
+  "atlas": "./Kaede_home.atlas",
+  "png": [
+   "Kaede_home.png",
+   "Kaede_home2.png"
+  ]
+ },
+ "Karin_home": {
+  "skel": "./Karin_home.skel",
+  "atlas": "./Karin_home.atlas",
+  "png": [
+   "Karin_home.png"
+  ]
+ },
+ "Kayoko_home": {
+  "skel": "./Kayoko_home.skel",
+  "atlas": "./Kayoko_home.atlas",
+  "png": [
+   "Kayoko_home.png",
+   "Kayoko_home2.png"
+  ]
+ },
+ "Kazusa_home": {
+  "skel": "./kazusa_home.skel",
+  "atlas": "./kazusa_home.atlas",
+  "png": [
+   "kazusa_home.png",
+   "kazusa_home2.png"
+  ]
+ },
+ "Kirara_home": {
+  "skel": "./Kirara_home.skel",
+  "atlas": "./Kirara_home.atlas",
+  "png": [
+   "Kirara_home.png",
+   "Kirara_home2.png"
+  ]
+ },
+ "Kirino_home": {
+  "skel": "./kirino_home.skel",
+  "atlas": "./kirino_home.atlas",
+  "png": [
+   "kirino_home.png",
+   "kirino_home2.png"
+  ]
+ },
+ "Koharu_home": {
+  "skel": "./Koharu_home.skel",
+  "atlas": "./Koharu_home.atlas",
+  "png": [
+   "Koharu_home.png",
+   "Koharu_home2.png"
+  ]
+ },
+ "Kotama_home": {
+  "skel": "./Kotama_home.skel",
+  "atlas": "./Kotama_home.atlas",
+  "png": [
+   "Kotama_home.png",
+   "Kotama_home2.png"
+  ]
+ },
+ "Kotori_home": {
+  "skel": "./Kotori_home.skel",
+  "atlas": "./Kotori_home.atlas",
+  "png": [
+   "Kotori_home.png",
+   "Kotori_home2.png"
+  ]
+ },
+ "LobbyAyane_multi": {
+  "skel": "./LobbyAyane_multi.skel",
+  "atlas": "./LobbyAyane_multi.atlas",
+  "png": [
+   "LobbyAyane_multi.png",
+   "LobbyAyane_multi2.png"
+  ]
+ },
+ "LobbyHoshino_multi": {
+  "skel": "./LobbyHoshino_multi.skel",
+  "atlas": "./LobbyHoshino_multi.atlas",
+  "png": [
+   "LobbyHoshino_multi.png",
+   "LobbyHoshino_multi2.png"
+  ]
+ },
+ "LobbyNonomi_multi": {
+  "skel": "./LobbyNonomi_multi.skel",
+  "atlas": "./LobbyNonomi_multi.atlas",
+  "png": [
+   "LobbyNonomi_multi.png",
+   "LobbyNonomi_multi2.png"
+  ]
+ },
+ "LobbySerika_multi": {
+  "skel": "./LobbySerika_multi.skel",
+  "atlas": "./LobbySerika_multi.atlas",
+  "png": [
+   "LobbySerika_multi.png",
+   "LobbySerika_multi2.png"
+  ]
+ },
+ "LobbyShiroko_multi": {
+  "skel": "./LobbyShiroko_multi.skel",
+  "atlas": "./LobbyShiroko_multi.atlas",
+  "png": [
+   "LobbyShiroko_multi.png",
+   "LobbyShiroko_multi2.png"
+  ]
+ },
+ "Maki_home": {
+  "skel": "./Maki_home.skel",
+  "atlas": "./Maki_home.atlas",
+  "png": [
+   "Maki_home.png",
+   "Maki_home2.png"
+  ]
+ },
+ "Mari_home": {
+  "skel": "./mari_home.skel",
+  "atlas": "./mari_home.atlas",
+  "png": [
+   "mari_home.png",
+   "mari_home2.png"
+  ]
+ },
+ "Marina_home": {
+  "skel": "./Marina_home.skel",
+  "atlas": "./Marina_home.atlas",
+  "png": [
+   "Marina_home.png",
+   "Marina_home2.png"
+  ]
+ },
+ "Mashiro_home": {
+  "skel": "./Mashiro_home.skel",
+  "atlas": "./Mashiro_home.atlas",
+  "png": [
+   "Mashiro_home.png",
+   "Mashiro_home2.png"
+  ]
+ },
+ "Mashiro_swimsuit_home": {
+  "skel": "./Mashiro_swimsuit_home.skel",
+  "atlas": "./Mashiro_swimsuit_home.atlas",
+  "png": [
+   "Mashiro_swimsuit_home.png",
+   "Mashiro_swimsuit_home2.png"
+  ]
+ },
+ "Midori_home": {
+  "skel": "./Midori_home.skel",
+  "atlas": "./Midori_home.atlas",
+  "png": [
+   "Midori_home.png",
+   "Midori_home2.png"
+  ]
+ },
+ "Mimori_home": {
+  "skel": "./Mimori_home.skel",
+  "atlas": "./Mimori_home.atlas",
+  "png": [
+   "Mimori_home.png",
+   "Mimori_home2.png"
+  ]
+ },
+ "Misaki_home": {
+  "skel": "./Misaki_home.skel",
+  "atlas": "./Misaki_home.atlas",
+  "png": [
+   "Misaki_home.png",
+   "Misaki_home2.png"
+  ]
+ },
+ "Miyako_home": {
+  "skel": "./Miyako_home.skel",
+  "atlas": "./Miyako_home.atlas",
+  "png": [
+   "Miyako_home.png",
+   "Miyako_home2.png"
+  ]
+ },
+ "Moe_home": {
+  "skel": "./Moe_home.skel",
+  "atlas": "./Moe_home.atlas",
+  "png": [
+   "Moe_home.png",
+   "Moe_home2.png",
+   "Moe_home3.png",
+   "Moe_home4.png"
+  ]
+ },
+ "Momiji_home": {
+  "skel": "./momiji_home.skel",
+  "atlas": "./momiji_home.atlas",
+  "png": [
+   "momiji_home.png",
+   "momiji_home2.png"
+  ]
+ },
+ "Momoi_home": {
+  "skel": "Momoi_home/Momoi_home.skel",
+  "atlas": "Momoi_home/Momoi_home.atlas",
+  "png": [
+   "Momoi_home.png",
+   "Momoi_home2.png"
+  ],
+  "scene": {
+   "skel": "Momoi_Scene.skel",
+   "atlas": "Momoi_Scene.atlas",
+   "png": [
+    "Momoi_Scene.png"
+   ]
+  }
+ },
+ "Mutsuki_home": {
+  "skel": "./Mutsuki_home.skel",
+  "atlas": "./Mutsuki_home.atlas",
+  "png": [
+   "Mutsuki_home.png",
+   "Mutsuki_home2.png"
+  ]
+ },
+ "Mutsuki_newyear_home": {
+  "skel": "./mutsuki_newyear_home.skel",
+  "atlas": "./mutsuki_newyear_home.atlas",
+  "png": [
+   "mutsuki_newyear_home.png",
+   "mutsuki_newyear_home2.png"
+  ]
+ },
+ "Nagisa_home": {
+  "skel": "./Nagisa_home.skel",
+  "atlas": "./Nagisa_home.atlas",
+  "png": [
+   "Nagisa_home.png",
+   "Nagisa_home2.png"
+  ]
+ },
+ "Neru_home": {
+  "skel": "./Neru_home.skel",
+  "atlas": "./Neru_home.atlas",
+  "png": [
+   "Neru_home.png",
+   "Neru_home2.png",
+   "Neru_home3.png"
+  ]
+ },
+ "Nodoka_home": {
+  "skel": "./Nodoka_home.skel",
+  "atlas": "./Nodoka_home.atlas",
+  "png": [
+   "Nodoka_home.png",
+   "Nodoka_home2.png"
+  ]
+ },
+ "Nonomi_home": {
+  "skel": "./Nonomi_home.skel",
+  "atlas": "./Nonomi_home.atlas",
+  "png": [
+   "Nonomi_home.png",
+   "Nonomi_home2.png"
+  ]
+ },
+ "Pina_home": {
+  "skel": "./Pina_home.skel",
+  "atlas": "./Pina_home.atlas",
+  "png": [
+   "Pina_home.png",
+   "Pina_home2.png"
+  ]
+ },
+ "Reizyo_home": {
+  "skel": "./reizyo_home.skel",
+  "atlas": "./reizyo_home.atlas",
+  "png": [
+   "reizyo_home.png",
+   "reizyo_home2.png"
+  ]
+ },
+ "Sakurako_home": {
+  "skel": "./Sakurako_home.skel",
+  "atlas": "./Sakurako_home.atlas",
+  "png": [
+   "Sakurako_home.png",
+   "Sakurako_home2.png",
+   "Sakurako_home3.png"
+  ]
+ },
+ "Saori_home": {
+  "skel": "./Saori_home.skel",
+  "atlas": "./Saori_home.atlas",
+  "png": [
+   "Saori_home.png",
+   "Saori_home2.png"
+  ]
+ },
+ "Saya_casual_home": {
+  "skel": "./Saya_casual_home.skel",
+  "atlas": "./Saya_casual_home.atlas",
+  "png": [
+   "Saya_casual_home.png",
+   "Saya_casual_home2.png"
+  ]
+ },
+ "Saya_home": {
+  "skel": "./Saya_home.skel",
+  "atlas": "./Saya_home.atlas",
+  "png": [
+   "Saya_home.png",
+   "Saya_home2.png"
+  ]
+ },
+ "Serika_home": {
+  "skel": "./Serika_home.skel",
+  "atlas": "./Serika_home.atlas",
+  "png": [
+   "Serika_home.png",
+   "Serika_home_2.png",
+   "Serika_home_3.png"
+  ]
+ },
+ "Serika_newyear_home": {
+  "skel": "./Serika_Newyear_home.skel",
+  "atlas": "./Serika_Newyear_home.atlas",
+  "png": [
+   "Serika_Newyear_home.png",
+   "Serika_Newyear_home2.png"
+  ]
+ },
+ "Serina_home": {
+  "skel": "./serina_home.skel",
+  "atlas": "./serina_home.atlas",
+  "png": [
+   "serina_home.png",
+   "serina_home2.png"
+  ]
+ },
+ "Shigure_home": {
+  "skel": "./Shigure_home.skel",
+  "atlas": "./Shigure_home.atlas",
+  "png": [
+   "Shigure_home.png",
+   "Shigure_home2.png"
+  ]
+ },
+ "Shimiko_home": {
+  "skel": "./Shimiko_home.skel",
+  "atlas": "./Shimiko_home.atlas",
+  "png": [
+   "Shimiko_home.png",
+   "Shimiko_home2.png",
+   "Shimiko_home3.png"
+  ]
+ },
+ "Shiroko_home": {
+  "skel": "./Shiroko_home.skel",
+  "atlas": "./Shiroko_home.atlas",
+  "png": [
+   "Shiroko_home.png",
+   "Shiroko_home2.png"
+  ]
+ },
+ "Shiroko_ridingsuit_home": {
+  "skel": "./Shiroko_ridingsuit_home.skel",
+  "atlas": "./Shiroko_ridingsuit_home.atlas",
+  "png": [
+   "Shiroko_ridingsuit_home.png",
+   "Shiroko_ridingsuit_home2.png"
+  ]
+ },
+ "Shizuko_home": {
+  "skel": "./Shizuko_home.skel",
+  "atlas": "./Shizuko_home.atlas",
+  "png": [
+   "Shizuko_home.png",
+   "Shizuko_home2.png"
+  ]
+ },
+ "Shun_home": {
+  "skel": "./Shun_home.skel",
+  "atlas": "./Shun_home.atlas",
+  "png": [
+   "Shun_home.png",
+   "Shun_home2.png"
+  ]
+ },
+ "Sumire_home": {
+  "skel": "./Sumire_home.skel",
+  "atlas": "./Sumire_home.atlas",
+  "png": [
+   "Sumire_home.png"
+  ]
+ },
+ "Suzumi_home": {
+  "skel": "./Suzumi_home.skel",
+  "atlas": "./Suzumi_home.atlas",
+  "png": [
+   "Suzumi_home.png",
+   "Suzumi_home2.png"
+  ]
+ },
+ "Tomoe_home": {
+  "skel": "./Tomoe_home.skel",
+  "atlas": "./Tomoe_home.atlas",
+  "png": [
+   "Tomoe_home.png",
+   "Tomoe_home2.png"
+  ]
+ },
+ "Tsubaki_home": {
+  "skel": "./Tsubaki_home.skel",
+  "atlas": "./Tsubaki_home.atlas",
+  "png": [
+   "Tsubaki_home.png",
+   "Tsubaki_home2.png"
+  ]
+ },
+ "Tsurugi_home": {
+  "skel": "./Tsurugi_home.skel",
+  "atlas": "./Tsurugi_home.atlas",
+  "png": [
+   "Tsurugi_home.png",
+   "Tsurugi_home2.png",
+   "Tsurugi_home3.png"
+  ]
+ },
+ "Utaha_home": {
+  "skel": "./Utaha_home.skel",
+  "atlas": "./Utaha_home.atlas",
+  "png": [
+   "Utaha_home.png",
+   "Utaha_home2.png"
+  ]
+ },
+ "Wakamo_home": {
+  "skel": "Wakamo_home/Wakamo_home.skel",
+  "atlas": "Wakamo_home/Wakamo_home.atlas",
+  "png": [
+   "Wakamo_home.png",
+   "Wakamo_home2.png"
+  ],
+  "scene": {
+   "skel": "Wakamo_Scene_0.skel",
+   "atlas": "Wakamo_Scene_0.atlas",
+   "png": [
+    "Wakamo_Scene_0.png",
+    "Wakamo_Scene_02.png",
+    "Wakamo_Scene_03.png",
+    "Wakamo_Scene_04.png"
+   ]
+  }
+ },
+ "Yoshimi_home": {
+  "skel": "./Yoshimi_home.skel",
+  "atlas": "./Yoshimi_home.atlas",
+  "png": [
+   "Yoshimi_home.png",
+   "Yoshimi_home2.png"
+  ]
+ },
+ "Yuuka_home": {
+  "skel": "./Yuuka_home.skel",
+  "atlas": "./Yuuka_home.atlas",
+  "png": [
+   "Yuuka_home.png",
+   "Yuuka_home2.png"
+  ]
+ },
+ "Yuzu_home": {
+  "skel": "Yuzu_home/Yuzu_home.skel",
+  "atlas": "Yuzu_home/Yuzu_home.atlas",
+  "png": [
+   "Yuzu_home.png"
+  ],
+  "bg": {
+   "skel": "yuzu_bg.skel",
+   "atlas": "yuzu_bg.atlas",
+   "png": [
+    "yuzu_bg.png"
+   ]
+  }
+ },
+ "Zunko_home": {
+  "skel": "./Zunko_home.skel",
+  "atlas": "./Zunko_home.atlas",
+  "png": [
+   "Zunko_home.png",
+   "Zunko_home2.png"
+  ]
+ }
+}

@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('ba', {
+  __electron: true,
   listLobbies: () => ipcRenderer.invoke('lobby-list'),
   introMedia: () => ipcRenderer.invoke('intro-media'),
   screenshot: (file) => ipcRenderer.invoke('screenshot', file),

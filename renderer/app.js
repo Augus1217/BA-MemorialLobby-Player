@@ -30,6 +30,7 @@ const sbSearch = document.getElementById('sbSearch');
 const sbList = document.getElementById('sbList');
 const sbClose = document.getElementById('sbClose');
 const btnExport = document.getElementById('btnExport');
+const btnSettings = document.getElementById('btnSettings');
 const exportPanel = document.getElementById('exportPanel');
 const expChar = document.getElementById('expChar');
 const expStart = document.getElementById('expStart');
@@ -2458,6 +2459,154 @@ function openExportPanel() {
 }
 function closeExportPanel() { exportPanel.classList.remove('open'); }
 
+// ---- settings panel (language / download mode / assets) ----
+const settingsPanel = document.getElementById('settingsPanel');
+const setClose = document.getElementById('setClose');
+const setLangSegs = document.getElementById('setLangSegs');
+const setModeSegs = document.getElementById('setModeSegs');
+const setCursorCk = document.getElementById('setCursorCk');
+const setClickFxCk = document.getElementById('setClickFxCk');
+const setAssetsStatus = document.getElementById('setAssetsStatus');
+const setDownloadBtn = document.getElementById('setDownloadBtn');
+const setAssetsProgress = document.getElementById('setAssetsProgress');
+const setProgressFill = document.getElementById('setProgressFill');
+const setProgressText = document.getElementById('setProgressText');
+
+function setUiLanguage(mode) {
+  langMode = mode;
+  try { localStorage.setItem('ba_lang', mode); } catch {}
+  uiLang = mode;                     // UI language follows the name-language cycle
+  applyI18n();
+  if (currentLobby) renderStudentName(currentLobby);
+  if (sidePanel.classList.contains('open')) renderSidebar();
+  syncSettingsLangSegs();
+  log(t('log.lang', { label: langLabel(langMode), ui: i18nTag(langMode) }));
+}
+
+function buildLangSegs() {
+  setLangSegs.innerHTML = '';
+  for (const [mode, label] of LANG_MODES) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.dataset.lang = mode;
+    b.addEventListener('click', () => setUiLanguage(mode));
+    setLangSegs.appendChild(b);
+  }
+}
+
+function syncSettingsLangSegs() {
+  for (const b of setLangSegs.querySelectorAll('button')) {
+    b.classList.toggle('on', b.dataset.lang === langMode);
+  }
+}
+
+function settingsStreaming() {
+  return window.ba?.getStreamingMode
+    ? window.ba.getStreamingMode()
+    : Promise.resolve(false);
+}
+
+async function syncSettingsModeSegs() {
+  const streaming = await settingsStreaming();
+  for (const b of setModeSegs.querySelectorAll('button')) {
+    b.classList.toggle('on', (b.dataset.m === 'streaming') === streaming);
+  }
+}
+
+function fmtBytes(n) {
+  if (!Number.isFinite(n)) return '?';
+  if (n >= 1073741824) return (n / 1073741824).toFixed(2) + ' GB';
+  if (n >= 1048576) return (n / 1048576).toFixed(0) + ' MB';
+  return (n / 1024).toFixed(0) + ' KB';
+}
+
+let _settingsAssetInfo = null;
+
+async function refreshSettingsAssets() {
+  try {
+    _settingsAssetInfo = await window.ba.checkAssets();
+  } catch {
+    _settingsAssetInfo = null;
+  }
+  renderSettingsAssets();
+}
+
+function renderSettingsAssets() {
+  const info = _settingsAssetInfo;
+  if (!info || !info.remoteVersion) {
+    setAssetsStatus.innerHTML = `<span class="warn">${t('set.statusOffline')}</span>`;
+    setDownloadBtn.style.display = 'none';
+    return;
+  }
+  const local = info.localVersion;
+  const verRow = t('set.statusVersion', { remote: info.remoteVersion, local: local || t('dl.localNone') });
+  let html = `${info.needsDownload ? '<span class="warn">⚠</span>' : '<span class="ok">✓</span> '}${verRow}`;
+  if (info.needsDownload && Array.isArray(info.needsDownloadPacks) && info.needsDownloadPacks.length) {
+    const packs = info.packages || {};
+    let bytes = 0;
+    for (const k of info.needsDownloadPacks) bytes += packs[k]?.size || 0;
+    html += `<br><span class="warn">⤓</span> ${t('set.pending', { n: info.needsDownloadPacks.length, size: fmtBytes(bytes) })}`;
+    setDownloadBtn.style.display = 'block';
+  } else {
+    setDownloadBtn.style.display = 'none';
+  }
+  setAssetsStatus.innerHTML = html;
+}
+
+function startSettingsDownload() {
+  const info = _settingsAssetInfo;
+  if (!info?.remoteVersion || !Array.isArray(info.packages)) return;
+  setDownloadBtn.style.display = 'none';
+  setAssetsProgress.style.display = 'block';
+  window.ba.onDownloadProgress?.((p) => {
+    if (p.status === 'downloading') {
+      setProgressText.textContent = `${p.package} (${p.index + 1}/${p.total}) — ${p.percent}%`;
+      setProgressFill.style.width = p.percent + '%';
+    } else if (p.status === 'done') {
+      setProgressFill.style.width = '100%';
+    } else if (p.status === 'error') {
+      setProgressText.textContent = `⚠ ${p.error}`;
+    }
+  });
+  // 下載全部缺的包（尊重目前模式：串流模式時 check-assets 已只回 core/intro）
+  const version = info.remoteVersion || '1.0.0';
+  const pkgs = {};
+  for (const k of info.needsDownloadPacks || []) pkgs[k] = info.packages[k];
+  window.ba.downloadAssets({ version, packages: pkgs }).then(async () => {
+    setAssetsProgress.style.display = 'none';
+    await refreshSettingsAssets();
+  }).catch((e) => {
+    setProgressText.textContent = `⚠ ${e?.message || e}`;
+  });
+}
+
+function settingsPref(key, dflt) {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? dflt : v === '1';
+  } catch { return dflt; }
+}
+
+function syncSettingsEffectCks() {
+  if (setCursorCk) setCursorCk.checked = settingsPref('ba_cursor', true);
+  if (setClickFxCk) setClickFxCk.checked = settingsPref('ba_clickfx', true);
+}
+
+function toggleSettingsPanel(force) {
+  // force 可能是 addEventListener 傳入的 Event 物件（truthy）——只接受真正的 boolean。
+  const open = typeof force === 'boolean' ? force : !settingsPanel.classList.contains('open');
+  if (open) {
+    exportPanel.classList.remove('open');
+    sidePanel.classList.remove('open');
+    syncSettingsLangSegs();
+    syncSettingsModeSegs();
+    syncSettingsEffectCks();
+    refreshSettingsAssets();
+  }
+  settingsPanel.classList.toggle('open', open);
+}
+
+
 function showRecBadge(duration) {
   recTime.textContent = '0:00';
   recDur.textContent = fmtClock(duration);
@@ -2964,7 +3113,9 @@ function updateResUI() {
 }
 
 // ---- asset loading ----
-const IS_ELECTRON = location.protocol === 'file:';
+const IS_ELECTRON = typeof window !== 'undefined' && !!window.ba?.__electron;
+// 網頁版（GitHub Pages）：無 Electron preload，由 ba-web.js 提供 window.ba
+const WEB_MODE = typeof window !== 'undefined' && !IS_ELECTRON && !!window.ba;
 function assetUrl(p) {
   return IS_ELECTRON ? 'app://' + p : p;
 }
@@ -3199,7 +3350,7 @@ function renderSidebar() {
 }
 
 function toggleSidebar(force) {
-  const open = force === undefined ? !sidePanel.classList.contains('open') : force;
+  const open = typeof force === 'boolean' ? force : !sidePanel.classList.contains('open');
   sidePanel.classList.toggle('open', open);
   btnStudents.textContent = open ? '✕' : '☰';
   if (open) renderSidebar();
@@ -3847,7 +3998,11 @@ async function init() {
   // later message renders in the user's language. Falls back to zh-TW source
   // strings when the dict is missing (dev without assets/data).
   await loadI18n();
+  buildLangSegs();
   applyI18n();
+
+  // ---- 標題畫面 BGM：檢查更新中就開始播（進 lobby 後被 setBgm 換成大廳曲）----
+  if (bgmOn) setBgm('Theme_152_Title.ogg');
 
   // ---- Asset check: show download UI if assets missing ----
   // loadingScreen 保持顯示（spinner），檢查／下載完成後才換成 TAP TO START。
@@ -3856,7 +4011,7 @@ async function init() {
       // 加 10 秒逾時，避免網路問題卡住整個 init
       const assetInfo = await Promise.race([
         window.ba.checkAssets(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('checkAssets timeout')), 10000)),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('checkAssets timeout')), WEB_MODE ? 30000 : 10000)),
       ]);
       _assetInfo = assetInfo;
       // skipUpdate=1（headless 自動化）跳過下載面板，直接進入 lobby。
@@ -3873,10 +4028,14 @@ async function init() {
   const canvas = app.canvas;
   document.getElementById('app').appendChild(canvas);
 
-  // ---- BA Click FX（蔚藍檔案點擊特效）----
+  // ---- BA Click FX（蔚藍檔案點擊特效；設定可關閉，切換後下次啟動生效）----
   try {
-    initClickFx();
-    console.log('[lobby] BAClickFX initialized');
+    if (settingsPref('ba_clickfx', true)) {
+      initClickFx();
+      console.log('[lobby] BAClickFX initialized');
+    } else {
+      console.log('[lobby] BAClickFX disabled by settings');
+    }
   } catch (e) {
     console.warn('[lobby] BAClickFX init failed:', e.message);
   }
@@ -3981,14 +4140,12 @@ async function init() {
   btnSkip.addEventListener('click', memoryLobbySkip);
   btnLang.addEventListener('click', () => {
     const i = LANG_MODES.findIndex(l => l[0] === langMode);
-    langMode = LANG_MODES[(i + 1) % LANG_MODES.length][0];
-    try { localStorage.setItem('ba_lang', langMode); } catch {}
-    uiLang = langMode;                 // UI language follows the name-language cycle
-    applyI18n();
-    if (currentLobby) renderStudentName(currentLobby);
-    if (sidePanel.classList.contains('open')) renderSidebar();
-    log(t('log.lang', { label: langLabel(langMode), ui: i18nTag(langMode) }));
+    setUiLanguage(LANG_MODES[(i + 1) % LANG_MODES.length][0]);
   });
+
+  // ---- settings panel ----
+  btnSettings.addEventListener('click', toggleSettingsPanel);
+  setClose.addEventListener('click', toggleSettingsPanel);
 
   btnStudents.addEventListener('click', () => toggleSidebar());
   sbClose.addEventListener('click', () => toggleSidebar(false));
@@ -4007,6 +4164,26 @@ async function init() {
   expStart.addEventListener('click', () => { closeExportPanel(); startAnimExport(); });
   expBgm.addEventListener('click', () => { closeExportPanel(); exportBgm(); });
   recStop.addEventListener('click', () => { if (animActive) stopAnimExport(true); });
+
+  // ---- settings panel wiring ----
+  if (setCursorCk) setCursorCk.addEventListener('change', () => {
+    const on = setCursorCk.checked;
+    try { localStorage.setItem('ba_cursor', on ? '1' : '0'); } catch {}
+    document.documentElement.classList.toggle('ba-cursor-off', !on);
+  });
+  if (setClickFxCk) setClickFxCk.addEventListener('change', () => {
+    try { localStorage.setItem('ba_clickfx', setClickFxCk.checked ? '1' : '0'); } catch {}
+    showToast(t('set.restartHint'));
+  });
+  setModeSegs.addEventListener('click', async (e) => {
+    const b = e.target.closest('button');
+    if (!b || b.classList.contains('on')) return;
+    const streaming = b.dataset.m === 'streaming';
+    try { await window.ba?.setStreamingMode?.(streaming); } catch {}
+    await syncSettingsModeSegs();
+  });
+  setDownloadBtn.addEventListener('click', startSettingsDownload);
+
   for (const id of ['expClip', 'expRes', 'expFps', 'expFmt']) {
     const box = document.getElementById(id);
     box.addEventListener('click', (e) => {
@@ -4061,8 +4238,36 @@ async function init() {
 // Headless self-test: with PROBE=1 the renderer dumps i18n state to the console
 // (main relays [renderer] lines). Must run before CAPTURE_DELAY elapses.
 if (/PROBE=1/.test(location.search + location.hash)) {
-  setTimeout(() => {
+  // 可選：PROBE 加 cursorOff=1 預置 ba_cursor=0，驗證游標關閉 class
+  if (/cursorOff=1/.test(location.search + location.hash)) {
+    try { localStorage.setItem('ba_cursor', '0'); } catch {}
+  }
+  window.__probeRun = async () => {
+    // 1) BGM：init 時就應該有 title BGM 在播
+    const bgmEarly = !!bgmAudio && !bgmAudio.paused;
+    // 2) 設定面板開 → 點 ✕ 關
+    toggleSettingsPanel(true);
+    await new Promise(r => setTimeout(r, 400));
+    await syncSettingsModeSegs();
+    document.getElementById('setClose')?.click();
+    await new Promise(r => setTimeout(r, 300));
+    const panelClosed = !settingsPanel.classList.contains('open');
+    // 3) 效果開關存在 + 游標 class 初始狀態
+    toggleSettingsPanel(true);
+    await new Promise(r => setTimeout(r, 200));
+    // 游標即時關閉驗證：取消勾選 → html class 應切換
+    const cursorCk2 = document.getElementById('setCursorCk');
+    cursorCk2.checked = false;
+    cursorCk2.dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 100));
     const probe = {
+      cursorOffAfterToggle: document.documentElement.classList.contains('ba-cursor-off'),
+      bgmEarly,
+      panelClosed,
+      cursorCk: document.getElementById('setCursorCk')?.checked,
+      clickfxCk: document.getElementById('setClickFxCk')?.checked,
+      // cursorOffClass moved('ba-cursor-off'),
+      fxCanvas: !!document.querySelector('#fx canvas, .baclickfx, [id*="clickfx" i]'),
       uiLang,
       dictLoaded: !!i18nDict,
       btnLangLabel: document.getElementById('btnLang')?.textContent,
@@ -4073,11 +4278,20 @@ if (/PROBE=1/.test(location.search + location.hash)) {
       searchPh: sbSearch.placeholder,
       prevTitle: btnPrev.title,
       langTitle: btnLang.title,
+      settingsBtnTitle: document.getElementById('btnSettings')?.title,
+      setLangSegs: document.getElementById('setLangSegs')?.children.length,
+      setModeSegs: [...(document.getElementById('setModeSegs')?.children || [])].map(b => `${b.dataset.m}:${b.classList.contains('on') ? 1 : 0}`).join(','),
+      setAssetsStatus: document.getElementById('setAssetsStatus')?.textContent?.slice(0, 80),
+      panelVisible: getComputedStyle(settingsPanel).display !== 'none',
+      panelClass: settingsPanel.className,
+      hasOpen: settingsPanel.classList.contains('open'),
+      panelRect: (() => { const r = settingsPanel.getBoundingClientRect(); return `${Math.round(r.width)}x${Math.round(r.height)}@${Math.round(r.left)},${Math.round(r.top)}`; })(),
+      langOn: [...setLangSegs.querySelectorAll('button')].map(b => `${b.dataset.lang}:${b.classList.contains('on') ? 1 : 0}`).join(','),
       charName: charNameEl.textContent,
       lobbyCount: ORDER.length,
     };
     console.log('[i18n-probe] ' + JSON.stringify(probe));
-  }, 9000);
+  };
 }
 
-init().catch(showErr);
+init().then(() => window.__probeRun?.()).catch((e) => { console.error('[probe] init failed:', e); showErr(e); });

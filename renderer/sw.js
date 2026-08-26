@@ -1,0 +1,37 @@
+// sw.js — GitHub Pages 版資產攔截：Cache Storage 優先，miss 走網路。
+// 只攔同源 assets/ 請求；Worker（跨域）與程式本身不碰。
+const CACHE_PREFIX = 'ba-assets-v';
+
+self.addEventListener('install', (e) => self.skipWaiting());
+
+self.addEventListener('activate', (e) => {
+  e.waitUntil((async () => {
+    // 清掉舊版本快取（ba-web.js 換版時會開新快取）
+    const names = await caches.keys();
+    await Promise.all(names.filter((n) => n.startsWith(CACHE_PREFIX) && n !== self.__baActiveCache).map((n) => caches.delete(n)));
+    await self.clients.claim();
+  })());
+});
+
+// ba-web.js 開新快取後廣播，讓 SW 更新 __baActiveCache
+self.addEventListener('message', (e) => {
+  if (e.data?.type === 'ba-cache' && typeof e.data.cache === 'string') {
+    self.__baActiveCache = e.data.cache;
+  }
+});
+
+self.addEventListener('fetch', (e) => {
+  const url = new URL(e.request.url);
+  if (url.origin !== location.origin) return;
+  if (!url.pathname.includes('/assets/')) return;
+  if (e.request.method !== 'GET') return;
+  e.respondWith((async () => {
+    const cacheNames = await caches.keys();
+    for (const n of cacheNames) {
+      if (!n.startsWith(CACHE_PREFIX)) continue;
+      const hit = await caches.open(n).then((c) => c.match(e.request));
+      if (hit) return hit;
+    }
+    return fetch(e.request);
+  })());
+});

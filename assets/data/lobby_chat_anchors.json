@@ -1,0 +1,2612 @@
+{
+ "Airi0_home": {
+  "prefab": "LobbyAiri",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -19.0,
+  "ty": 306.0,
+  "flip": 0
+ },
+ "Airi_home": {
+  "prefab": "LobbyAiri",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -19.0,
+  "ty": 306.0,
+  "flip": 0,
+  "thinkOffsetX": -51.2,
+  "thinkOffsetY": -1.9
+ },
+ "Akane_home": {
+  "prefab": "LobbyAkane",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 140.0,
+  "ty": 241.0,
+  "flip": 0,
+  "thinkOffsetX": 6.0,
+  "thinkOffsetY": 0.0
+ },
+ "Akari_home": {
+  "prefab": "LobbyAkari",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 170.0,
+  "ty": 457.0,
+  "flip": 1,
+  "thinkOffsetX": 40.0,
+  "thinkOffsetY": -3.0
+ },
+ "Ako_home": {
+  "prefab": "LobbyAko",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 41.0,
+  "ty": 391.0,
+  "flip": 1,
+  "thinkOffsetX": -10.0,
+  "thinkOffsetY": -8.0
+ },
+ "Aris_home": {
+  "prefab": "LobbyAris",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 204.0,
+  "ty": 44.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Aru_home": {
+  "prefab": "LobbyAru",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -136.0,
+  "ty": 222.0,
+  "flip": 0,
+  "thinkOffsetX": 103.0,
+  "thinkOffsetY": -37.0
+ },
+ "Aru_newyear_home": {
+  "prefab": "LobbyAru_newyear",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 110.0,
+  "ty": 285.0,
+  "flip": 0,
+  "thinkOffsetX": 1.0,
+  "thinkOffsetY": -42.0
+ },
+ "Asuna_home": {
+  "prefab": "LobbyAsuna",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -116.5,
+  "ty": 214.0,
+  "flip": 1,
+  "thinkOffsetX": 50.5,
+  "thinkOffsetY": 0.0
+ },
+ "Atsuko_home": {
+  "prefab": "LobbyAtsuko",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 107.0,
+  "ty": 185.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Ayane_home": {
+  "prefab": "LobbyAyane",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 238.0,
+  "ty": 129.0,
+  "flip": 0,
+  "thinkOffsetX": 8.0,
+  "thinkOffsetY": -12.0
+ },
+ "Azusa_home": {
+  "prefab": "LobbyAzusa",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 98.0,
+  "ty": 277.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Azusa_swimsuit_home": {
+  "prefab": "LobbyAzusa_swimsuit",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 33.0,
+  "ty": 372.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0058_home": {
+  "prefab": "LobbyCH0058",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 147.0,
+  "ty": 276.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0060_home": {
+  "prefab": "LobbyCH0060",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -224.0,
+  "ty": 432.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0063_home": {
+  "prefab": "LobbyCH0063",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 122.0,
+  "ty": 287.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0064_home": {
+  "prefab": "LobbyCH0064",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 374.0,
+  "ty": 139.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0066_home": {
+  "prefab": "LobbyCH0066",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 15.0,
+  "ty": 300.0,
+  "flip": 1,
+  "thinkOffsetX": 4.0,
+  "thinkOffsetY": -10.0
+ },
+ "CH0069_home": {
+  "prefab": "LobbyCH0069",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 262.0,
+  "ty": 282.0,
+  "flip": 3,
+  "thinkOffsetX": -126.0,
+  "thinkOffsetY": 93.0
+ },
+ "CH0070_home": {
+  "prefab": "LobbyCH0070",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 20.0,
+  "ty": 191.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": -0.0
+ },
+ "CH0070_home_GL": {
+  "prefab": "LobbyCH0070",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 20.0,
+  "ty": 191.0,
+  "flip": 1
+ },
+ "CH0071_home": {
+  "prefab": "LobbyCH0071",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 324.0,
+  "ty": 487.0,
+  "flip": 1,
+  "thinkOffsetX": -2.0,
+  "thinkOffsetY": -13.0
+ },
+ "CH0079_home": {
+  "prefab": "LobbyCH0079",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 378.0,
+  "ty": 439.0,
+  "flip": 1,
+  "thinkOffsetX": -86.0,
+  "thinkOffsetY": -81.0
+ },
+ "CH0080_home": {
+  "prefab": "LobbyCH0080",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 45.0,
+  "ty": 263.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0081_home": {
+  "prefab": "LobbyCH0081",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 172.0,
+  "ty": 114.0,
+  "flip": 1,
+  "thinkOffsetX": -10.0,
+  "thinkOffsetY": -0.0
+ },
+ "CH0082_home": {
+  "prefab": "LobbyCH0082",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 91.0,
+  "ty": 151.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0086_home": {
+  "prefab": "LobbyCH0086",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -271.0,
+  "ty": 274.0,
+  "flip": 0,
+  "thinkOffsetX": -50.3,
+  "thinkOffsetY": -0.3
+ },
+ "CH0087_home": {
+  "prefab": "LobbyCH0087",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -5.0,
+  "ty": 32.0,
+  "flip": 3,
+  "thinkOffsetX": 49.4,
+  "thinkOffsetY": 0.3
+ },
+ "CH0088_home": {
+  "prefab": "LobbyCH0088",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -117.0,
+  "ty": 395.0,
+  "flip": 0,
+  "thinkOffsetX": 3.0,
+  "thinkOffsetY": -13.0
+ },
+ "CH0089_home": {
+  "prefab": "LobbyCH0089",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 231.0,
+  "ty": 421.0,
+  "flip": 1,
+  "thinkOffsetX": 1.0,
+  "thinkOffsetY": -10.0
+ },
+ "CH0092_home": {
+  "prefab": "LobbyCH0092",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 34.0,
+  "ty": 30.0,
+  "flip": 3,
+  "thinkOffsetX": 13.0,
+  "thinkOffsetY": 3.0
+ },
+ "CH0095_home": {
+  "prefab": "LobbyCH0095",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -166.0,
+  "ty": 257.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0098_home": {
+  "prefab": "LobbyCH0098",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -175.0,
+  "ty": 435.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0099_home": {
+  "prefab": "LobbyCH0099",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 233.0,
+  "ty": 272.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0100_home": {
+  "prefab": "LobbyCH0100",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -320.0,
+  "ty": 503.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0101_home": {
+  "prefab": "LobbyCH0101",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -292.0,
+  "ty": 461.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0107_home": {
+  "prefab": "LobbyCH0107",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -20.0,
+  "ty": 486.0,
+  "flip": 0,
+  "thinkOffsetX": -49.1,
+  "thinkOffsetY": 0.0
+ },
+ "CH0109_home": {
+  "prefab": "LobbyCH0109",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 260.0,
+  "ty": 50.0,
+  "flip": 0,
+  "thinkOffsetX": 50.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0110_home": {
+  "prefab": "LobbyCH0110",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 20.0,
+  "ty": 296.0,
+  "flip": 1
+ },
+ "CH0113_home": {
+  "prefab": "LobbyCH0113",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 314.0,
+  "ty": 333.0,
+  "flip": 1,
+  "thinkOffsetX": -13.0,
+  "thinkOffsetY": -11.0
+ },
+ "CH0114_home": {
+  "prefab": "LobbyCH0114",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 104.0,
+  "ty": 350.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0123_home": {
+  "prefab": "LobbyCH0123",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 173.0,
+  "ty": 466.0,
+  "flip": 1,
+  "thinkOffsetX": 4.0,
+  "thinkOffsetY": -10.0
+ },
+ "CH0124_home": {
+  "prefab": "LobbyCH0124",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 169.0,
+  "ty": 322.0,
+  "flip": 1,
+  "thinkOffsetX": 49.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0135_home": {
+  "prefab": "LobbyCH0135",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 110.0,
+  "ty": 460.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0137_home": {
+  "prefab": "LobbyCH0137",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 532.0,
+  "ty": 2.0,
+  "flip": 0,
+  "thinkOffsetX": -207.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0138_home": {
+  "prefab": "LobbyCH0138",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 21.0,
+  "ty": 454.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0139_home": {
+  "prefab": "LobbyCH0139",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 422.0,
+  "ty": 293.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0141_home": {
+  "prefab": "LobbyCH0141",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -229.0,
+  "ty": 229.0,
+  "flip": 0,
+  "thinkOffsetX": 3.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0144_home": {
+  "prefab": "LobbyCH0144",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 30.0,
+  "ty": 340.0,
+  "flip": 1,
+  "thinkOffsetX": 1.0,
+  "thinkOffsetY": -1.0
+ },
+ "CH0145_home": {
+  "prefab": "LobbyCH0145",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -151.0,
+  "ty": 140.0,
+  "flip": 1,
+  "thinkOffsetX": 20.0,
+  "thinkOffsetY": 13.0
+ },
+ "CH0152_home": {
+  "prefab": "LobbyCH0152",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 91.0,
+  "ty": 290.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0155_home": {
+  "prefab": "LobbyCH0155",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -116.0,
+  "ty": -122.0,
+  "flip": 3,
+  "thinkOffsetX": 48.0,
+  "thinkOffsetY": 3.0
+ },
+ "CH0156_home": {
+  "prefab": "LobbyCH0156",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -73.0,
+  "ty": 311.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0158_home": {
+  "prefab": "LobbyCH0158",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 570.0,
+  "ty": 195.0,
+  "flip": 3
+ },
+ "CH0159_home": {
+  "prefab": "LobbyCH0159",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -218.0,
+  "ty": 413.0,
+  "flip": 0,
+  "thinkOffsetX": 7.0,
+  "thinkOffsetY": -16.0
+ },
+ "CH0160_home": {
+  "prefab": "LobbyCH0160",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 107.0,
+  "ty": -53.0,
+  "flip": 3,
+  "thinkOffsetX": -105.0,
+  "thinkOffsetY": 8.0
+ },
+ "CH0161_home": {
+  "prefab": "LobbyCH0161",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 236.0,
+  "ty": 106.0,
+  "flip": 3,
+  "thinkOffsetX": 35.0,
+  "thinkOffsetY": 6.0
+ },
+ "CH0163_home": {
+  "prefab": "LobbyCH0163",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -270.0,
+  "ty": 409.0,
+  "flip": 0,
+  "thinkOffsetX": -39.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0164_home": {
+  "prefab": "LobbyCH0164",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 85.0,
+  "ty": 480.0,
+  "flip": 1,
+  "thinkOffsetX": 23.0,
+  "thinkOffsetY": -13.0
+ },
+ "CH0165_home": {
+  "prefab": "LobbyCH0165",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -123.0,
+  "ty": 390.0,
+  "flip": 1,
+  "thinkOffsetX": -52.0,
+  "thinkOffsetY": 3.0
+ },
+ "CH0166_home": {
+  "prefab": "LobbyCH0166",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 300.0,
+  "ty": 120.0,
+  "flip": 1,
+  "thinkOffsetX": 10.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0167_home": {
+  "prefab": "LobbyCH0167",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 420.0,
+  "ty": 95.0,
+  "flip": 0,
+  "thinkOffsetX": -51.3,
+  "thinkOffsetY": -2.5
+ },
+ "CH0169_home": {
+  "prefab": "LobbyCH0169",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 128.0,
+  "ty": 384.0,
+  "flip": 1,
+  "thinkOffsetX": -3.0,
+  "thinkOffsetY": -4.0
+ },
+ "CH0170_home": {
+  "prefab": "LobbyCH0170",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -227.0,
+  "ty": 287.0,
+  "flip": 1,
+  "thinkOffsetX": 106.0,
+  "thinkOffsetY": 10.0
+ },
+ "CH0175_home": {
+  "prefab": "LobbyCH0175",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 487.0,
+  "ty": 284.0,
+  "flip": 1,
+  "thinkOffsetX": 20.0,
+  "thinkOffsetY": 1.0
+ },
+ "CH0176_home": {
+  "prefab": "LobbyCH0176",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 153.0,
+  "ty": 285.0,
+  "flip": 1,
+  "thinkOffsetX": 20.0,
+  "thinkOffsetY": -0.4
+ },
+ "CH0177_home": {
+  "prefab": "LobbyCH0177",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 255.0,
+  "ty": 222.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0178_home": {
+  "prefab": "LobbyCH0178",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -114.0,
+  "ty": 186.0,
+  "flip": 1,
+  "thinkOffsetX": 45.0,
+  "thinkOffsetY": 2.0
+ },
+ "CH0179_home": {
+  "prefab": "LobbyCH0179",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 350.0,
+  "ty": 92.0,
+  "flip": 0,
+  "thinkOffsetX": -43.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0180_home": {
+  "prefab": "LobbyCH0180",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 169.0,
+  "ty": 364.0,
+  "flip": 0,
+  "thinkOffsetX": -51.0,
+  "thinkOffsetY": -1.0
+ },
+ "CH0181_home": {
+  "prefab": "LobbyCH0181",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -6.0,
+  "ty": 254.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0182_home": {
+  "prefab": "LobbyCH0182",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 33.0,
+  "ty": 302.0,
+  "flip": 1,
+  "thinkOffsetX": -4.0,
+  "thinkOffsetY": -39.0
+ },
+ "CH0183_home": {
+  "prefab": "LobbyCH0183",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 24.0,
+  "ty": 336.0,
+  "flip": 0,
+  "thinkOffsetX": -24.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0184_home": {
+  "prefab": "LobbyCH0184",
+  "skY": -962.0000610351562,
+  "skScale": 100.0,
+  "tx": 120.0,
+  "ty": 207.0,
+  "flip": 0,
+  "thinkOffsetX": 1.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0185_home": {
+  "prefab": "LobbyCH0185",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -379.0,
+  "ty": 506.0,
+  "flip": 0,
+  "thinkOffsetX": -52.0,
+  "thinkOffsetY": -2.0
+ },
+ "CH0186_home": {
+  "prefab": "LobbyCH0186",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 155.0,
+  "ty": 341.0,
+  "flip": 1,
+  "thinkOffsetX": -9.0,
+  "thinkOffsetY": 73.0
+ },
+ "CH0187_home": {
+  "prefab": "LobbyCH0187",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 90.0,
+  "ty": 290.0,
+  "flip": 1,
+  "thinkOffsetX": 5.0,
+  "thinkOffsetY": -12.0
+ },
+ "CH0188_home": {
+  "prefab": "LobbyCH0188",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 94.0,
+  "ty": 437.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0189_home": {
+  "prefab": "LobbyCH0189",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -202.0,
+  "ty": 318.0,
+  "flip": 0,
+  "thinkOffsetX": -1.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0190_home": {
+  "prefab": "LobbyCH0190",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -14.0,
+  "ty": 403.0,
+  "flip": 0,
+  "thinkOffsetX": -11.0,
+  "thinkOffsetY": -8.0
+ },
+ "CH0191_home": {
+  "prefab": "LobbyCH0191",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 230.0,
+  "ty": 182.0,
+  "flip": 0,
+  "thinkOffsetX": 17.0,
+  "thinkOffsetY": 31.0
+ },
+ "CH0192_home": {
+  "prefab": "LobbyCH0192",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -91.0,
+  "ty": 332.0,
+  "flip": 1,
+  "thinkOffsetX": 32.0,
+  "thinkOffsetY": -7.0
+ },
+ "CH0193_home": {
+  "prefab": "LobbyCH0193",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 119.0,
+  "ty": 294.0,
+  "flip": 0,
+  "thinkOffsetX": 4.0,
+  "thinkOffsetY": -1.0
+ },
+ "CH0194_home": {
+  "prefab": "LobbyCH0194",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 373.0,
+  "ty": 62.0,
+  "flip": 0,
+  "thinkOffsetX": -35.0,
+  "thinkOffsetY": -15.0
+ },
+ "CH0195_home": {
+  "prefab": "LobbyCH0195",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 35.0,
+  "ty": 264.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0196_home": {
+  "prefab": "LobbyCH0196",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -180.0,
+  "ty": 258.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0197_home": {
+  "prefab": "LobbyCH0197",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -49.0,
+  "ty": -12.0,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0198_home": {
+  "prefab": "LobbyCH0198",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 350.0,
+  "ty": 128.0,
+  "flip": 0,
+  "thinkOffsetX": 12.0,
+  "thinkOffsetY": -9.0
+ },
+ "CH0200_home": {
+  "prefab": "LobbyCH0200",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -105.0,
+  "ty": 397.0,
+  "flip": 1,
+  "thinkOffsetX": 50.8,
+  "thinkOffsetY": -1.5
+ },
+ "CH0201_home": {
+  "prefab": "LobbyCH0201",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -109.0,
+  "ty": 479.0,
+  "flip": 0,
+  "thinkOffsetX": 0.0,
+  "thinkOffsetY": -2.0
+ },
+ "CH0202_home": {
+  "prefab": "LobbyCH0202",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 198.0,
+  "ty": 243.0,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0203_home": {
+  "prefab": "LobbyCH0203",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 273.0,
+  "ty": 224.0,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0204_home": {
+  "prefab": "LobbyCH0204",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -104.0,
+  "ty": 308.0,
+  "flip": 1,
+  "thinkOffsetX": -34.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0205_home": {
+  "prefab": "LobbyCH0205",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -23.0,
+  "ty": 270.0,
+  "flip": 0,
+  "thinkOffsetX": -34.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0209_home": {
+  "prefab": "LobbyCH0209",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -195.0,
+  "ty": 349.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0210_home": {
+  "prefab": "LobbyCH0210",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 316.0,
+  "ty": 356.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0211_home": {
+  "prefab": "LobbyCH0211",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 608.0,
+  "ty": 495.0,
+  "flip": 1,
+  "thinkOffsetX": 50.4,
+  "thinkOffsetY": -1.9
+ },
+ "CH0214_home": {
+  "prefab": "LobbyCH0214",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 132.0,
+  "ty": 422.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0215_home": {
+  "prefab": "LobbyCH0215",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -143.0,
+  "ty": 253.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0216_home": {
+  "prefab": "LobbyCH0216",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 435.0,
+  "ty": 220.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0217_home": {
+  "prefab": "LobbyCH0217",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 46.0,
+  "ty": -78.0,
+  "flip": 3,
+  "thinkOffsetX": 54.0,
+  "thinkOffsetY": -2.0
+ },
+ "CH0218_home": {
+  "prefab": "LobbyCH0218",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 104.0,
+  "ty": 171.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0219_home": {
+  "prefab": "LobbyCH0219",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 113.0,
+  "ty": 241.0,
+  "flip": 1,
+  "thinkOffsetX": -7.0,
+  "thinkOffsetY": -3.0
+ },
+ "CH0220_home": {
+  "prefab": "LobbyCH0220",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 40.0,
+  "ty": 403.0,
+  "flip": 0,
+  "thinkOffsetX": -48.4,
+  "thinkOffsetY": 0.3
+ },
+ "CH0221_home": {
+  "prefab": "LobbyCH0221",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -36.0,
+  "ty": 161.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0222_home": {
+  "prefab": "LobbyCH0222",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 405.0,
+  "ty": 90.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0224_home": {
+  "prefab": "LobbyCH0224",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -171.0,
+  "ty": 96.0,
+  "flip": 2,
+  "thinkOffsetX": -52.0,
+  "thinkOffsetY": 2.0
+ },
+ "CH0225_home": {
+  "prefab": "LobbyCH0225",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -388.0,
+  "ty": 408.0,
+  "flip": 0,
+  "thinkOffsetX": -1.1,
+  "thinkOffsetY": -9.5
+ },
+ "CH0228_home": {
+  "prefab": "LobbyCH0228",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 248.0,
+  "ty": 22.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": -0.0
+ },
+ "CH0229_home": {
+  "prefab": "LobbyCH0229",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 147.0,
+  "ty": 117.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0230_home": {
+  "prefab": "LobbyCH0230",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -137.0,
+  "ty": 236.0,
+  "flip": 0,
+  "thinkOffsetX": 104.0,
+  "thinkOffsetY": -51.0
+ },
+ "CH0231_home": {
+  "prefab": "LobbyCH0231",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -299.0,
+  "ty": 425.0,
+  "flip": 0,
+  "thinkOffsetX": -94.0,
+  "thinkOffsetY": -189.0
+ },
+ "CH0232_home": {
+  "prefab": "LobbyCH0232",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -130.0,
+  "ty": 85.0,
+  "flip": 1,
+  "thinkOffsetX": 58.0,
+  "thinkOffsetY": 2.0
+ },
+ "CH0233_home": {
+  "prefab": "LobbyCH0233",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 109.0,
+  "ty": 319.0,
+  "flip": 1,
+  "thinkOffsetX": 51.0,
+  "thinkOffsetY": -2.0
+ },
+ "CH0235_home": {
+  "prefab": "LobbyCH0235",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 367.0,
+  "ty": 42.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0238_home": {
+  "prefab": "LobbyCH0238",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 27.0,
+  "ty": 210.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0239_home": {
+  "prefab": "LobbyCH0239",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -208.0,
+  "ty": 429.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0240_home": {
+  "prefab": "LobbyCH0240",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -3.0,
+  "ty": 288.0,
+  "flip": 1,
+  "thinkOffsetX": 10.3,
+  "thinkOffsetY": -2.4
+ },
+ "CH0242_home": {
+  "prefab": "LobbyCH0242",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 492.0,
+  "ty": -190.0,
+  "flip": 2,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0243_home": {
+  "prefab": "LobbyCH0243",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 173.0,
+  "ty": 134.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0245_home": {
+  "prefab": "LobbyCH0245",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 200.0,
+  "ty": 190.0,
+  "flip": 1
+ },
+ "CH0250_home": {
+  "prefab": "LobbyCH0250",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 118.0,
+  "ty": 399.0,
+  "flip": 0,
+  "thinkOffsetX": -51.1,
+  "thinkOffsetY": -1.7
+ },
+ "CH0251_home": {
+  "prefab": "LobbyCH0251",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -99.0,
+  "ty": -29.0,
+  "flip": 3,
+  "thinkOffsetX": 49.1,
+  "thinkOffsetY": -0.6
+ },
+ "CH0255_home": {
+  "prefab": "LobbyCH0255",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 214.0,
+  "ty": -111.0,
+  "flip": 3,
+  "thinkOffsetX": 0.0,
+  "thinkOffsetY": 6.0
+ },
+ "CH0257_home": {
+  "prefab": "LobbyCH0257",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 165.0,
+  "ty": 60.0,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0258_home": {
+  "prefab": "LobbyCH0258",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 59.0,
+  "ty": 281.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0259_home": {
+  "prefab": "LobbyCH0259",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 458.0,
+  "ty": 157.0,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0260_home": {
+  "prefab": "LobbyCH0260",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 116.0,
+  "ty": 325.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0261_home": {
+  "prefab": "LobbyCH0261",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 296.0,
+  "ty": 208.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0262_home": {
+  "prefab": "LobbyCH0262",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 215.0,
+  "ty": 361.0,
+  "flip": 0
+ },
+ "CH0263_home": {
+  "prefab": "LobbyCH0263",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -142.0,
+  "ty": 210.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0264_home": {
+  "prefab": "LobbyCH0264",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 110.0,
+  "ty": 140.0,
+  "flip": 1
+ },
+ "CH0266_home": {
+  "prefab": "LobbyCH0266",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -8.0,
+  "ty": -52.0,
+  "flip": 3,
+  "thinkOffsetX": 6.0,
+  "thinkOffsetY": 4.0
+ },
+ "CH0267_home": {
+  "prefab": "LobbyCH0267",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -35.0,
+  "ty": 173.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0268_home": {
+  "prefab": "LobbyCH0268",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 120.0,
+  "ty": 0.0,
+  "flip": 1
+ },
+ "CH0269_home": {
+  "prefab": "LobbyCH0269",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 399.0,
+  "ty": 329.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0270_home": {
+  "prefab": "LobbyCH0270",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 480.0,
+  "ty": 170.0,
+  "flip": 1,
+  "thinkOffsetX": -10.0,
+  "thinkOffsetY": -10.0
+ },
+ "CH0271_home": {
+  "prefab": "LobbyCH0271",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 473.0,
+  "ty": 321.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0273_home": {
+  "prefab": "LobbyCH0273",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 0.0,
+  "ty": 20.0,
+  "flip": 3,
+  "thinkOffsetX": 33.0,
+  "thinkOffsetY": 17.0
+ },
+ "CH0274_home": {
+  "prefab": "LobbyCH0274",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 47.0,
+  "ty": 101.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": -0.0
+ },
+ "CH0275_home": {
+  "prefab": "LobbyCH0275",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 150.0,
+  "ty": 90.0,
+  "flip": 0,
+  "thinkOffsetX": -10.0,
+  "thinkOffsetY": -5.0
+ },
+ "CH0280_home": {
+  "prefab": "LobbyCH0280",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 61.0,
+  "ty": -37.0,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": -0.0
+ },
+ "CH0281_home": {
+  "prefab": "LobbyCH0281",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 247.0,
+  "ty": 211.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0282_home": {
+  "prefab": "LobbyCH0282",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 95.0,
+  "ty": 155.0,
+  "flip": 1,
+  "thinkOffsetX": 0.0,
+  "thinkOffsetY": -5.0
+ },
+ "CH0284_home": {
+  "prefab": "LobbyCH0284",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -161.0,
+  "ty": -87.0,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0285_home": {
+  "prefab": "LobbyCH0285",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 360.0,
+  "ty": 280.0,
+  "flip": 1
+ },
+ "CH0286_home": {
+  "prefab": "LobbyCH0286",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -13.0,
+  "ty": 40.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0287_home": {
+  "prefab": "LobbyCH0287",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -147.0,
+  "ty": 269.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0288_home": {
+  "prefab": "LobbyCH0288",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 300.0,
+  "ty": 180.0,
+  "flip": 1
+ },
+ "CH0291_home": {
+  "prefab": "LobbyCH0291",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 305.0,
+  "ty": 373.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0292_home": {
+  "prefab": "LobbyCH0292",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 323.0,
+  "ty": 159.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": -0.0
+ },
+ "CH0293_home": {
+  "prefab": "LobbyCH0293",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 453.0,
+  "ty": 140.0,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0294_home": {
+  "prefab": "LobbyCH0294",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -220.0,
+  "ty": -130.0,
+  "flip": 3
+ },
+ "CH0295_home": {
+  "prefab": "LobbyCH0295",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 53.0,
+  "ty": -160.0,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0295_home_GL": {
+  "prefab": "LobbyCH0295",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 53.0,
+  "ty": -160.0,
+  "flip": 3
+ },
+ "CH0296_home": {
+  "prefab": "LobbyCH0296",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -25.0,
+  "ty": 174.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0297_home": {
+  "prefab": "LobbyCH0297",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -60.0,
+  "ty": 100.0,
+  "flip": 0
+ },
+ "CH0300_home": {
+  "prefab": "LobbyCH0300",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -40.0,
+  "ty": 173.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0301_home": {
+  "prefab": "LobbyCH0301",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 14.0,
+  "ty": 223.0,
+  "flip": 1,
+  "thinkOffsetX": 33.0,
+  "thinkOffsetY": 6.0
+ },
+ "CH0302_home": {
+  "prefab": "LobbyCH0302",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 306.0,
+  "ty": 92.0,
+  "flip": 2,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0304_home": {
+  "prefab": "LobbyCH0304",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 190.0,
+  "ty": 152.0,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": -0.0
+ },
+ "CH0305_home": {
+  "prefab": "LobbyCH0305",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 270.0,
+  "ty": 10.0,
+  "flip": 0
+ },
+ "CH0306_home": {
+  "prefab": "LobbyCH0306",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 65.0,
+  "ty": -75.0,
+  "flip": 0
+ },
+ "CH0307_home": {
+  "prefab": "LobbyCH0307",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 33.0,
+  "ty": 326.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0309_home": {
+  "prefab": "LobbyCH0309",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 367.5,
+  "ty": 79.7,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": -0.0
+ },
+ "CH0310_home": {
+  "prefab": "LobbyCH0310",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 452.0,
+  "ty": -180.0,
+  "flip": 2,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": -0.0
+ },
+ "CH0317_home": {
+  "prefab": "LobbyCH0317",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 253.0,
+  "ty": 84.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0318_home": {
+  "prefab": "LobbyCH0318",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 317.0,
+  "ty": 299.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0319_home": {
+  "prefab": "LobbyCH0319",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 352.0,
+  "ty": 86.0,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": -0.0
+ },
+ "CH0325_home": {
+  "prefab": "LobbyCH0325",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 139.0,
+  "ty": 280.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0326_home": {
+  "prefab": "LobbyCH0326",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 176.0,
+  "ty": 22.0,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": -0.0
+ },
+ "CH0331_home": {
+  "prefab": "LobbyCH0331",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -40.0,
+  "ty": 215.0,
+  "flip": 2
+ },
+ "CH0332_home": {
+  "prefab": "LobbyCH0332",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -220.0,
+  "ty": 240.0,
+  "flip": 0
+ },
+ "CH0333_home": {
+  "prefab": "LobbyCH0333",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 51.0,
+  "ty": 328.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0334_home": {
+  "prefab": "LobbyCH0334",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 179.0,
+  "ty": 182.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0335_home": {
+  "prefab": "LobbyCH0335",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 563.0,
+  "ty": -123.0,
+  "flip": 2,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "CH0336_home": {
+  "prefab": "LobbyCH0336",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -230.7,
+  "ty": -42.7,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": -0.0
+ },
+ "CH0337_home": {
+  "prefab": "LobbyCH0337",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 190.0,
+  "ty": 160.0,
+  "flip": 0,
+  "thinkOffsetX": 0.0,
+  "thinkOffsetY": 40.0
+ },
+ "CH9996_home": {
+  "prefab": "LobbyCH9996",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -53.0,
+  "ty": 152.0,
+  "flip": 1,
+  "thinkOffsetX": 39.0,
+  "thinkOffsetY": 6.0
+ },
+ "CH9997_home": {
+  "prefab": "LobbyCH9997",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 131.0,
+  "ty": 485.0,
+  "flip": 0,
+  "thinkOffsetX": -51.0,
+  "thinkOffsetY": -2.0
+ },
+ "CH9998_home": {
+  "prefab": "LobbyCH9998",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 53.0,
+  "ty": 529.0,
+  "flip": 0,
+  "thinkOffsetX": -10.0,
+  "thinkOffsetY": -2.0
+ },
+ "CH9999_home": {
+  "prefab": "LobbyCH9999",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 128.0,
+  "ty": 209.0,
+  "flip": 3,
+  "thinkOffsetX": 29.0,
+  "thinkOffsetY": -2.0
+ },
+ "Cherino_home": {
+  "prefab": "LobbyCherino",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 230.0,
+  "ty": 170.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Chinatsu_home": {
+  "prefab": "LobbyChinatsu",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -204.0,
+  "ty": 291.0,
+  "flip": 0,
+  "thinkOffsetX": -51.0,
+  "thinkOffsetY": -1.0
+ },
+ "Chise_home": {
+  "prefab": "LobbyChise",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 302.0,
+  "ty": 185.0,
+  "flip": 1,
+  "thinkOffsetX": 31.0,
+  "thinkOffsetY": -42.0
+ },
+ "Eimi_home": {
+  "prefab": "LobbyEimi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 490.0,
+  "ty": 99.0,
+  "flip": 0,
+  "thinkOffsetX": 3.0,
+  "thinkOffsetY": -10.0
+ },
+ "Fuuka_home": {
+  "prefab": "LobbyFuuka",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -60.0,
+  "ty": 156.0,
+  "flip": 0,
+  "thinkOffsetX": -11.0,
+  "thinkOffsetY": -102.0
+ },
+ "Hanae_home": {
+  "prefab": "LobbyHanae",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 52.0,
+  "ty": 133.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Hanako_home": {
+  "prefab": "LobbyHanako",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -177.0,
+  "ty": 332.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Hare_home": {
+  "prefab": "LobbyHare",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 117.0,
+  "ty": 260.0,
+  "flip": 1
+ },
+ "Haruka_home": {
+  "prefab": "LobbyHaruka",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 211.0,
+  "ty": -76.0,
+  "flip": 3,
+  "thinkOffsetX": 24.0,
+  "thinkOffsetY": 9.0
+ },
+ "Haruna_home": {
+  "prefab": "LobbyHaruna",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 246.0,
+  "ty": 292.0,
+  "flip": 0,
+  "thinkOffsetX": -3.0,
+  "thinkOffsetY": -4.0
+ },
+ "Hasumi_home": {
+  "prefab": "LobbyHasumi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -175.0,
+  "ty": 326.0,
+  "flip": 0,
+  "thinkOffsetX": -23.0,
+  "thinkOffsetY": -39.0
+ },
+ "Hibiki_home": {
+  "prefab": "LobbyHibiki",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -42.0,
+  "ty": 236.0,
+  "flip": 1,
+  "thinkOffsetX": -15.0,
+  "thinkOffsetY": 0.0
+ },
+ "Hihumi_home": {
+  "prefab": "LobbyHihumi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 73.0,
+  "ty": 425.0,
+  "flip": 0,
+  "thinkOffsetX": -12.0,
+  "thinkOffsetY": -126.0
+ },
+ "Hina_home": {
+  "prefab": "LobbyHina",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -38.0,
+  "ty": 265.0,
+  "flip": 0,
+  "thinkOffsetX": -23.0,
+  "thinkOffsetY": -59.0
+ },
+ "Hinata_home": {
+  "prefab": "LobbyHinata",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 169.0,
+  "ty": 287.0,
+  "flip": 0,
+  "thinkOffsetX": -34.0,
+  "thinkOffsetY": -1.0
+ },
+ "Hiyori_home": {
+  "prefab": "LobbyHiyori",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -175.0,
+  "ty": 238.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Hoshino_home": {
+  "prefab": "LobbyHoshino",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 487.0,
+  "ty": 29.0,
+  "flip": 0,
+  "thinkOffsetX": -48.0,
+  "thinkOffsetY": -7.0
+ },
+ "Hoshino_swimsuit_home": {
+  "prefab": "LobbyHoshino_swimsuit",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 112.0,
+  "ty": 23.0,
+  "flip": 3,
+  "thinkOffsetX": 46.0,
+  "thinkOffsetY": 60.0
+ },
+ "Ibuki_home": {
+  "prefab": "LobbyIbuki",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 35.0,
+  "ty": 196.0,
+  "flip": 3,
+  "thinkOffsetX": 62.0,
+  "thinkOffsetY": -133.0
+ },
+ "Iori_home": {
+  "prefab": "LobbyIori",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 275.0,
+  "ty": 200.0,
+  "flip": 1,
+  "thinkOffsetX": -36.0,
+  "thinkOffsetY": -3.0
+ },
+ "Izumi_home": {
+  "prefab": "LobbyIzumi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 169.0,
+  "ty": 258.0,
+  "flip": 1,
+  "thinkOffsetX": 13.0,
+  "thinkOffsetY": 0.0
+ },
+ "Izumi_swimsuit_home": {
+  "prefab": "LobbyIzumi_swimsuit",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -323.0,
+  "ty": 442.0,
+  "flip": 0,
+  "thinkOffsetX": -21.0,
+  "thinkOffsetY": -13.0
+ },
+ "Izumi_swimsuit_home_Teen": {
+  "prefab": "LobbyIzumi_swimsuit",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -323.0,
+  "ty": 442.0,
+  "flip": 0
+ },
+ "Izuna_home": {
+  "prefab": "LobbyIzuna",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 88.0,
+  "ty": 204.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Juri_home": {
+  "prefab": "LobbyJuri",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -125.0,
+  "ty": 296.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Kaede_home": {
+  "prefab": "LobbyKaede",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 223.0,
+  "ty": 277.0,
+  "flip": 0,
+  "thinkOffsetX": -4.0,
+  "thinkOffsetY": -2.0
+ },
+ "Karin_home": {
+  "prefab": "LobbyKarin",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -343.0,
+  "ty": 436.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Kayoko_home": {
+  "prefab": "LobbyKayoko",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -141.0,
+  "ty": 227.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Kazusa_home": {
+  "prefab": "LobbyKazusa",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 66.0,
+  "ty": 166.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Kirara_home": {
+  "prefab": "LobbyKirara",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 267.0,
+  "ty": 522.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": -0.0
+ },
+ "Kirino_home": {
+  "prefab": "LobbyKirino",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -103.0,
+  "ty": 335.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Koharu_home": {
+  "prefab": "LobbyKoharu",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 249.0,
+  "ty": -40.0,
+  "flip": 0,
+  "thinkOffsetX": -21.0,
+  "thinkOffsetY": -191.0
+ },
+ "Kotama_home": {
+  "prefab": "LobbyKotama",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 432.0,
+  "ty": 55.6,
+  "flip": 0,
+  "thinkOffsetX": -204.8,
+  "thinkOffsetY": 17.2
+ },
+ "Kotori_home": {
+  "prefab": "LobbyKotori",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 218.0,
+  "ty": 258.0,
+  "flip": 0,
+  "thinkOffsetX": 12.0,
+  "thinkOffsetY": 0.0
+ },
+ "LobbyAyane_multi": {
+  "prefab": "LobbyAyane_multi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -3.0,
+  "ty": -109.0,
+  "flip": 3
+ },
+ "LobbyHoshino_multi": {
+  "prefab": "LobbyHoshino_multi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -3.0,
+  "ty": 185.0,
+  "flip": 0
+ },
+ "LobbyNonomi_multi": {
+  "prefab": "LobbyNonomi_multi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -122.0,
+  "ty": -2.0,
+  "flip": 0
+ },
+ "LobbySerika_multi": {
+  "prefab": "LobbySerika_multi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 230.0,
+  "ty": 45.0,
+  "flip": 1
+ },
+ "LobbyShiroko_multi": {
+  "prefab": "LobbyShiroko_multi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -51.0,
+  "ty": 25.0,
+  "flip": 0
+ },
+ "Maki_home": {
+  "prefab": "LobbyMaki",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -264.0,
+  "ty": 303.0,
+  "flip": 0,
+  "thinkOffsetX": -11.0,
+  "thinkOffsetY": -0.0
+ },
+ "Mari_home": {
+  "prefab": "LobbyMari",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 283.0,
+  "ty": 80.0,
+  "flip": 0,
+  "thinkOffsetX": -6.0,
+  "thinkOffsetY": -3.0
+ },
+ "Marina_home": {
+  "prefab": "LobbyMarina",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 51.0,
+  "ty": 324.0,
+  "flip": 1,
+  "thinkOffsetX": -6.0,
+  "thinkOffsetY": -6.0
+ },
+ "Mashiro_home": {
+  "prefab": "LobbyMashiro",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -374.0,
+  "ty": 409.0,
+  "flip": 0,
+  "thinkOffsetX": -2.0,
+  "thinkOffsetY": 0.0
+ },
+ "Mashiro_swimsuit_home": {
+  "prefab": "LobbyMashiro_swimsuit",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -34.0,
+  "ty": 300.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Midori_home": {
+  "prefab": "LobbyMidori",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 149.0,
+  "ty": 195.0,
+  "flip": 1,
+  "thinkOffsetX": -4.0,
+  "thinkOffsetY": -10.0
+ },
+ "Mimori_home": {
+  "prefab": "LobbyMimori",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 383.0,
+  "ty": 304.0,
+  "flip": 1,
+  "thinkOffsetX": -1.0,
+  "thinkOffsetY": 0.0
+ },
+ "Misaki_home": {
+  "prefab": "LobbyMisaki",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -197.0,
+  "ty": 201.0,
+  "flip": 1,
+  "thinkOffsetX": 21.0,
+  "thinkOffsetY": -45.0
+ },
+ "Miyako_home": {
+  "prefab": "LobbyMiyako",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 373.0,
+  "ty": 257.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 17.0
+ },
+ "Moe_home": {
+  "prefab": "LobbyMoe",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 306.0,
+  "ty": 86.0,
+  "flip": 3,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Momiji_home": {
+  "prefab": "LobbyMomiji",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -101.0,
+  "ty": 304.0,
+  "flip": 1,
+  "thinkOffsetX": 52.0,
+  "thinkOffsetY": -3.0
+ },
+ "Momoi_home": {
+  "prefab": "LobbyMomoi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 58.0,
+  "ty": 194.0,
+  "flip": 1,
+  "thinkOffsetX": 15.0,
+  "thinkOffsetY": 0.0
+ },
+ "Mutsuki_home": {
+  "prefab": "LobbyMutsuki",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -381.0,
+  "ty": 478.0,
+  "flip": 0,
+  "thinkOffsetX": -7.0,
+  "thinkOffsetY": -45.0
+ },
+ "Mutsuki_newyear_home": {
+  "prefab": "LobbyMutsuki_newyear",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -74.0,
+  "ty": 421.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Nagisa_home": {
+  "prefab": "LobbyNagisa",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 269.0,
+  "ty": 109.0,
+  "flip": 0,
+  "thinkOffsetX": 1.0,
+  "thinkOffsetY": -7.0
+ },
+ "Neru_home": {
+  "prefab": "LobbyNeru",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -58.0,
+  "ty": 214.0,
+  "flip": 1,
+  "thinkOffsetX": 16.0,
+  "thinkOffsetY": -50.0
+ },
+ "Nodoka_home": {
+  "prefab": "LobbyNodoka",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 198.0,
+  "ty": 282.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Nonomi_home": {
+  "prefab": "LobbyNonomi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -138.0,
+  "ty": -109.0,
+  "flip": 3,
+  "thinkOffsetX": 616.0,
+  "thinkOffsetY": 134.0
+ },
+ "Pina_home": {
+  "prefab": "LobbyPina",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 296.0,
+  "ty": 403.0,
+  "flip": 1,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Reizyo_home": {
+  "prefab": "LobbyReizyo",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 452.0,
+  "ty": 343.0,
+  "flip": 1,
+  "thinkOffsetX": -60.0,
+  "thinkOffsetY": -0.0
+ },
+ "Sakurako_home": {
+  "prefab": "LobbySakurako",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 212.0,
+  "ty": 289.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Saori_home": {
+  "prefab": "LobbySaori",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -90.0,
+  "ty": 214.0,
+  "flip": 0,
+  "thinkOffsetX": -43.0,
+  "thinkOffsetY": -1.0
+ },
+ "Saya_casual_home": {
+  "prefab": "LobbySaya_casual",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -147.0,
+  "ty": 8.0,
+  "flip": 3,
+  "thinkOffsetX": 22.0,
+  "thinkOffsetY": 8.0
+ },
+ "Saya_home": {
+  "prefab": "LobbySaya",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 124.0,
+  "ty": -77.0,
+  "flip": 0,
+  "thinkOffsetX": 9.0,
+  "thinkOffsetY": 0.0
+ },
+ "Serika_home": {
+  "prefab": "LobbySerika",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -8.0,
+  "ty": 249.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": -102.0
+ },
+ "Serika_newyear_home": {
+  "prefab": "LobbySerika_newyear",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -205.0,
+  "ty": 274.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Serina_home": {
+  "prefab": "LobbySerina",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 148.0,
+  "ty": 170.0,
+  "flip": 0,
+  "thinkOffsetX": -50.0,
+  "thinkOffsetY": -30.0
+ },
+ "Shigure_home": {
+  "prefab": "LobbyShigure",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -91.0,
+  "ty": 420.0,
+  "flip": 0,
+  "thinkOffsetX": -25.0,
+  "thinkOffsetY": -6.0
+ },
+ "Shimiko_home": {
+  "prefab": "LobbyShimiko",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 417.0,
+  "ty": -218.0,
+  "flip": 2,
+  "thinkOffsetX": -185.0,
+  "thinkOffsetY": 0.0
+ },
+ "Shiroko_home": {
+  "prefab": "LobbyShiroko",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 239.0,
+  "ty": 230.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Shiroko_ridingsuit_home": {
+  "prefab": "LobbyShiroko_ridingsuit",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -67.0,
+  "ty": 415.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Shizuko_home": {
+  "prefab": "LobbyShizuko",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -45.0,
+  "ty": -106.0,
+  "flip": 3,
+  "thinkOffsetX": -10.0,
+  "thinkOffsetY": 8.0
+ },
+ "Shun_home": {
+  "prefab": "LobbyShun",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -180.0,
+  "ty": 193.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Sumire_home": {
+  "prefab": "LobbySumire",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -25.0,
+  "ty": 257.0,
+  "flip": 1,
+  "thinkOffsetX": 2.0,
+  "thinkOffsetY": -17.0
+ },
+ "Suzumi_home": {
+  "prefab": "LobbySuzumi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -89.0,
+  "ty": 289.0,
+  "flip": 0,
+  "thinkOffsetX": -22.5,
+  "thinkOffsetY": 0.0
+ },
+ "Tomoe_home": {
+  "prefab": "LobbyTomoe",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 250.0,
+  "ty": 392.0,
+  "flip": 1,
+  "thinkOffsetX": 31.0,
+  "thinkOffsetY": -42.0
+ },
+ "Tsubaki_home": {
+  "prefab": "LobbyTsubaki",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 250.0,
+  "ty": -120.0,
+  "flip": 3,
+  "thinkOffsetX": 3.0,
+  "thinkOffsetY": 3.0
+ },
+ "Tsurugi_home": {
+  "prefab": "LobbyTsurugi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -200.0,
+  "ty": 326.0,
+  "flip": 0,
+  "thinkOffsetX": 19.0,
+  "thinkOffsetY": -37.0
+ },
+ "Utaha_home": {
+  "prefab": "LobbyUtaha",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 316.0,
+  "ty": 209.0,
+  "flip": 0,
+  "thinkOffsetX": 6.0,
+  "thinkOffsetY": -36.0
+ },
+ "Wakamo_home": {
+  "prefab": "LobbyWakamo",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -40.0,
+  "ty": 249.0,
+  "flip": 1,
+  "thinkOffsetX": -11.0,
+  "thinkOffsetY": -26.0
+ },
+ "Yoshimi_home": {
+  "prefab": "LobbyYoshimi",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": -191.0,
+  "ty": 336.0,
+  "flip": 0,
+  "thinkOffsetX": -30.0,
+  "thinkOffsetY": 0.0
+ },
+ "Yuuka_home": {
+  "prefab": "LobbyYuuka",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 89.0,
+  "ty": 83.0,
+  "flip": 0,
+  "thinkOffsetX": 41.0,
+  "thinkOffsetY": 3.0
+ },
+ "Yuzu_home": {
+  "prefab": "LobbyYuzu",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 393.0,
+  "ty": -138.0,
+  "flip": 2,
+  "thinkOffsetX": -12.0,
+  "thinkOffsetY": 6.0
+ },
+ "Zunko_home": {
+  "prefab": "LobbyZunko",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 123.0,
+  "ty": 72.0,
+  "flip": 1,
+  "thinkOffsetX": -1.0,
+  "thinkOffsetY": 0.0
+ },
+ "ako_home_Teen": {
+  "prefab": "LobbyAko",
+  "skY": -962.0,
+  "skScale": 100.0,
+  "tx": 41.0,
+  "ty": 391.0,
+  "flip": 1
+ }
+}
