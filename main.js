@@ -327,14 +327,14 @@ function writeInstalled(map) {
 function getStreamingFlagPath() {
   return path.join(getAssetsDir(), '.streaming');
 }
+// 串流模式為預設：無旗標檔或 '1' 都視為串流；只有明確的 '0' 才是完整安裝
 function isStreamingMode() {
-  try { return fs.readFileSync(getStreamingFlagPath(), 'utf-8').trim() === '1'; }
-  catch { return false; }
+  try { return fs.readFileSync(getStreamingFlagPath(), 'utf-8').trim() !== '0'; }
+  catch { return true; }
 }
 function setStreamingMode(v) {
   fs.mkdirSync(getAssetsDir(), { recursive: true });
-  if (v) fs.writeFileSync(getStreamingFlagPath(), '1');
-  else try { fs.unlinkSync(getStreamingFlagPath()); } catch {}
+  fs.writeFileSync(getStreamingFlagPath(), v ? '1' : '0');
 }
 
 function readLocalVersion() {

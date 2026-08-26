@@ -783,6 +783,7 @@ function playVoice(voiceId) {
 }
 
 function onAnimationEvent(_entry, ev) {
+  console.log('[EVT-DBG]', ev?.data?.name, ev?.stringValue);
   // Voice-event format in BA MemorialLobby skeletons — VERIFIED by dumping the
   // SkeletonBinary EventTimelines: the generic marker event is named "Talk"
   // (ev.data.name) while the REAL voice id lives in ev.stringValue, e.g.
@@ -945,6 +946,7 @@ function restTracks() {
 }
 
 async function playTalk() {
+  console.log('[TALK-DBG]', 'spine=', !!spine, 'busy=', state.busy, 'blockOnPlay=', state.blockInteractionOnPlay);
   if (!spine) return;
   // ---- BlockInteraction constraint from reversed code ----
   // In-game, the dialog system calls BlockInteraction(dialogBox, true) which
@@ -963,6 +965,7 @@ async function playTalk() {
 
   try {
     const talks = animNames().filter(n => n.startsWith('Talk_') && n.endsWith('_M'));
+    console.log('[TALK-DBG] animNames=', animNames().length, 'talks=', talks.join(','));
     if (!talks.length) return;
 
     // Prefer Talk animations that have voice events (lobby_voice_schedule.json).
@@ -1427,6 +1430,7 @@ function memoryLobbySkip() {
 // `ba_debug.state` is a frozen-ish snapshot that other tools (or the devtools
 // console) can use to inspect the BlockInteraction / Talk / Voice state machine.
 // Mirrors the SpineCharacter+0xb0 / +0xc8 / busy fields, useful when tweaking.
+window.__dbgSpine = () => spine;
 window.ba_debug = {
   state: () => ({
     busy: state.busy,
@@ -3114,10 +3118,12 @@ function updateResUI() {
 
 // ---- asset loading ----
 const IS_ELECTRON = typeof window !== 'undefined' && !!window.ba?.__electron;
+// Electron prod 用 file: 載入 + app:// 協議服務資產；dev（vite http）與網頁版都用相對路徑
+const IS_ELECTRON_PROD = IS_ELECTRON && location.protocol === 'file:';
 // 網頁版（GitHub Pages）：無 Electron preload，由 ba-web.js 提供 window.ba
 const WEB_MODE = typeof window !== 'undefined' && !IS_ELECTRON && !!window.ba;
 function assetUrl(p) {
-  return IS_ELECTRON ? 'app://' + p : p;
+  return IS_ELECTRON_PROD ? 'app://' + p : p;
 }
 
 async function fetchRetry(url, retries = 4) {
@@ -3867,6 +3873,27 @@ async function ensureLobbyAssets(lobbyName) {
   }
 }
 
+// 串流模式啟動：自動下載必要包（core+intro），進度寫進 loading 文字。
+// 回傳 true=全部成功（可進 lobby）；false=有失敗（呼叫端應彈下載面板）。
+async function autoStreamBootstrap(assetInfo) {
+  const loadingText2 = document.getElementById('loadingText');
+  const packs = (assetInfo.needsDownloadPacks || []).filter(k => assetInfo.packages?.[k]);
+  if (!packs.length) return true;
+  const done = await new Promise((resolve) => {
+    window.ba.onDownloadProgress?.((p) => {
+      if (p.status === 'downloading' && loadingText2) {
+        loadingText2.textContent = t('dl.downloading', { pkg: p.package, i: p.index + 1, n: p.total });
+      }
+    });
+    window.ba.downloadAssets({
+      version: assetInfo.remoteVersion,
+      packages: assetInfo.packages,
+      onlyPacks: packs,
+    }).then(resolve).catch(() => resolve(null));
+  });
+  return Array.isArray(done) && done.every(r => r.ok);
+}
+
 async function showAssetDownload(assetInfo) {
   const downloadPanel = document.getElementById('downloadPanel');
   const status = document.getElementById('assetStatus');
@@ -4014,10 +4041,22 @@ async function init() {
         new Promise((_, rej) => setTimeout(() => rej(new Error('checkAssets timeout')), WEB_MODE ? 30000 : 10000)),
       ]);
       _assetInfo = assetInfo;
-      // skipUpdate=1（headless 自動化）跳過下載面板，直接進入 lobby。
+      // skipUpdate=1（headless 自動化）跳過下載，直接進入 lobby。
       if (assetInfo.needsDownload && !/(?:^|&)skipUpdate=1/.test(location.search + location.hash)) {
-        await showAssetDownload(assetInfo);
-        try { _assetInfo = await window.ba.checkAssets(); } catch {}
+        // 串流模式（預設）：自動補齊必要包（core/intro），不出面板；全量安裝走設定面板。
+        if (assetInfo.streaming && assetInfo.needsDownloadPacks?.length) {
+          const ok = await autoStreamBootstrap(assetInfo);
+          if (ok) {
+            try { _assetInfo = await window.ba.checkAssets(); } catch {}
+          } else {
+            await showAssetDownload(assetInfo);
+            try { _assetInfo = await window.ba.checkAssets(); } catch {}
+          }
+        } else if (!assetInfo.streaming) {
+          // 完整安裝模式：維持舊面板流程
+          await showAssetDownload(assetInfo);
+          try { _assetInfo = await window.ba.checkAssets(); } catch {}
+        }
       }
     } catch (e) {
       console.warn('[lobby] Asset check failed/skipped:', e.message);
