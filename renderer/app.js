@@ -635,7 +635,17 @@ function subtitlePick(voiceId) {
   const hit = SUBTITLES[voiceId] ?? SUBTITLES[voiceId.toLowerCase()];
   if (hit == null) return null;
   if (typeof hit === 'string') return { text: hit, lang: null };
-  for (const k of ['tw', 'ja', 'jp', 'en', 'zh']) {
+  // 字幕語言跟隨介面語言（langMode：tw/jp/cn/en/kr）；無該語言時 fallback：
+  // cn→tw、kr→jp，再退到任一可用語言。
+  const pref = [];
+  if (langMode) pref.push(langMode);
+  if (langMode === 'cn') pref.push('tw');
+  if (langMode === 'kr') pref.push('jp');
+  pref.push('jp', 'tw', 'en');
+  for (const k of pref) {
+    if (hit[k]) return { text: hit[k], lang: k === 'cn' ? 'tw' : k };
+  }
+  for (const k of ['jp', 'tw', 'en', 'kr']) {
     if (hit[k]) return { text: hit[k], lang: k };
   }
   return null;
