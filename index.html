@@ -107,6 +107,32 @@
       background: rgba(150,30,30,.9); color: #fff; padding: 10px 14px; border-radius: 8px;
       font-size: 13px; white-space: pre-wrap; display: none; }
 
+    /* skip confirm popup (game UIPopup_System style: dark overlay, centered box) */
+    #skipConfirm {
+      position: fixed; inset: 0; z-index: 60; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,.55); backdrop-filter: blur(2px);
+    }
+    #skipConfirm.show { display: flex; }
+    #skipConfirmBox {
+      min-width: 340px; max-width: 82vw; padding: 26px 34px 22px;
+      background: rgba(18,20,38,.96); border: 1px solid rgba(255,255,255,.18);
+      border-radius: 12px; text-align: center; color: #eef1ff;
+      box-shadow: 0 18px 60px rgba(0,0,0,.6);
+    }
+    #skipConfirmTitle { font-size: 17px; font-weight: 600; letter-spacing: .06em; opacity: .92; }
+    #skipConfirmMsg { font-size: 15px; margin-top: 14px; opacity: .85; }
+    #skipConfirmBtns { display: flex; gap: 14px; justify-content: center; margin-top: 22px; }
+    .sbtn {
+      min-width: 108px; padding: 9px 18px; font-size: 14px; cursor: pointer;
+      border-radius: 8px; border: 1px solid rgba(255,255,255,.25);
+      background: rgba(60,66,110,.35); color: #eef1ff;
+      transition: background .2s, border-color .2s;
+    }
+    .sbtn:hover { background: rgba(90,98,160,.5); border-color: rgba(255,255,255,.45); }
+    .sbtn.primary { background: rgba(68,88,200,.75); border-color: rgba(140,165,255,.7); }
+    .sbtn.primary:hover { background: rgba(88,110,230,.9); }
+
     /* left student sidebar (collapsible) */
     #btnStudents {
       position: fixed; left: 14px; top: 50%; transform: translateY(-50%);
@@ -478,7 +504,7 @@
       <button id="btnNext" class="btn" data-i18n-title="hud.next" title="下一位">›</button>
     </div>
     <div id="hudBottom" class="hudbar">
-      <button id="btnSkip" class="btn" style="margin-right:20px" data-i18n-title="hud.skip" title="ˑˑˑˑ (跳過)">ˑˑˑˑ</button>
+      <button id="btnSkip" class="btn" style="margin-right:20px" data-i18n-title="hud.skip" title="跳過開始動畫">&#8811;</button>
       <button id="btnLang" class="btn" data-i18n-title="hud.lang" title="名稱語言 (繁/日/簡/EN)">繁</button>
       <button id="btnFull" class="btn" style="margin-left:10px" data-i18n-title="hud.fullscreen" title="全螢幕">⤢</button>
       <button id="btnBgm" class="btn" style="margin-left:10px" data-i18n-title="hud.bgm" title="音樂">♪</button>
@@ -506,6 +532,19 @@
     <div id="chatBubble"></div>
     <div id="chatName"></div>
     <div id="chatText"></div>
+  </div>
+
+  <!-- skip confirmation popup — mirrors the game's UIPopup_System flow
+       (UILobby.OnClickMemoryLobbySkip shows a confirm before MemoryLobbySkip) -->
+  <div id="skipConfirm">
+    <div id="skipConfirmBox">
+      <div id="skipConfirmTitle" data-i18n="skip.title">紀念大廳的開始動畫</div>
+      <div id="skipConfirmMsg" data-i18n="skip.confirm">是否跳過？</div>
+      <div id="skipConfirmBtns">
+        <button id="skipNo" class="sbtn" data-i18n="skip.cancel">取消</button>
+        <button id="skipYes" class="sbtn primary" data-i18n="skip.ok">確定</button>
+      </div>
+    </div>
   </div>
 
   <div id="exportPanel">

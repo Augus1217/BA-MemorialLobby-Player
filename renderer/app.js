@@ -1479,6 +1479,7 @@ window.ba_debug = {
   }),
   triggerTalk: () => playTalk(),
   subtitleProbe: (v) => subtitleFor(v),
+  playVoiceProbe: (v) => playVoice(v),
   subtitleKeys: () => (SUBTITLES ? Object.keys(SUBTITLES).length : -1),
   triggerLook: (on) => on ? startLook() : endLook(),
   triggerPat: (on) => on ? startPat() : endPat(),
@@ -4217,7 +4218,15 @@ async function init() {
   btnPrev.addEventListener('click', () => switchLobby(-1));
   btnNext.addEventListener('click', () => switchLobby(1));
   btnBgm.addEventListener('click', toggleBgm);
-  btnSkip.addEventListener('click', memoryLobbySkip);
+  // Skip button mirrors the game: UILobby.OnClickMemoryLobbySkip opens a
+  // UIPopup_System confirm first; MemoryLobbySkip() runs only on OK.
+  const skipConfirmEl = document.getElementById('skipConfirm');
+  const openSkipConfirm = () => skipConfirmEl && skipConfirmEl.classList.add('show');
+  const closeSkipConfirm = () => skipConfirmEl && skipConfirmEl.classList.remove('show');
+  btnSkip.addEventListener('click', openSkipConfirm);
+  document.getElementById('skipYes')?.addEventListener('click', () => { closeSkipConfirm(); memoryLobbySkip(); });
+  document.getElementById('skipNo')?.addEventListener('click', closeSkipConfirm);
+  skipConfirmEl?.addEventListener('click', (e) => { if (e.target === skipConfirmEl) closeSkipConfirm(); });
   btnLang.addEventListener('click', () => {
     const i = LANG_MODES.findIndex(l => l[0] === langMode);
     setUiLanguage(LANG_MODES[(i + 1) % LANG_MODES.length][0]);

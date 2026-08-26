@@ -5,7 +5,7 @@
   "loading.load": "載入 {name}",
   "hud.prev": "上一位",
   "hud.next": "下一位",
-  "hud.skip": "ˑˑˑˑ (跳過)",
+  "hud.skip": "跳過開始動畫",
   "hud.lang": "名稱語言 ({modes})",
   "hud.fullscreen": "全螢幕",
   "hud.bgm": "音樂",
@@ -91,7 +91,11 @@
   "set.effects": "視覺效果",
   "set.cursor": "BA 遊標",
   "set.clickfx": "點擊特效 (Click FX)",
-  "set.restartHint": "已儲存——點擊特效將在下次啟動時生效"
+  "set.restartHint": "已儲存——點擊特效將在下次啟動時生效",
+  "skip.title": "紀念大廳的開始動畫",
+  "skip.confirm": "是否跳過？",
+  "skip.cancel": "取消",
+  "skip.ok": "確定"
  },
  "zh-CN": {
   "boot.checking": "检查更新中……",
@@ -99,7 +103,7 @@
   "loading.load": "加载 {name}",
   "hud.prev": "上一位",
   "hud.next": "下一位",
-  "hud.skip": "ˑˑˑˑ (跳过)",
+  "hud.skip": "跳过开场动画",
   "hud.lang": "名称语言 ({modes})",
   "hud.fullscreen": "全屏",
   "hud.bgm": "音乐",
@@ -185,7 +189,11 @@
   "set.effects": "视觉效果",
   "set.cursor": "BA 鼠标指针",
   "set.clickfx": "点击特效 (Click FX)",
-  "set.restartHint": "已保存——点击特效将在下次启动时生效"
+  "set.restartHint": "已保存——点击特效将在下次启动时生效",
+  "skip.title": "纪念大厅的开始动画",
+  "skip.confirm": "是否跳过？",
+  "skip.cancel": "取消",
+  "skip.ok": "确定"
  },
  "ja": {
   "boot.checking": "確認中です……",
@@ -193,7 +201,7 @@
   "loading.load": "{name} を読み込み中",
   "hud.prev": "前の生徒",
   "hud.next": "次の生徒",
-  "hud.skip": "ˑˑˑˑ (スキップ)",
+  "hud.skip": "スタート演出をスキップ",
   "hud.lang": "表示言語 ({modes})",
   "hud.fullscreen": "フルスクリーン",
   "hud.bgm": "音楽",
@@ -279,7 +287,11 @@
   "set.effects": "視覚エフェクト",
   "set.cursor": "BAカーソル",
   "set.clickfx": "クリックエフェクト (Click FX)",
-  "set.restartHint": "保存しました——クリックエフェクトは次回起動時に反映されます"
+  "set.restartHint": "保存しました——クリックエフェクトは次回起動時に反映されます",
+  "skip.title": "メモリアルロビーの演出",
+  "skip.confirm": "スキップしますか？",
+  "skip.cancel": "キャンセル",
+  "skip.ok": "OK"
  },
  "en": {
   "boot.checking": "Checking for updates...",
@@ -287,7 +299,7 @@
   "loading.load": "Loading {name}",
   "hud.prev": "Previous student",
   "hud.next": "Next student",
-  "hud.skip": "ˑˑˑˑ (Skip)",
+  "hud.skip": "Skip intro animation",
   "hud.lang": "Name language ({modes})",
   "hud.fullscreen": "Fullscreen",
   "hud.bgm": "Music",
@@ -373,7 +385,11 @@
   "set.effects": "Visual effects",
   "set.cursor": "BA cursor",
   "set.clickfx": "Click effects (Click FX)",
-  "set.restartHint": "Saved — click effects will apply on next launch"
+  "set.restartHint": "Saved — click effects will apply on next launch",
+  "skip.title": "Recollection Lobby Intro",
+  "skip.confirm": "Skip?",
+  "skip.cancel": "Cancel",
+  "skip.ok": "OK"
  },
  "ko": {
   "boot.checking": "업데이트 확인 중...",
@@ -381,7 +397,7 @@
   "loading.load": "{name} 로딩 중",
   "hud.prev": "이전 학생",
   "hud.next": "다음 학생",
-  "hud.skip": "ˑˑˑˑ (건너뛰기)",
+  "hud.skip": "시작 연출 건너뛰기",
   "hud.lang": "표시 언어 ({modes})",
   "hud.fullscreen": "전체 화면",
   "hud.bgm": "음악",
@@ -467,6 +483,10 @@
   "set.effects": "비주얼 효과",
   "set.cursor": "BA 커서",
   "set.clickfx": "클릭 이펙트 (Click FX)",
-  "set.restartHint": "저장됨 — 클릭 이펙트는 다음 실행 시 적용됩니다"
+  "set.restartHint": "저장됨 — 클릭 이펙트는 다음 실행 시 적용됩니다",
+  "skip.title": "메모리얼 로비의 시작 연출",
+  "skip.confirm": "스킵하시겠습니까?",
+  "skip.cancel": "취소",
+  "skip.ok": "확인"
  }
 }
