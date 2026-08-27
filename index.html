@@ -335,13 +335,11 @@
          text defaults to the TC stack (the app's TW-first subtitle behaviour). */
       --chatFont: 'BA NotoSansTC', 'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', sans-serif;
       width: fit-content; height: fit-content;
-      /* Round-4: the box is bottom-pinned at the Talk origin, so a short
-         one-line line shrinks the box upward and the top (and tail) sink.
-         MIN height floors the box at the full 2-line reference height
-         (213 = padding 45+44 + 2 * lineHeight 62) so the top never drops;
-         the text then centres vertically in the box. border-box keeps the
-         floor as the WHOLE border-box height (padding included). */
-      min-height: calc(213 * var(--bs));
+      /* The box is bottom-pinned at the Talk origin and grows upward with
+         line count — matching the in-game NGUI balloon, which sizes to its
+         label: 1 line = 151u (padding 45+44 + lineHeight 62), 2 lines = 213u.
+         A fixed 2-line floor made single-line bubbles look too tall. */
+      min-height: calc(151 * var(--bs));
       box-sizing: border-box;
       display: flex; flex-direction: column; justify-content: center;
       padding: calc(45 * var(--bs)) calc(59 * var(--bs)) calc(44 * var(--bs)) calc(79 * var(--bs));
@@ -359,7 +357,7 @@
        the text; min-height floors the box at 2 label lines + vertical padding. */
     #chatDialog[data-dtype="Think"] {
       padding: calc(43 * var(--bs)) calc(50 * var(--bs)) calc(55 * var(--bs)) calc(130 * var(--bs));
-      min-height: calc(222 * var(--bs));
+      min-height: calc(160 * var(--bs));   /* 43+55 + 1 lineHeight 62 */
     }
     #chatBubble {
       position: absolute; left: 0; top: 0; right: 0; bottom: 0;

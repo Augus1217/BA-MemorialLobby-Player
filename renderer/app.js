@@ -622,6 +622,8 @@ let voiceCalls = 0;
 // 逐字稿查詢（lobby_subtitle.json：voiceId -> { jp, tw, en } 或字串）。
 // GL dump 未含 memorial lobby 逐字稿，此檔現為空，放入資料即可自動顯示。
 let SUBTITLES = null;
+// lobby_timelines.json：BA PlayableDirector 的 spine 播放軌道（每 lobby 多段開場排程）
+let TIMELINES = null;
 // DialogType per voice (assets/data/lobby_dialog_types.json, from the GL
 // CharacterDialogExcel table): "Talk" (Lobby_balloon) / "Think" (Lobby_balloon2)
 // / "UITalk" (Common_Balloon_Type2). Missing voice -> "Talk" (newest JP-only
@@ -1457,6 +1459,53 @@ function playStart() {
   const introName = resolveStartClip();
   const hasStart = !!introName;
   if (!idleClip) idleClip = resolveIdleClip();
+  // ---- BA PlayableDirector 播放軌道（lobby_timelines.json）----
+  // 有排程資料就精確照播：把「本體骨架」的 clips 依 start 排進 track 0
+  // （delay 鏈），Idle_01 之後 loop。多段開場（體育服優香 Start_Idle_01 →
+  // 10.67s Start_Idle_02 → 24s Idle_01）自動正確，不再一個一個改。
+  const tl = TIMELINES?.[currentLobby] ?? TIMELINES?.[currentLobby.toLowerCase()];
+  if (tl?.tracks?.length) {
+    // timeline 的多條 spine track：本體 = 含 t≈0 clip 的那條（開場特寫骨架是另一條，
+    // 通常 start>0 或由 scene 層處理）。選定 track 後過濾掉本體骨架沒有的動畫名。
+    const byTrack = new Map();
+    for (const t of tl.tracks) {
+      if (!byTrack.has(t.spineTrack)) byTrack.set(t.spineTrack, []);
+      byTrack.get(t.spineTrack).push(t);
+    }
+    let best = null;
+    for (const [, clips] of byTrack) {
+      const startsAtZero = clips.some(c => c.start <= 0.05);
+      if (startsAtZero && (!best || clips.length > best.length)) best = clips;
+    }
+    const bodyClips = (best || [])
+      .filter(t => has(t.anim))
+      .sort((a, b) => a.start - b.start);
+    if (bodyClips.length) {
+      state.introBlock = true;
+      startIntroClock();
+      // 排隊鏈：第一個 clip setAnimation（delay=首 clip.start），後續 addAnimation
+      // （delay 相對前一個的「排程結束點」，用絕對 start 差計算）。
+      let schedEnd = 0;   // 前一個 clip 的排程絕對結束時間
+      let first = true;
+      let queuedIdle = false;
+      for (const clip of bodyClips) {
+        const isIdle = clip.anim === idleClip;
+        if (first) {
+          spine.state.setAnimation(0, clip.anim, isIdle, Math.max(0, clip.start));
+          first = false;
+        } else {
+          const gap = Math.max(0, clip.start - schedEnd);
+          spine.state.addAnimation(0, clip.anim, isIdle, gap);
+        }
+        schedEnd = clip.start + (isIdle ? 1e9 : clip.duration);   // Idle 無限循環
+        if (isIdle) { queuedIdle = true; break; }
+      }
+      if (!queuedIdle) spine.state.addAnimation(0, idleClip, true, 0);
+      startBgSequence();
+      log(`[timeline] ${currentLobby}: ${bodyClips.length} clips, total ${tl.duration}s`);
+      return;
+    }
+  }
   if (hasStart) {
     // Memorial intro timeline (PlayableDirector) occupies the screen and locks
     // interaction until it finishes (matching UILobby memory lobby flow). Track 0
@@ -1514,6 +1563,21 @@ window.ba_debug = {
   subtitleProbe: (v) => subtitleFor(v),
   playVoiceProbe: (v) => playVoice(v),
   typeProbe: (v) => dialogTypeFor(v),
+  timelinesProbe: (lobby) => {
+    const tl = TIMELINES?.[lobby] ?? TIMELINES?.[lobby?.toLowerCase()];
+    return tl ? { n: tl.tracks.length, dur: tl.duration, first: tl.tracks[0] } : null;
+  },
+  timelinesCount: () => (TIMELINES ? Object.keys(TIMELINES).length : -1),
+  queueProbe: () => {
+    if (!spine) return null;
+    return [0, 1, 2].map(t => {
+      const q = spine.state.tracks?.[t];
+      const arr = [];
+      let cur = q;
+      while (cur) { arr.push(`${cur.animation?.name}${cur.loop ? '(loop)' : ''}@${(cur.trackLast||0).toFixed(1)}/${cur.trackEnd?.toFixed(1)}`); cur = cur.next; }
+      return arr;
+    });
+  },
   // 目前 track0/1/1 播放中的動畫名（headless 測試 Start_Idle 解析用）
   animProbe: () => {
     if (!spine) return null;
@@ -4334,6 +4398,11 @@ async function init() {
     VOICE_INDEX = await fetchRetry('assets/data/voice_index.json').then(r => r.json());
   } catch (e) {
     console.warn('[lobby] 語音索引載入失敗', e);
+  }
+  try {
+    TIMELINES = await fetchRetry('assets/data/lobby_timelines.json').then(r => r.json());
+  } catch {
+    TIMELINES = null;   // 缺檔 → 走 resolveStartClip fallback
   }
   try {
     FLASH_TABLE = normalizeFlashTable(await fetchRetry('assets/data/flash_curves.json').then(r => r.json()));

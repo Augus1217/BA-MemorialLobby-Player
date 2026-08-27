@@ -1660,8 +1660,26 @@
    "CH0356_home_4.png"
   ]
  },
+ "CH0368_home": {
+  "skel": "./CH0368_home.skel",
+  "atlas": "./CH0368_home.atlas",
+  "png": [
+   "CH0368_home.png",
+   "CH0368_home_2.png",
+   "CH0368_home_3.png"
+  ]
+ },
+ "CH0369_home": {
+  "skel": "./CH0369_home.skel",
+  "atlas": "./CH0369_home.atlas",
+  "png": [
+   "CH0369_home.png",
+   "CH0369_home_2.png",
+   "CH0369_home_3.png"
+  ]
+ },
  "CH9996_home": {
-  "skel": "./CH0996_home_CH0996_home.json",
+  "skel": "./CH9996_home.skel",
   "atlas": "./CH0996_home.atlas",
   "png": [
    "CH0996_home.png",

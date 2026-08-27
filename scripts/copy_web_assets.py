@@ -21,6 +21,7 @@ CORE_DIRS = ["data", "ui", "fonts", "students", "clickfx"]
 # 核心檔案（相對 assets/）
 CORE_FILES = [
     "lobby_index.json",
+    "lobby_timelines.json",
 ]
 # intro：只帶 h264 mp4 + ogg（title.mp4 原始編碼瀏覽器不一定能播）
 INTRO_FILES = ["intro/title_h264.mp4", "intro/pv-a.ogg"]

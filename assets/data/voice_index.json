@@ -2017,6 +2017,17 @@
     "ch0326_memoriallobby_5_2.ogg",
     "ch0326_memoriallobby_5_3.ogg"
   ],
+  "CH0328": [
+    "ch0328_memoriallobby_1_1.ogg",
+    "ch0328_memoriallobby_1_2.ogg",
+    "ch0328_memoriallobby_2.ogg",
+    "ch0328_memoriallobby_3.ogg",
+    "ch0328_memoriallobby_4.ogg",
+    "ch0328_memoriallobby_5_1.ogg",
+    "ch0328_memoriallobby_5_2.ogg",
+    "ch0328_memoriallobby_6_1.ogg",
+    "ch0328_memoriallobby_6_2.ogg"
+  ],
   "CH0331": [
     "ch0331_memoriallobby_1.ogg",
     "ch0331_memoriallobby_2_1.ogg",
@@ -2198,6 +2209,33 @@
     "ch0356_memoriallobby_5_1.ogg",
     "ch0356_memoriallobby_5_2.ogg",
     "ch0356_memoriallobby_5_3.ogg"
+  ],
+  "CH0368": [
+    "ch0368_memoriallobby_1_1.ogg",
+    "ch0368_memoriallobby_1_2.ogg",
+    "ch0368_memoriallobby_2_1.ogg",
+    "ch0368_memoriallobby_2_2.ogg",
+    "ch0368_memoriallobby_3_1.ogg",
+    "ch0368_memoriallobby_3_2.ogg",
+    "ch0368_memoriallobby_4_1.ogg",
+    "ch0368_memoriallobby_4_2.ogg",
+    "ch0368_memoriallobby_5.ogg",
+    "ch0368_memoriallobby_6_1.ogg",
+    "ch0368_memoriallobby_6_2.ogg",
+    "ch0368_memoriallobby_7_1.ogg",
+    "ch0368_memoriallobby_7_2.ogg"
+  ],
+  "CH0369": [
+    "ch0369_memoriallobby_1_1.ogg",
+    "ch0369_memoriallobby_1_2.ogg",
+    "ch0369_memoriallobby_2_1.ogg",
+    "ch0369_memoriallobby_2_2.ogg",
+    "ch0369_memoriallobby_3_1.ogg",
+    "ch0369_memoriallobby_3_2.ogg",
+    "ch0369_memoriallobby_4_1.ogg",
+    "ch0369_memoriallobby_4_2.ogg",
+    "ch0369_memoriallobby_5_1.ogg",
+    "ch0369_memoriallobby_5_2.ogg"
   ],
   "CH9996": [
     "ch9996_memoriallobby_1_1.ogg",
