@@ -1461,6 +1461,7 @@ window.ba_debug = {
   triggerTalk: () => playTalk(),
   subtitleProbe: (v) => subtitleFor(v),
   playVoiceProbe: (v) => playVoice(v),
+  typeProbe: (v) => dialogTypeFor(v),
   // 目前 track0/1/1 播放中的動畫名（headless 測試 Start_Idle 解析用）
   animProbe: () => {
     if (!spine) return null;
