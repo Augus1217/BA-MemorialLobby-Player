@@ -4227,9 +4227,18 @@ async function init() {
   document.getElementById('skipYes')?.addEventListener('click', () => { closeSkipConfirm(); memoryLobbySkip(); });
   document.getElementById('skipNo')?.addEventListener('click', closeSkipConfirm);
   skipConfirmEl?.addEventListener('click', (e) => { if (e.target === skipConfirmEl) closeSkipConfirm(); });
-  btnLang.addEventListener('click', () => {
-    const i = LANG_MODES.findIndex(l => l[0] === langMode);
-    setUiLanguage(LANG_MODES[(i + 1) % LANG_MODES.length][0]);
+  // ---- focus mode (cinema) ---- btnLang repurposed as focus mode toggle
+  const toggleFocusMode = (on) => {
+    if (on === undefined) on = !document.body.classList.contains('focusMode');
+    document.body.classList.toggle('focusMode', on);
+    log('focus mode ' + (on ? 'on' : 'off'));
+  };
+  btnLang.addEventListener('click', () => toggleFocusMode());
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.body.classList.contains('focusMode')) {
+      toggleFocusMode(false);
+      e.preventDefault();
+    }
   });
 
   // ---- settings panel ----

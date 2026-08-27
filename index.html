@@ -369,6 +369,11 @@
     body.recording #hud, body.recording #fx, body.recording #btnStudents,
     body.recording #sidePanel, body.recording #exportPanel, body.recording #settingsPanel, body.recording #chatDialog { display: none !important; }
 
+    /* focus / cinema mode — only spine character + dialogue bubble visible */
+    body.focusMode #hud, body.focusMode #fx, body.focusMode #btnStudents,
+    body.focusMode #sidePanel, body.focusMode #exportPanel,
+    body.focusMode #skipConfirm, body.focusMode #settingsPanel { display: none !important; }
+
     /* Loading screen: intro + spinner + 確認中です…… */
     #loadingScreen {
       position: fixed; inset: 0; z-index: 200;
