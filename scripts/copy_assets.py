@@ -188,27 +188,39 @@ def extract_portraits():
     n_missing = 0
     n_skip = 0
     for core, pref_cid in sorted(cores.items()):
-        if core in icon and os.path.exists(os.path.join(dst, icon[core])):
-            n_skip += 1
-            continue
-        if pref_cid:
-            cids = [pref_cid]
-        elif core.startswith("ch"):
-            cids = [core.upper()]
+        # ch#### 變體：官方有 Student_Portrait_CH####.png（變體專屬頭像），
+        # 存在即強制重擷——過去曾 fallback 到本尊頭像（Hoshino.webp 等），要修正
+        is_ch_variant = core.startswith("ch") and re.fullmatch(r"ch\d+", core)
+        if is_ch_variant:
+            forced = os.path.join(SRC_PORTRAIT, f"Student_Portrait_{core.upper()}.png")
+            if not os.path.exists(forced):
+                forced = os.path.join(SRC_PORTRAIT, f"NPC_Portrait_NP{core[2:]}.png")
+            if not os.path.exists(forced):
+                n_missing += 1
+                print(f"大頭貼在 BA 中缺失: core={core}", file=sys.stderr)
+                continue
+            src = forced
+            resolved = core.upper()
         else:
-            cids = [core.capitalize()]
-        src = None
-        resolved = None
-        for cid in cids:
-            for cand in ba_candidates(cid):
-                p = os.path.join(SRC_PORTRAIT, cand)
-                if os.path.exists(p):
-                    src = p
-                    resolved = cid
+            if core in icon and os.path.exists(os.path.join(dst, icon[core])):
+                n_skip += 1
+                continue
+            src = None
+            resolved = None
+            if pref_cid:
+                cids = [pref_cid]
+            else:
+                cids = [core.capitalize()]
+            for cid in cids:
+                for cand in ba_candidates(cid):
+                    p = os.path.join(SRC_PORTRAIT, cand)
+                    if os.path.exists(p):
+                        src = p
+                        resolved = cid
+                        break
+                if src:
                     break
-            if src:
-                break
-        if not src and re.fullmatch(r"CH\d+", cid, re.I):
+        if not src and (is_ch_variant or (cid and re.fullmatch(r"CH\d+", cid, re.I))):
             # NPC lobby：BA 用 NPC_Portrait_NP####.png 而非 Student_Portrait
             npc = "NP" + re.search(r"\d+", cid).group()
             for cand in (f"NPC_Portrait_{npc}.png", f"NPC_Portrait_{npc}_Small.png"):
