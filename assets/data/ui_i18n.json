@@ -95,7 +95,8 @@
   "skip.title": "紀念大廳的開始動畫",
   "skip.confirm": "是否跳過？",
   "skip.cancel": "取消",
-  "skip.ok": "確定"
+  "skip.ok": "確定",
+  "hud.focus": "專注模式"
  },
  "zh-CN": {
   "boot.checking": "检查更新中……",
@@ -193,7 +194,8 @@
   "skip.title": "纪念大厅的开始动画",
   "skip.confirm": "是否跳过？",
   "skip.cancel": "取消",
-  "skip.ok": "确定"
+  "skip.ok": "确定",
+  "hud.focus": "专注模式"
  },
  "ja": {
   "boot.checking": "確認中です……",
@@ -291,7 +293,8 @@
   "skip.title": "メモリアルロビーの演出",
   "skip.confirm": "スキップしますか？",
   "skip.cancel": "キャンセル",
-  "skip.ok": "OK"
+  "skip.ok": "OK",
+  "hud.focus": "集中モード"
  },
  "en": {
   "boot.checking": "Checking for updates...",
@@ -389,7 +392,8 @@
   "skip.title": "Recollection Lobby Intro",
   "skip.confirm": "Skip?",
   "skip.cancel": "Cancel",
-  "skip.ok": "OK"
+  "skip.ok": "OK",
+  "hud.focus": "Focus mode"
  },
  "ko": {
   "boot.checking": "업데이트 확인 중...",
@@ -487,6 +491,7 @@
   "skip.title": "메모리얼 로비의 시작 연출",
   "skip.confirm": "스킵하시겠습니까?",
   "skip.cancel": "취소",
-  "skip.ok": "확인"
+  "skip.ok": "확인",
+  "hud.focus": "집중 모드"
  }
 }

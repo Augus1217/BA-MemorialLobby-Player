@@ -603,12 +603,6 @@ let voiceCalls = 0;
 // 逐字稿查詢（lobby_subtitle.json：voiceId -> { jp, tw, en } 或字串）。
 // GL dump 未含 memorial lobby 逐字稿，此檔現為空，放入資料即可自動顯示。
 let SUBTITLES = null;
-// 大廳互動台詞（assets/data/lobby_dialogs.json，from JP CharacterDialogDB）：
-// characterId(小寫) -> [{cond,type,group,cat,jp,kr}]。遊戲中記憶大廳點擊的
-// 氣泡文字就是這個表；MemorialLobby 專屬語音在遊戲資料中沒有逐句字幕。
-// 播 memorial 語音時顯示「該角色的真實遊戲台詞」（輪替），語音照舊。
-let DIALOG_INDEX = null;
-let dialogCursor = {};   // characterId -> 上一輪索引（輪替不重複）
 // DialogType per voice (assets/data/lobby_dialog_types.json, from the GL
 // CharacterDialogExcel table): "Talk" (Lobby_balloon) / "Think" (Lobby_balloon2)
 // / "UITalk" (Common_Balloon_Type2). Missing voice -> "Talk" (newest JP-only
@@ -659,17 +653,6 @@ function subtitleFor(voiceId) {
 function subtitleLang(voiceId) {
   const r = subtitlePick(voiceId);
   return r ? r.lang : null;
-}
-// 從 DIALOG_INDEX 取該角色的下一條台詞（輪替不重複）；無資料回 null。
-// 依 uiLang 對應欄位：tw/cn/jp 顯示日文原文（jp），en 顯示日文（無英譯表）。
-function lobbyDialogFor(characterId) {
-  if (!DIALOG_INDEX || !characterId) return null;
-  const list = DIALOG_INDEX[characterId.toLowerCase()];
-  if (!list || !list.length) return null;
-  const cur = dialogCursor[characterId] ?? -1;
-  const idx = (cur + 1) % list.length;
-  dialogCursor[characterId] = idx;
-  return list[idx];
 }
 function showChat(name, text) {
   chatName.textContent = name || '';
@@ -751,7 +734,7 @@ function speakerName() {
   const rec = studentForLobby(currentLobby);
   return (rec && rec[langField(langMode)]) || (rec && (rec.name_tw || rec.name_en || rec.name_jp)) || prettyName(currentLobby);
 }
-// 目前角色的邏輯 ID（如 "Airi"），來自 lobby_voice_schedule.json；查 DIALOG_INDEX 用。
+// 目前角色的邏輯 ID（如 "Airi"），來自 lobby_voice_schedule.json。
 function speakerCharacterId() {
   return SCHEDULE?.lobbies?.[currentLobby]?.characterId || null;
 }
@@ -790,22 +773,12 @@ function playVoice(voiceId) {
   };
   audio.onplay = () => {
     lipActive = true;
-    // 字幕優先序：lobby_subtitle.json（手動逐句稿，目前為空）→
-    // CharacterDialogDB 大廳台詞（真實遊戲資料，輪替顯示）。
-    let text = subtitleFor(voiceId);
-    let lang = subtitleLang(voiceId);
-    if (!text) {
-      const dlg = lobbyDialogFor(speakerCharacterId());
-      if (dlg) {
-        text = dlg.jp || dlg.kr;
-        lang = 'jp';
-      }
-    }
-    if (!text) {
-      // 完全沒有可顯示的文字：跳過氣泡。對話中途保持前一條氣泡
-      //（隨對話結束一起關閉）；單獨語音行就不顯示。
-      return;
-    }
+    // 字幕：lobby_subtitle.json（whisper 驗證逐句稿 + GL 多語）。
+    // 查無條目＝SFX（如 airi_memoriallobby_0 舔冰淇淋音效，設計上就沒有台詞）
+    // → 直接跳過氣泡。絕不可 fallback 到隨機台詞池（會冒出不相干的日文）。
+    const text = subtitleFor(voiceId);
+    const lang = subtitleLang(voiceId);
+    if (!text) return;
     chatDialog.dataset.lang = lang || '';
     // Balloon style follows the line's DialogType (Think = OS bubble
     // Lobby_balloon2, Talk = Lobby_balloon; UITalk would use Common_Balloon_Type2).
@@ -3305,8 +3278,6 @@ function renderStudentName(lobbyKey) {
   const rec = studentForLobby(lobbyKey);
   const label = rec ? rec[langField(langMode)] : null;
   charNameEl.textContent = label || prettyName(lobbyKey);
-  btnLang.textContent = langLabel(langMode);
-  btnLang.title = t('hud.lang', { modes: LANG_MODES.map(l => l[1]).join('/') });
 }
 
 // ---- collapsible student sidebar ----
@@ -4160,11 +4131,6 @@ async function init() {
     VOICE_INDEX = await fetchRetry('assets/data/voice_index.json').then(r => r.json());
   } catch (e) {
     console.warn('[lobby] 語音索引載入失敗', e);
-  }
-  try {
-    DIALOG_INDEX = await fetchRetry('assets/data/lobby_dialogs.json').then(r => r.json());
-  } catch (e) {
-    console.warn('[lobby] 大廳台詞載入失敗，氣泡將無文字', e);
   }
   try {
     FLASH_TABLE = normalizeFlashTable(await fetchRetry('assets/data/flash_curves.json').then(r => r.json()));
