@@ -592,6 +592,96 @@ ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies
   return failed.length ? { ok: false, results } : { ok: true, results };
 });
 
+// ---------------------------------------------------------------------------
+// Asset space management — per-pack disk usage + user-driven deletion
+// ---------------------------------------------------------------------------
+function dirStats(dir) {
+  let size = 0, files = 0;
+  const stack = [dir];
+  while (stack.length) {
+    const cur = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(cur, { withFileTypes: true }); }
+    catch { continue; }
+    for (const ent of entries) {
+      const p = path.join(cur, ent.name);
+      if (ent.isDirectory()) stack.push(p);
+      else {
+        try {
+          size += fs.statSync(p).size;
+          files++;
+        } catch {}
+      }
+    }
+  }
+  return { size, files };
+}
+
+// installed.json 的 pack key → 磁碟路徑清單（與 build_assets.py 打包規則一一對應）
+function packPaths(key) {
+  const assetsDir = getAssetsDir();
+  if (key === 'core') return ['data', 'students', 'ui', 'loading'].map(s => path.join(assetsDir, s));
+  if (key === 'intro') return [path.join(assetsDir, 'intro')];
+  if (key.startsWith('lobby/')) {
+    const nm = key.slice('lobby/'.length);
+    return [path.join(assetsDir, 'spine', nm), path.join(assetsDir, 'scene', nm)];
+  }
+  if (key.startsWith('voice/')) return [path.join(assetsDir, 'voice', key.slice('voice/'.length))];
+  return [];
+}
+
+ipcMain.handle('assets-manage-list', async () => {
+  const installed = readInstalled();
+  const localVersion = readLocalVersion();
+  const packs = [];
+  for (const key of Object.keys(installed).sort()) {
+    const paths = packPaths(key);
+    // lobby 包跨 spine/ 兩處 + 可能共用 bgm；大小統計全部存在的路徑
+    const stats = paths.reduce((acc, p) => {
+      if (!fs.existsSync(p)) return acc;
+      const s = dirStats(p);
+      acc.size += s.size; acc.files += s.files;
+      return acc;
+    }, { size: 0, files: 0 });
+    packs.push({
+      key,
+      kind: key === 'core' ? 'core' : key === 'intro' ? 'intro' : key.split('/')[0],
+      name: key.includes('/') ? key.split('/')[1] : key,
+      size: stats.size,
+      files: stats.files,
+      deletable: key !== 'core',   // core 是必載基礎，不可刪
+      present: paths.some(p => fs.existsSync(p)),
+    });
+  }
+  const total = packs.reduce((a, p) => a + p.size, 0);
+  return { version: localVersion, packs, totalSize: total, streaming: isStreamingMode() };
+});
+
+ipcMain.handle('assets-manage-delete', async (event, keys) => {
+  const list = Array.isArray(keys) ? keys : [keys];
+  const installed = readInstalled();
+  const removed = [], errors = [];
+  for (const key of list) {
+    if (key === 'core') { errors.push({ key, error: 'core 不可刪除' }); continue; }
+    // 安全檢查：只允許刪除已知 pack 對應的目錄，防止任意路徑注入
+    const paths = packPaths(key);
+    if (!paths.length || !installed[key]) { errors.push({ key, error: '未知的資源包' }); continue; }
+    try {
+      for (const p of paths) {
+        // 必須位於 assetsDir 之下才可刪
+        if (!p.startsWith(getAssetsDir())) continue;
+        fs.rmSync(p, { recursive: true, force: true });
+      }
+      delete installed[key];
+      removed.push(key);
+    } catch (e) {
+      errors.push({ key, error: e.message });
+    }
+  }
+  writeInstalled(installed);
+  return { removed, errors };
+});
+
 app.whenReady().then(async () => {
   // Register app:// protocol for serving assets in production
   if (!isDev) {

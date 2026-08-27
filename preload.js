@@ -18,4 +18,7 @@ contextBridge.exposeInMainWorld('ba', {
   getStreamingMode: () => ipcRenderer.invoke('get-streaming-mode'),
   setStreamingMode: (v) => ipcRenderer.invoke('set-streaming-mode', v),
   ensureLobby: (payload) => ipcRenderer.invoke('ensure-lobby', payload),
+  // 管理空間：檢視已下載資源包與磁碟用量、刪除
+  assetsManageList: () => ipcRenderer.invoke('assets-manage-list'),
+  assetsManageDelete: (keys) => ipcRenderer.invoke('assets-manage-delete', keys),
 });

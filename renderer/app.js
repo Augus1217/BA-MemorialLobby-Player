@@ -2550,6 +2550,10 @@ function fmtBytes(n) {
   return (n / 1024).toFixed(0) + ' KB';
 }
 
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 let _settingsAssetInfo = null;
 
 async function refreshSettingsAssets() {
@@ -2622,6 +2626,80 @@ function syncSettingsEffectCks() {
   if (setClickFxCk) setClickFxCk.checked = settingsPref('ba_clickfx', true);
 }
 
+// ---- 管理空間（已下載資源包檢視 + 刪除）----
+const setSpaceSummary = document.getElementById('setSpaceSummary');
+const setSpaceToggle = document.getElementById('setSpaceToggle');
+const setSpaceList = document.getElementById('setSpaceList');
+let _spaceInfo = null;
+let _spaceOpen = false;
+
+function spaceKindLabel(kind) {
+  const map = { core: t('set.space.kindCore'), intro: t('set.space.kindIntro'), lobby: t('set.space.kindLobby'), voice: t('set.space.kindVoice') };
+  return map[kind] || kind;
+}
+
+async function refreshSpaceManager() {
+  try {
+    _spaceInfo = await window.ba.assetsManageList?.();
+  } catch { _spaceInfo = null; }
+  renderSpaceSummary();
+  if (_spaceOpen) renderSpaceList();
+}
+
+function renderSpaceSummary() {
+  if (!setSpaceSummary || !setSpaceToggle) return;
+  if (!_spaceInfo || !_spaceInfo.packs?.length) {
+    setSpaceSummary.textContent = t('set.space.empty');
+    setSpaceToggle.style.display = 'none';
+    setSpaceList.style.display = 'none';
+    return;
+  }
+  const n = _spaceInfo.packs.length;
+  setSpaceSummary.textContent = `${t('set.space.summary', { n, size: fmtBytes(_spaceInfo.totalSize) })} · v${_spaceInfo.version || '?'}`;
+  setSpaceToggle.style.display = 'inline-block';
+}
+
+function renderSpaceList() {
+  if (!setSpaceList || !_spaceInfo) return;
+  const packs = _spaceInfo.packs || [];
+  let html = '';
+  for (const p of packs) {
+    const delBtn = p.deletable
+      ? `<button class="spaceDel" data-key="${p.key}" data-i18n-title="set.space.delete" title="刪除">✕</button>`
+      : `<span class="spaceLock" data-i18n-title="set.space.locked" title="必要資源">🔒</span>`;
+    html += `<div class="spaceRow">
+      <div class="spaceMain">
+        <span class="spaceName">${escapeHtml(p.name)}</span>
+        <span class="spaceKind">${spaceKindLabel(p.kind)}</span>
+        ${p.present ? '' : `<span class="warn" style="font-size:10px;">⚠</span>`}
+      </div>
+      <span class="spaceSize">${fmtBytes(p.size)}</span>
+      ${delBtn}
+    </div>`;
+  }
+  setSpaceList.innerHTML = html;
+  for (const btn of setSpaceList.querySelectorAll('.spaceDel')) {
+    btn.addEventListener('click', async () => {
+      const key = btn.dataset.key;
+      if (!confirm(t('set.space.confirm', { key }))) return;
+      btn.disabled = true;
+      try {
+        await window.ba.assetsManageDelete([key]);
+        await refreshSpaceManager();
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+}
+
+setSpaceToggle?.addEventListener('click', () => {
+  _spaceOpen = !_spaceOpen;
+  setSpaceList.style.display = _spaceOpen ? 'block' : 'none';
+  if (_spaceOpen) renderSpaceList();
+  setSpaceToggle.textContent = _spaceOpen ? t('set.space.close') : t('set.space.open');
+});
+
 function toggleSettingsPanel(force) {
   // force 可能是 addEventListener 傳入的 Event 物件（truthy）——只接受真正的 boolean。
   const open = typeof force === 'boolean' ? force : !settingsPanel.classList.contains('open');
@@ -2632,6 +2710,7 @@ function toggleSettingsPanel(force) {
     syncSettingsModeSegs();
     syncSettingsEffectCks();
     refreshSettingsAssets();
+    refreshSpaceManager();
   }
   settingsPanel.classList.toggle('open', open);
 }
