@@ -895,7 +895,10 @@ function setBgm(filename) {
   audio.volume = 0.42;
   // 串流模式首次進大廳：pack 下載中 SW cache 尚無此檔 → network 404。
   // 標記失敗，等 ensureLobbyAssets 完成後由 retryBgm() 再播一次。
-  audio.addEventListener('error', () => { if (bgmAudio === audio) bgmAudio = null; }, { once: true });
+  audio.addEventListener('error', () => {
+    if (bgmAudio === audio) bgmAudio = null;
+    console.warn(`[bgm] ${filename} 無法載入（串流包未含或尚在下載）`);
+  }, { once: true });
   audio.play().catch(() => {});
   bgmAudio = audio;
 }
