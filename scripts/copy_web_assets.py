@@ -24,6 +24,8 @@ CORE_FILES = [
 ]
 # intro：只帶 h264 mp4 + ogg（title.mp4 原始編碼瀏覽器不一定能播）
 INTRO_FILES = ["intro/title_h264.mp4", "intro/pv-a.ogg"]
+# 標題畫面 BGM（標題畫面在資產下載完成前就播，必須內建）
+TITLE_BGM_FILES = ["bgm/Theme_152_Title.ogg"]
 
 
 def main() -> int:
@@ -53,7 +55,7 @@ def main() -> int:
             if f.is_file():
                 copy(f, f.relative_to(ASSETS).as_posix())
 
-    for rel in CORE_FILES + INTRO_FILES:
+    for rel in CORE_FILES + INTRO_FILES + TITLE_BGM_FILES:
         s = ASSETS / rel
         if s.exists():
             copy(s, rel)

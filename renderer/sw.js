@@ -25,7 +25,27 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== location.origin) return;
   if (!url.pathname.includes('/assets/')) return;
   if (e.request.method !== 'GET') return;
+  // data/（ui_i18n、字幕表等）會隨 app 更新而變動 → network-first，
+  // 失敗才退快取；其餘大型資產（spine/voice/bgm…immutable tag 內容）維持 cache-first。
+  const networkFirst = url.pathname.includes('/assets/data/');
   e.respondWith((async () => {
+    if (networkFirst) {
+      try {
+        const fresh = await fetch(e.request);
+        if (fresh.ok) {
+          const cacheNames = await caches.keys();
+          for (const n of cacheNames) {
+            if (!n.startsWith(CACHE_PREFIX)) continue;
+            const c = await caches.open(n);
+            c.put(e.request, fresh.clone());
+            break;
+          }
+        }
+        return fresh;
+      } catch {
+        // offline → fall through to cache
+      }
+    }
     const cacheNames = await caches.keys();
     for (const n of cacheNames) {
       if (!n.startsWith(CACHE_PREFIX)) continue;
