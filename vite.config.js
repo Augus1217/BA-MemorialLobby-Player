@@ -53,6 +53,19 @@ export default defineConfig({
       }
     },
   }, {
+    name: 'copy-favicon',
+    generateBundle() {
+      try {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'favicon.ico',
+          source: readFileSync(resolve(__dirname, 'favicon.ico')),
+        });
+      } catch (e) {
+        console.warn('[build] copy favicon failed:', e.message);
+      }
+    },
+  }, {
     name: 'copy-root-index',
     closeBundle() {
       const src = resolve(__dirname, 'dist', 'index.html');

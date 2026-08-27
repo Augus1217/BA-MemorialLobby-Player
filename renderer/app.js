@@ -3708,6 +3708,10 @@ async function loadLobby(name) {
     }
   }
   // 串流模式：確保該 lobby 的資源已在本地（隨播隨下）
+  if (!_assetInfo && window.ba?.checkAssets) {
+    // 首訪/硬重載後 checkAssets 可能尚未完成；deep-link 直接進大廳時在此補跑一次
+    try { _assetInfo = await window.ba.checkAssets(); } catch {}
+  }
   if (_assetInfo?.lobbies?.[name]) {
     try { await ensureLobbyAssets(name); retryBgmIfSilent(); } catch (e) { console.warn('[lobby] 串流下載失敗', e.message); }
   }

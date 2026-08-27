@@ -27,7 +27,9 @@
       "preload.js",
       "package.json",
       "index.prod.html",
-      "assets/data/ui_i18n.json"
+      "assets/data/ui_i18n.json",
+      "assets/bgm/Theme_152_Title.ogg",
+      "favicon.ico"
     ],
     "linux": {
       "target": [
