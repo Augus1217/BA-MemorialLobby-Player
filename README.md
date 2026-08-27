@@ -1,42 +1,67 @@
 # BA Memorial Lobby Player
 
-《蔚藍檔案》(Blue Archive) Memorial Lobby **模擬器** built with Electron + PixiJS + Spine. Reproduces the in-game lobby experience: a fullscreen immersive scene where the character idles in her room, reacts to you, and speaks with live lip-sync.
+《蔚藍檔案》(Blue Archive) 記憶大廳（Memorial Lobby）**模擬器** — Electron + PixiJS + Spine。
+重現遊戲內的大廳體驗：全螢幕沉浸場景，角色在房間裡待機、對你的動作有反應、開口說話（即時嘴型）、並顯示與語音逐句對應的多語言字幕氣泡。
 
-## Features
+> 資源建置管線請見姊妹倉庫 [BA-MemorialLobby-Assets](https://github.com/Augus1217/BA-MemorialLobby-Assets)。
 
-- 266 lobby skeletons from `assets/lobby_index.json` (main LOD variant per lobby, quirk handling for `Airi0/Airi`, `CH9996/CH0996`, `juri/Juri`)
-- Immersive, tool-free presentation: auto-hiding HUD (‹/› to switch lobby, ♪ for BGM), cinematic vignette
-- Room scene layer: lobbies that ship one (`Aru_Scene`, `Akari_Scene`, `Fuuka_Scene`, `Momoi_Scene`, `Wakamo_Scene_0`) render the room behind the character
-- Spine playback model faithful to the game:
-  - Track 0: `Start_Idle_01` intro → `Idle_01` loop
-  - **Eyes follow your cursor** — driven frame-by-frame from each lobby's own `Look_01` pose animation (identical to the in-game "抓眼睛" mechanic)
-  - Tap: random voiced `Talk_NN` (syncs `_M` + `_A` on tracks 1 & 2)
-  - Long-press / hold: `Pat_01` loop, `PatEnd` on release
-  - Autonomous idle chatter (no forced look — eyes already follow you)
-- Voice driven by the skeleton's embedded animation events (`Sound/` + `Talk`), routed through a WebAudio analyser; mouth-bone `scaleY` responds to live RMS amplitude on top of the baked `_M` lip-sync
-- BGM per lobby from `lobby_bgm_mapping.csv` (`Theme_*.ogg`)
-- Camera from `lobby_camera_config.json`: framing follows the in-game camera marker. Per lobby the camera bone (`Camera_Pos` / `Camera_Root`, else `All_Layer` e.g. CH0070) is placed at the vertical centre of the view, and the character is scaled to fill the screen using the kivo "fill" rule (view width ÷ 3000 against the standard 3000-unit skeleton). The camera is fixed — no drag, pan, zoom or drift; `Weight` controls how fast the framing settles on lobby switch.
-- `CAPTURE=<png path>` env for headless screenshots, `#lobby=<name>` deep-links to a lobby
+## 功能
 
-## Setup
+### 呈現
 
-1. `npm install`
-2. Copy the game assets (not included in this repo — see below): `python3 scripts/copy_assets.py` produces `assets/{spine,scene,voice,bgm,data,lobby_index.json}`
-3. `npm start`
+- **266+ 大廳骨架**（`assets/lobby_index.json`，每 lobby 取主要 LOD 變體；處理 `Airi0/Airi`、`CH9996/CH0996`、`juri/Juri` 等命名異例）
+- 沉浸式呈現：自動隱藏 HUD、電影黑邊
+- 房間場景層：有開場特寫的 lobby（`Aru_Scene`、`Akari_Scene` 等）會在角色背後渲染房間
+- 開場動畫（`Start_Idle_01`）完整播放，含 PlayableDirector 時間軸對位（bodyStart 延遲、白閃切換）；可用 `≫` 按鈕跳過（帶確認彈窗，比照遊戲的 `UIPopup_System` 流程）
+- 攝影機取景依 `lobby_camera_config.json`：骨架攝影機骨頭對齊畫面中心 + kivo fill 縮放規則
 
-### Controls
+### 互動（對齊遊戲 UILobbySpineController 逆向）
 
-| Input | Action |
+| 操作 | 反應 |
 | --- | --- |
-| Move cursor | Her eyes follow you (eyes-follow-cursor, the "抓眼睛" mechanic) |
-| Tap (quick) | Character talks (random voiced line) |
-| Hold (0.4s+) | Headpat, release to finish |
-| ‹ / › | Previous / next lobby |
-| ♪ | Toggle BGM |
+| 移動游標 | 眼睛跟著你看（逐幀驅動 `Look_01`，即「抓眼睛」機制） |
+| 點擊 | 隨機有聲 `Talk_NN`（雙 track 同步 `_M` 嘴型 + `_A` 表情） |
+| 長按 | 摸頭 `Pat_01` 迴圈，放開結束 |
+| ESC（專注模式中） | 退出專注模式 |
 
-### Preparing assets
+- 語音由骨架內嵌動畫事件驅動，WebAudio analyser 即時 RMS 疊加在烘焙嘴型上
+- 自主閒聊：待機時隨機觸發語音（不強制看鏡頭）
 
-The assets are extracted from the game, so they are intentionally **not** committed. Run the copy script with source paths (defaults are this machine's extraction directories; override with env vars or edit the defaults at the top of the script):
+### 對話氣泡（本專案的核心還原）
+
+- **Talk / Think 兩種氣泡樣式**：從官方 `CharacterDialogDB.DialogType` 判定——說話用 `Lobby_balloon.png`、內心 OS 用 `Lobby_balloon2.png`
+- **多語言字幕**（繁中/日文/英文/韓文），跟隨介面語言切換；字體也依語言自動換（繁中 Noto Sans TC／日文 M PLUS 1p）
+- 字幕資料來源：
+  - 官方表 GL/JP `CharacterDialogDB`（UILobbySpecial 分類）＝遊戲中大廳點擊台詞的真實來源
+  - GL 表提供 Tw/En 翻譯；JP 缺漏新角色的韓文對齊由文字正規化模糊比對完成
+  - **faster-whisper 全量轉錄交叉驗證**（2573 檔語音），確保表格行 ↔ 音檔一句一句對得上
+  - SFX（舔冰淇淋等短音效）正確地不顯示任何氣泡
+
+### 專注模式
+
+底部 `◉` 按鈕一鍵進入：隱藏所有按鈕與介面文字，只留人物與對話框，互動照常運作。`ESC` 退出。
+
+### 資源管理
+
+- **增量更新**：`assets_version.json`（schema 2）記錄每個包 sha256，啟動時只下載缺的包
+- **串流模式**（預設）：初始只下載核心資源，第一次進入某角色大廳時才下載該 lobby＋語音包
+- **管理空間**（設定面板）：列出已下載的所有資源包與磁碟用量，可自行刪除（core 必載不可刪），刪除後下次進入會重新下載
+- BGM、點擊特效、BA 遊標皆可在設定中調整
+
+## 快速開始（一般使用者）
+
+到 [Releases](https://github.com/Augus1217/BA-MemorialLobby-Player/releases) 下載安裝包，啟動後程式會自動串流下載需要的資源。
+
+## 開發者 Setup
+
+```bash
+npm install
+# 從本地解包目錄產生 assets/（或先用 Assets repo 的 GitHub Actions 產物）
+python3 scripts/copy_assets.py
+npm start
+```
+
+資源刻意不入庫。copy script 支援環境變數覆寫來源路徑：
 
 ```bash
 BA_SRC_SPINE=/path/to/SpineLobbies \
@@ -46,16 +71,31 @@ BA_SRC_DATA=/path/to/BA_MemorialLobby/data \
 python3 scripts/copy_assets.py
 ```
 
-The script copies only the main skeleton variant (skips `_1/_2/_3` LOD copies), copies the `JP_*` voice folders and `Theme_*.ogg` BGM, and regenerates `assets/lobby_index.json`. Room skeletons (folders like `Aru_Scene`) are copied to `assets/scene/` and recorded in the manifest.
+- `SpineLobbies`：客戶端解包的 `Assets/_MX/SpineLobbies`（`.skel`/`.atlas`/.png）
+- `Media`：含 `JP_*` 語音資料夾
+- BGM：`Theme_*.ogg` 所在目錄
+- data：各 mapping JSON（可改用 Assets repo 的 build 產物）
 
-Sources referenced:
-- `SpineLobbies`: `Assets/_MX/SpineLobbies` from an extracted BA client (`.skel` / `.atlas` / `.png`)
-- `Media`: `GL_Extracted/Media` containing `JP_*` voice folders
-- BGM: `GL_RawData/Media/Audio/BGM` containing `Theme_*.ogg`
-- data: `lobby_voice_schedule.json`, `lobby_bgm_mapping.csv`, `lobby_camera_config.json`
+## 控制摘要
 
-## Stack
+| Input | Action |
+| --- | --- |
+| ‹ / › | 上一位 / 下一位 |
+| ♪ | BGM 開關 |
+| ⤢ | 全螢幕 |
+| ◉ | 專注模式 |
+| ≫ | 跳過開場動畫 |
 
-- Electron, Vite (`dev` via `main.js` spawning a system `node`, `vite build` for production)
-- `pixi.js` 8.19.0, `@esotericsoftware/spine-pixi-v8` 4.2.119 (spine-core 4.2 parses 4.2.x lobby files)
-- WebAudio `AnalyserNode` for real-time mouth amplitude
+`CAPTURE=<png path>` headless 截圖、`#lobby=<name>` deep-link 到指定大廳。
+
+## 技術棧
+
+- Electron、Vite（dev 由 main.js spawn；production 用 vite build）
+- pixi.js 8.19.0、@esotericsoftware/spine-pixi-v8 4.2.119（spine-core 4.2 解析 4.2.x lobby 檔）
+- WebAudio `AnalyserNode` 即時嘴幅
+- i18n：ui_i18n.json（五語言）
+
+## 已知限制
+
+- 偶爾顯示日文 = 該角色 Global 版尚未實裝（如部分 CH03xx 新角色），無官方翻譯時 fallback 日文；實裝後管線會自動補上
+- Yostar JP 服 CDN 偶爾限流；資源更新以 Global 版本為準
