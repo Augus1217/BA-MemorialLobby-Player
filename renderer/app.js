@@ -3701,10 +3701,21 @@ async function loadLobby(name) {
             chk();
           });
         })(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('sw ready timeout')), 8000)),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('sw ready timeout')), 3000)),
       ]);
     } catch (e) {
-      console.warn('[lobby] SW 未及時接管（繼續用網路載入）', e.message);
+      console.warn('[lobby] SW 未及時接管', e.message);
+    }
+    // 強制重新載入（Ctrl+Shift+R）會讓「本次導航」完全繞過 SW：controller 恒 null，
+    // Cache Storage 的 spine/voice 全部讀不到 → 打網路 404。
+    // 對策：此頁面注定拿不到快取 → 存旗標自動一般重載一次（reload 後 SW 接管即恢復；
+    // sessionStorage 防止無限循環——使用者若連按硬重載，最多自動重載一次）。
+    if (!navigator.serviceWorker.controller && !sessionStorage.getItem('ba_forceReloaded')) {
+      try {
+        sessionStorage.setItem('ba_forceReloaded', '1');
+        location.reload();
+        return;   // 不 return 之後的程式碼會在 reload 前繼續跑
+      } catch {}
     }
   }
   // 串流模式：確保該 lobby 的資源已在本地（隨播隨下）
