@@ -140,10 +140,10 @@ jobs:
       - name: Create GitHub Release and upload
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}   # gh CLI 免 checkout 直接指定 repo
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"
           TITLE="BA Memorial Lobby ${TAG}"
 
           gh release create "$TAG" --title "$TITLE" --generate-notes --draft=false || {
@@ -154,15 +154,17 @@ jobs:
           for f in artifacts/*; do
             [ -f "$f" ] || continue
             base=$(basename "$f")
+            ok=""
             for i in 1 2 3 4; do
               if gh release upload "$TAG" "$f" --clobber; then
                 echo "uploaded: $base"
+                ok=1
                 break
               fi
               echo "retry $i for $base"
               sleep $((i * 10))
-              [ "$i" = "4" ] && { echo "upload failed: $base"; exit 1; }
             done
+            [ -n "$ok" ] || { echo "upload failed: $base"; exit 1; }
           done
           echo "all artifacts uploaded"
         if: ${{ inputs.publish == true || startsWith(github.ref, 'refs/tags/v') }}
