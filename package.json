@@ -12,7 +12,8 @@
     "build:win": "vite build && electron-builder --win",
     "build:mac": "vite build && electron-builder --mac",
     "copy-assets": "python3 scripts/copy_assets.py",
-    "update-assets": "python3 scripts/build_assets.py"
+    "update-assets": "python3 scripts/build_assets.py",
+    "dist": "vite build && electron-builder -mwl --publish always"
   },
   "build": {
     "appId": "com.ba.memorial-lobby",
@@ -25,25 +26,70 @@
       "main.js",
       "preload.js",
       "package.json",
-      "index.prod.html"
+      "index.prod.html",
+      "assets/data/ui_i18n.json"
     ],
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "rpm",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "category": "Game"
+      "category": "Game",
+      "artifactName": "${name}-${version}-${arch}.${ext}",
+      "executableName": "ba-memorial-lobby",
+      "desktop": {
+        "Name": "BA Memorial Lobby"
+      }
     },
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "mac": {
       "target": [
-        "dmg"
-      ]
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.games"
     },
     "nsis": {
       "oneClick": false,

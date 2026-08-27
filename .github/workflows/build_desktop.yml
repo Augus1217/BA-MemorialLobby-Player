@@ -1,0 +1,130 @@
+name: Build & Release Desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to GitHub Release (uncheck = build only)'
+        required: false
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-linux:
+    # electron-userland 官方容器：內含能正常產 rpm/deb/AppImage 的 fpm+rpmbuild 工具鏈
+    runs-on: ubuntu-latest
+    container: electronuserland/builder:20
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer (Vite)
+        run: npx vite build
+
+      - name: Build Linux packages (AppImage x64+arm64, deb, rpm)
+        run: npx electron-builder --linux --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Show artifacts
+        run: ls -lh release/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: |
+            release/*.AppImage
+            release/*.deb
+            release/*.rpm
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        if: ${{ inputs.publish == true || startsWith(github.ref, 'refs/tags/v') }}
+        run: npx electron-builder --linux --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-win:
+    runs-on: windows-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer (Vite)
+        run: npx vite build
+
+      - name: Build Windows packages (NSIS + portable)
+        run: npx electron-builder --win --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: |
+            release/*.exe
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        if: ${{ inputs.publish == true || startsWith(github.ref, 'refs/tags/v') }}
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-mac:
+    runs-on: macos-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer (Vite)
+        run: npx vite build
+
+      - name: Build macOS packages (DMG + zip, universal)
+        run: npx electron-builder --mac --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'   # 無簽名憑證也能出包；使用者右鍵開啟繞 Gatekeeper
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: |
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        if: ${{ inputs.publish == true || startsWith(github.ref, 'refs/tags/v') }}
+        run: npx electron-builder --mac --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
