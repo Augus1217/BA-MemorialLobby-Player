@@ -939,6 +939,14 @@ function resolveIdleClip() {
   const start = names.find(n => /^start/i.test(n));
   return start || names[0] || 'Idle_01';
 }
+// Start_Idle intro clip resolver. Almost every lobby names it "Start_Idle_01",
+// but some skeletons ship a lowercase variant (e.g. 武裝星野 CH0258_home:
+// "Start_idle_01") — resolve case-insensitively instead of hardcoding.
+function resolveStartClip() {
+  if (!spine) return null;
+  const names = animNames();
+  return names.find(n => /^start_idle/i.test(n)) || names.find(n => /^start/i.test(n)) || null;
+}
 
 function after(ms, fn) {
   const id = setTimeout(fn, ms);
@@ -1394,8 +1402,8 @@ function removeSceneCloseup() {
 
 function playStart() {
   if (!spine) return;
-  const introName = 'Start_Idle_01';
-  const hasStart = has(introName);
+  const introName = resolveStartClip();
+  const hasStart = !!introName;
   if (!idleClip) idleClip = resolveIdleClip();
   if (hasStart) {
     // Memorial intro timeline (PlayableDirector) occupies the screen and locks
@@ -1453,6 +1461,14 @@ window.ba_debug = {
   triggerTalk: () => playTalk(),
   subtitleProbe: (v) => subtitleFor(v),
   playVoiceProbe: (v) => playVoice(v),
+  // 目前 track0/1/1 播放中的動畫名（headless 測試 Start_Idle 解析用）
+  animProbe: () => {
+    if (!spine) return null;
+    return [0, 1, 2].map(t => {
+      const e = spine.state.getCurrent(t);
+      return e && e.animation ? `${t}:${e.animation.name}` : `${t}:null`;
+    });
+  },
   subtitleKeys: () => (SUBTITLES ? Object.keys(SUBTITLES).length : -1),
   triggerLook: (on) => on ? startLook() : endLook(),
   triggerPat: (on) => on ? startPat() : endPat(),
@@ -2879,8 +2895,9 @@ async function startAnimExport() {
     const a2 = m.replace(/_M$/, '_A');
     track2 = has(a2) ? a2 : null;
   } else if (clipType === 'start') {
-    if (!has('Start_Idle_01')) { showErr(t('msg.noStartIdle')); return; }
-    animName = 'Start_Idle_01';
+    const startClip = resolveStartClip();
+    if (!startClip) { showErr(t('msg.noStartIdle')); return; }
+    animName = startClip;
   } else {
     animName = idleClip || 'Idle_01';
   }
@@ -2922,7 +2939,7 @@ async function startAnimExport() {
   } else if (clipType === 'start') {
     spine.state.setEmptyAnimation(1, 0.3);
     spine.state.setEmptyAnimation(2, 0.3);
-    spine.state.setAnimation(0, 'Start_Idle_01', false);
+    spine.state.setAnimation(0, animName, false);   // animName = resolveStartClip()
     startIntroClock();
   } else {
     restTracks();             // idle：清掉可能殘留的 talk/摸頭 track
@@ -3113,7 +3130,7 @@ function updateClipUI() {
   if (!canVoice) expDialog.checked = false;
   for (const b of document.querySelectorAll('#expClip button')) {
     const bb = b.dataset.k;
-    const dis = (bb === 'start' && !has('Start_Idle_01')) || (bb === 'talk' && talks.length === 0);
+    const dis = (bb === 'start' && !resolveStartClip()) || (bb === 'talk' && talks.length === 0);
     b.classList.toggle('dis', dis);
     if (dis && b.classList.contains('on')) {
       b.classList.remove('on');
@@ -3700,9 +3717,11 @@ function startBgSequence({ skip = false } = {}) {
   if (scene && scene.state) {
     if (!skip) {
       // 特寫從 0s 起播一次（BA 時間軸 m_Start=0）；播至本體進場（白閃）時由
-      // removeSceneCloseup 整個移除（見 tickWhiteFlash）。
-      scene.state.setAnimation(0, 'Start_Idle_01', false);
-      armSceneCloseup();
+      // removeSceneCloseup 整個移除（見 tickWhiteFlash）。動畫名由 scene 骨架
+      // 實際內容解析（防大小寫變體，同 resolveStartClip 的處理）。
+      const sa = scene.state.data.skeletonData.animations.map(a => a.name);
+      const sIntro = sa.find(n => /^start_idle/i.test(n)) || sa.find(n => /^start/i.test(n));
+      if (sIntro) { scene.state.setAnimation(0, sIntro, false); armSceneCloseup(); }
     } else {
       removeSceneCloseup();
     }
