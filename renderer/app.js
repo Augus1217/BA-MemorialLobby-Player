@@ -3688,6 +3688,25 @@ async function loadLobby(name) {
 
   const entry = LOBBY_INDEX[name];
   if (!entry) { showErr(t('msg.notInIndex', { name })); return; }
+  // web 模式：等 Service Worker 接管頁面。首次訪問/硬重載後 SW 在 installing，
+  // 未接管的頁面 fetch 不經 SW → Cache Storage 裡剛下載的 spine/voice 全部 404。
+  if (WEB_MODE && navigator.serviceWorker) {
+    try {
+      await Promise.race([
+        (async () => {
+          if (navigator.serviceWorker.controller) return;
+          await navigator.serviceWorker.ready;
+          await new Promise((r) => {
+            const chk = () => (navigator.serviceWorker.controller ? r() : setTimeout(chk, 100));
+            chk();
+          });
+        })(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('sw ready timeout')), 8000)),
+      ]);
+    } catch (e) {
+      console.warn('[lobby] SW 未及時接管（繼續用網路載入）', e.message);
+    }
+  }
   // 串流模式：確保該 lobby 的資源已在本地（隨播隨下）
   if (_assetInfo?.lobbies?.[name]) {
     try { await ensureLobbyAssets(name); retryBgmIfSilent(); } catch (e) { console.warn('[lobby] 串流下載失敗', e.message); }
