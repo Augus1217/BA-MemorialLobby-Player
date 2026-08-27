@@ -306,8 +306,11 @@ ipcMain.handle('screen-size', async () => {
 // ---------------------------------------------------------------------------
 // Asset download system — check + download + extract tar.gz packages
 // ---------------------------------------------------------------------------
-const ASSETS_VERSION_URL = 'https://github.com/Augus1217/BA-MemorialLobby-Assets/releases/latest/download/assets_version.json';
-const ASSETS_PACKAGES_URL = 'https://github.com/Augus1217/BA-MemorialLobby-Assets/releases/download';
+// 資產分發走 Cloudflare Worker（Assets repo 轉 private 後 Releases 需授權，
+// Worker 內嵌 GitHub token 代理；見 ba-assets-worker repo）
+const ASSETS_WORKER_BASE = 'https://ba-assets.imlindora.workers.dev';
+const ASSETS_VERSION_URL = `${ASSETS_WORKER_BASE}/latest/assets_version.json`;
+const ASSETS_PACKAGES_URL = ASSETS_WORKER_BASE;
 
 function getAssetsVersionPath() {
   return path.join(getAssetsDir(), '.version');
@@ -500,7 +503,7 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks }
     };
     try {
       sendProgress({ status: 'downloading', percent: 0 });
-      const url = pkg.url || `${ASSETS_PACKAGES_URL}/v${version}/${tarName}`;
+      const url = `${ASSETS_PACKAGES_URL}/v${version}/${tarName}` || pkg.url;
       await downloadFile(url, tarPath, (dl, total) => {
         sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total });
       });
@@ -567,7 +570,7 @@ ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies
     };
     try {
       sendProgress({ status: 'downloading', percent: 0 });
-      const url = pkg.url || `${ASSETS_PACKAGES_URL}/v${version}/${tarName}`;
+      const url = `${ASSETS_PACKAGES_URL}/v${version}/${tarName}` || pkg.url;
       await downloadFile(url, tarPath, (dl, total) => {
         sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total });
       });
