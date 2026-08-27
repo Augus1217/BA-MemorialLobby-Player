@@ -418,8 +418,9 @@ function ensureAudio() {
 // element's .duration if WebAudio is unavailable.
 async function probeVoiceLength(name) {
   const lower = name.toLowerCase();
-  if (voiceLengthCache.has(lower)) return voiceLengthCache.get(lower);
-  const url = `assets/voice/${currentLobbyVoiceFolder}/${lower}.ogg`;
+  const cacheKey = (voiceLang === 'kr' ? 'kr:' : '') + lower;
+  if (voiceLengthCache.has(cacheKey)) return voiceLengthCache.get(cacheKey);
+  const url = voiceUrl(currentLobbyVoiceFolder, lower);
   const p = (async () => {
     try {
       const ctx = ensureAudio();
@@ -429,6 +430,15 @@ async function probeVoiceLength(name) {
         return ab.duration;
       }
     } catch (e) {
+      // KR 缺檔 → 退回 JP 檔的長度（JP 一定存在；保持 CoDialog 節奏正確）
+      if (voiceLang === 'kr') {
+        try {
+          const jpUrl = `assets/voice/${currentLobbyVoiceFolder}/${lower}.ogg`;
+          const buf = await fetchRetry(jpUrl).then((r) => r.arrayBuffer());
+          const ab = await ensureAudio().decodeAudioData(buf);
+          return ab.duration;
+        } catch {}
+      }
       // fall through
     }
     try {
@@ -443,7 +453,7 @@ async function probeVoiceLength(name) {
       return 1.5;
     }
   })();
-  voiceLengthCache.set(lower, p);
+  voiceLengthCache.set(cacheKey, p);
   return p;
 }
 
@@ -599,6 +609,15 @@ function applyEyeFollow(self) {
 }
 
 let currentLobbyVoiceFolder = null;
+// 語音語言：jp（預設）/ kr。KR 資料夾 = voice/KR_<Folder 去 JP_>；缺檔 fallback JP。
+let voiceLang = (() => {
+  try { return localStorage.getItem('ba_voiceLang') === 'kr' ? 'kr' : 'jp'; }
+  catch { return 'jp'; }
+})();
+function voiceUrl(folder, name) {
+  const f = (voiceLang === 'kr') ? folder.replace(/^JP_/, 'KR_') : folder;
+  return assetUrl(`assets/voice/${f}/${name}.ogg`);
+}
 let voiceCalls = 0;
 // 逐字稿查詢（lobby_subtitle.json：voiceId -> { jp, tw, en } 或字串）。
 // GL dump 未含 memorial lobby 逐字稿，此檔現為空，放入資料即可自動顯示。
@@ -753,7 +772,8 @@ function speakerCharacterId() {
 function playVoice(voiceId) {
   voiceCalls++;
   const name = voiceId.toLowerCase();
-  const base = assetUrl(`assets/voice/${currentLobbyVoiceFolder}/${name}.ogg`);
+  const jpBase = `assets/voice/${currentLobbyVoiceFolder}/${name}.ogg`;
+  const base = voiceUrl(currentLobbyVoiceFolder, name);
   const audio = new Audio(base);
   const ctx = ensureAudio();
   if (ctx) {
@@ -794,7 +814,16 @@ function playVoice(voiceId) {
     showChat(speakerName(), text);
   };
   audio.onended = done;
-  audio.onerror = done;
+  audio.onerror = () => {
+    // KR 模式缺檔 → 靜默退回 JP 語音（換 src 重播一次）
+    if (voiceLang === 'kr' && !audio.dataset.jpFallback) {
+      audio.dataset.jpFallback = '1';
+      audio.src = jpBase;
+      audio.play().catch(done);
+      return;
+    }
+    done();
+  };
   audio.play().catch(done);
   // Save as last seen voice promise so playTalk() can await it for CoDialog pacing.
   lastVoicePromise = endPromise;
@@ -2539,6 +2568,23 @@ function syncSettingsLangSegs() {
   }
 }
 
+// ---- 語音語言（jp/kr）----
+const setVoiceLangSegs = document.getElementById('setVoiceLangSegs');
+function syncVoiceLangSegs() {
+  if (!setVoiceLangSegs) return;
+  for (const b of setVoiceLangSegs.querySelectorAll('button')) {
+    b.classList.toggle('on', b.dataset.v === voiceLang);
+  }
+}
+setVoiceLangSegs?.addEventListener('click', async (e) => {
+  const b = e.target.closest('button');
+  if (!b || b.dataset.v === voiceLang) return;
+  voiceLang = b.dataset.v;
+  try { localStorage.setItem('ba_voiceLang', voiceLang); } catch {}
+  syncVoiceLangSegs();
+  log('voice lang: ' + voiceLang);
+});
+
 function settingsStreaming() {
   return window.ba?.getStreamingMode
     ? window.ba.getStreamingMode()
@@ -2717,6 +2763,7 @@ function toggleSettingsPanel(force) {
     sidePanel.classList.remove('open');
     syncSettingsLangSegs();
     syncSettingsModeSegs();
+    syncVoiceLangSegs();
     syncSettingsEffectCks();
     refreshSettingsAssets();
     refreshSpaceManager();
@@ -2809,7 +2856,7 @@ async function mixVoicePcm(timeline, duration) {
   for (const e of timeline) {
     if (e.start >= duration || !currentLobbyVoiceFolder) continue;
     try {
-      const buf = await fetchRetry(`assets/voice/${currentLobbyVoiceFolder}/${e.voiceId.toLowerCase()}.ogg`).then(r => r.arrayBuffer());
+      const buf = await fetchRetry(voiceUrl(currentLobbyVoiceFolder, e.voiceId.toLowerCase())).then(r => r.arrayBuffer());
       const ab = await offline.decodeAudioData(buf);
       const src = offline.createBufferSource();
       src.buffer = ab;

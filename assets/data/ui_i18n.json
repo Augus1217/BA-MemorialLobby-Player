@@ -108,7 +108,11 @@
   "set.space.kindVoice": "語音",
   "set.space.delete": "刪除",
   "set.space.locked": "必要資源，不可刪除",
-  "set.space.confirm": "確定要刪除「{key}」嗎？刪除後進入該大廳會重新下載。"
+  "set.space.confirm": "確定要刪除「{key}」嗎？刪除後進入該大廳會重新下載。",
+  "set.voiceLang": "語音語言",
+  "set.voiceJp": "日文",
+  "set.voiceKr": "韓文",
+  "set.voiceLangDesc": "韓文語音為 Global 版內建 KR 配音；缺韓文檔的角色自動改播日文。"
  },
  "zh-CN": {
   "boot.checking": "检查更新中……",
@@ -219,7 +223,11 @@
   "set.space.kindVoice": "语音",
   "set.space.delete": "删除",
   "set.space.locked": "必要资源，不可删除",
-  "set.space.confirm": "确定要删除「{key}」吗？删除后进入该大厅会重新下载。"
+  "set.space.confirm": "确定要删除「{key}」吗？删除后进入该大厅会重新下载。",
+  "set.voiceLang": "语音语言",
+  "set.voiceJp": "日文",
+  "set.voiceKr": "韩文",
+  "set.voiceLangDesc": "韩文语音为 Global 版内置 KR 配音；缺韩文档的角色自动改播日文。"
  },
  "ja": {
   "boot.checking": "確認中です……",
@@ -330,7 +338,11 @@
   "set.space.kindVoice": "ボイス",
   "set.space.delete": "削除",
   "set.space.locked": "必須リソースのため削除できません",
-  "set.space.confirm": "「{key}」を削除しますか？削除後、そのロビーに入る際に再ダウンロードされます。"
+  "set.space.confirm": "「{key}」を削除しますか？削除後、そのロビーに入る際に再ダウンロードされます。",
+  "set.voiceLang": "音声言語",
+  "set.voiceJp": "日本語",
+  "set.voiceKr": "韓国語",
+  "set.voiceLangDesc": "韓国語音声は Global 版内蔵の KR 収音です。ファイルがないキャラは自動で日本語声に切り替わります。"
  },
  "en": {
   "boot.checking": "Checking for updates...",
@@ -441,7 +453,11 @@
   "set.space.kindVoice": "Voice",
   "set.space.delete": "Delete",
   "set.space.locked": "Required, cannot delete",
-  "set.space.confirm": "Delete '{key}'? It will be re-downloaded next time you visit that lobby."
+  "set.space.confirm": "Delete '{key}'? It will be re-downloaded next time you visit that lobby.",
+  "set.voiceLang": "Voice Language",
+  "set.voiceJp": "Japanese",
+  "set.voiceKr": "Korean",
+  "set.voiceLangDesc": "Korean audio is the built-in KR dub from Global. Characters missing KR files automatically fall back to Japanese."
  },
  "ko": {
   "boot.checking": "업데이트 확인 중...",
@@ -552,6 +568,10 @@
   "set.space.kindVoice": "음성",
   "set.space.delete": "삭제",
   "set.space.locked": "필수 리소스, 삭제 불가",
-  "set.space.confirm": "'{key}'을(를) 삭제하시겠습니까? 삭제 후 해당 로비 진입 시 다시 다운로드됩니다."
+  "set.space.confirm": "'{key}'을(를) 삭제하시겠습니까? 삭제 후 해당 로비 진입 시 다시 다운로드됩니다.",
+  "set.voiceLang": "음성 언어",
+  "set.voiceJp": "일본어",
+  "set.voiceKr": "한국어",
+  "set.voiceLangDesc": "한국어 음성은 Global 버전 내장 KR 더빙입니다. 파일이 없는 캐릭터는 자동으로 일본어 음성으로 재생됩니다."
  }
 }
