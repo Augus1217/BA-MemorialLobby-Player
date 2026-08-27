@@ -626,7 +626,15 @@ function dialogTypeFor(voiceId) {
 }
 function subtitlePick(voiceId) {
   if (!SUBTITLES) return null;
-  const hit = SUBTITLES[voiceId] ?? SUBTITLES[voiceId.toLowerCase()];
+  const id = voiceId.toLowerCase();
+  let hit = SUBTITLES[voiceId] ?? SUBTITLES[id];
+  // 表格條數與音檔拆句不同步（如 Shiroko：表格 G1..G4 各1條，音檔 _1.._4 單檔；
+  // 但同角色另一皮膚 DevName 撞名時，規則稿可能只剩 _G_I 形式）——
+  // 單 index 語音退化匹配「同群組第一條」的翻譯。
+  if (hit == null) {
+    const m = id.match(/^(.+_memoriallobby_\d+)$/);
+    if (m) hit = SUBTITLES[m[1] + '_1'];
+  }
   if (hit == null) return null;
   if (typeof hit === 'string') return { text: hit, lang: null };
   // 字幕語言跟隨介面語言（langMode：tw/jp/cn/en/kr）；無該語言時 fallback：
