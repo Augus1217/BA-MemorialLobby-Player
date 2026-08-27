@@ -881,7 +881,9 @@ let VOICE_INDEX = {};     // characterId -> 該角色語音檔名清單
 let bgmAudio = null;
 let bgmOn = true;
 
+let bgmFilename = null;   // 目前 lobby 的 BGM 檔名（串流下載完成後重試用）
 function setBgm(filename) {
+  bgmFilename = filename || null;
   if (bgmAudio) {
     bgmAudio.pause();
     bgmAudio.src = '';
@@ -891,8 +893,18 @@ function setBgm(filename) {
   const audio = new Audio(assetUrl(`assets/bgm/${filename}`));
   audio.loop = true;
   audio.volume = 0.42;
+  // 串流模式首次進大廳：pack 下載中 SW cache 尚無此檔 → network 404。
+  // 標記失敗，等 ensureLobbyAssets 完成後由 retryBgm() 再播一次。
+  audio.addEventListener('error', () => { if (bgmAudio === audio) bgmAudio = null; }, { once: true });
   audio.play().catch(() => {});
   bgmAudio = audio;
+}
+// BGM 檔案隨 lobby pack 下載；串流首入時可能晚於 setBgm() 就緒 → 補播一次
+function retryBgmIfSilent() {
+  if (!bgmOn && !bgmAudio) return;
+  if (bgmAudio && !bgmAudio.paused && bgmAudio.readyState > 2) return;   // 正常播放中
+  const file = bgmFilename || (currentLobby && bgmForLobby(currentLobby));
+  if (file && bgmOn) setBgm(file);
 }
 
 function toggleBgm() {
@@ -3678,7 +3690,7 @@ async function loadLobby(name) {
   if (!entry) { showErr(t('msg.notInIndex', { name })); return; }
   // 串流模式：確保該 lobby 的資源已在本地（隨播隨下）
   if (_assetInfo?.lobbies?.[name]) {
-    try { await ensureLobbyAssets(name); } catch (e) { console.warn('[lobby] 串流下載失敗', e.message); }
+    try { await ensureLobbyAssets(name); retryBgmIfSilent(); } catch (e) { console.warn('[lobby] 串流下載失敗', e.message); }
   }
   loadIdleClip(entry);
   loadingEl.classList.add('show');
