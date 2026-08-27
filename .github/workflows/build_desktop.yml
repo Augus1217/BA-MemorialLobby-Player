@@ -12,6 +12,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build-linux:
     # electron-userland 官方容器：內含能正常產 rpm/deb/AppImage 的 fpm+rpmbuild 工具鏈
@@ -28,6 +31,7 @@ jobs:
       - name: Build renderer (Vite)
         run: npx vite build
 
+      # 不帶 --publish：只出包，統一由 release job 上傳（避免三 job race 觸發 secondary rate limit）
       - name: Build Linux packages (AppImage x64+arm64, deb, rpm)
         run: npx electron-builder --linux --publish never
         env:
@@ -44,13 +48,9 @@ jobs:
             release/*.AppImage
             release/*.deb
             release/*.rpm
+            release/*.blockmap
+            release/latest*.yml
           if-no-files-found: error
-
-      - name: Publish to GitHub Release
-        if: ${{ inputs.publish == true || startsWith(github.ref, 'refs/tags/v') }}
-        run: npx electron-builder --linux --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-win:
     runs-on: windows-latest
@@ -81,13 +81,9 @@ jobs:
           name: dist-windows
           path: |
             release/*.exe
+            release/*.blockmap
+            release/latest*.yml
           if-no-files-found: error
-
-      - name: Publish to GitHub Release
-        if: ${{ inputs.publish == true || startsWith(github.ref, 'refs/tags/v') }}
-        run: npx electron-builder --win --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-mac:
     runs-on: macos-latest
@@ -120,11 +116,53 @@ jobs:
           path: |
             release/*.dmg
             release/*.zip
+            release/*.blockmap
+            release/latest*.yml
           if-no-files-found: error
 
-      - name: Publish to GitHub Release
-        if: ${{ inputs.publish == true || startsWith(github.ref, 'refs/tags/v') }}
-        run: npx electron-builder --mac --publish always
+  release:
+    needs: [build-linux, build-win, build-mac]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Show files
+        run: ls -lh artifacts/
+
+      - name: Create GitHub Release and upload
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          TITLE="BA Memorial Lobby ${TAG}"
+
+          gh release create "$TAG" --title "$TITLE" --generate-notes --draft=false || {
+            echo "release 已存在，改用既有 release"
+          }
+
+          # 逐檔上傳 + 失敗退避重試（GitHub secondary rate limit 防護，同 Assets repo 做法）
+          for f in artifacts/*; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            for i in 1 2 3 4; do
+              if gh release upload "$TAG" "$f" --clobber; then
+                echo "uploaded: $base"
+                break
+              fi
+              echo "retry $i for $base"
+              sleep $((i * 10))
+              [ "$i" = "4" ] && { echo "upload failed: $base"; exit 1; }
+            done
+          done
+          echo "all artifacts uploaded"
+        if: ${{ inputs.publish == true || startsWith(github.ref, 'refs/tags/v') }}
