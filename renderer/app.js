@@ -543,6 +543,8 @@ function setupLipHook(target) {
       }
     }
     applyEyeFollow(self);
+    if (pinchActive && interactionMode === 'pinch') updatePinch();
+    if (handFollowActive && interactionMode === 'handfollow') updateHandFollow();
   };
 }
 
@@ -607,6 +609,220 @@ function applyEyeFollow(self) {
     bone.y += (bone.data.y - bone.y) * k;
   }
 }
+
+// ---- advanced interactions: Pinch (拖曳捏頰) / Touch (戳) / HandFollow (手部跟隨) ----
+// VERIFIED straight from the game skeletons (all 277 lobbies scanned):
+// only 10 newer lobbies carry non-standard gesture animations, each with a
+// distinct clip set & trigger (see assets/data scan notes):
+//   Pinch_01_M / Pinch_02_M + PinchEnd_01_M   -> drag-stretch on the face
+//   Touch_01_M / Touch_02_M + TouchEnd_01_M   -> tap / poke on the face
+//   HandFollow_01_M / _02_M + HandFollowEnd   -> drag anywhere, hand follows cursor
+// Detection is per-lobby and driven by the loaded skeleton's animation names
+// (no external config file to keep in sync). These special gestures take priority
+// over the base 摸頭 (Pat) on the face region for the characters that own them.
+let interactionMode = null;    // 'pinch' | 'touch' | 'handfollow' | null
+let pinchActive = false;       // pinch drag in progress
+let pinchDeep = false;         // voice/animation switched to the deeper Pinch_02
+let handFollowBone = null;     // skeleton position bone driven toward the cursor
+let handFollowActive = false;
+
+// Available memorial-lobby voices for the current lobby (media ids, lowercase).
+function reactionVoices() {
+  if (!validVoices) return [];
+  return [...validVoices].filter(v => /memoriallobby/i.test(v));
+}
+function playReactionVoice() {
+  const pool = reactionVoices();
+  if (!pool.length) return;
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+  playVoice(pick);
+}
+
+function setupInteraction() {
+  interactionMode = null;
+  pinchActive = false;
+  pinchDeep = false;
+  handFollowBone = null;
+  handFollowActive = false;
+  if (!spine) return;
+  // mode priority: pinch > touch > handfollow (mirrors each lobby's primary gesture)
+  if (has('Pinch_01_M') || has('Pinch_01') || hasAny('Pinch_')) interactionMode = 'pinch';
+  else if (has('Touch_01_M') || hasAny('Touch_')) interactionMode = 'touch';
+  else if (has('HandFollow_01_M') || hasAny('HandFollow_')) interactionMode = 'handfollow';
+  if (interactionMode) {
+    // pick a hand/arm position bone for the HandFollow cursor-tracking (in order
+    // of preference; the game keys these `*_hand_Pos*` / `*_LowArm_Pos` bones).
+    const pref = ['R_hand_Pos', 'L_hand_Pos2', 'R_LowArm_Pos', 'L_LowArm_Pos',
+      'R_lowerarm_rot', 'R_hand_rot', 'L_hand_rot', 'R_UpperArm_Pos', 'L_UpperArm_Pos'];
+    for (const name of pref) {
+      const b = spine.skeleton.findBone(name);
+      if (b) { handFollowBone = b; break; }
+    }
+  }
+  if (interactionMode) log(`進階互動: ${interactionMode}${handFollowBone ? ` (hand=${handFollowBone.data.name})` : ''}`);
+  else log('進階互動: 無 (標準 Pat/Look/Talk)');
+}
+
+// ---- Pinch (拖曳捏頰) ----
+// Face drag: the stretched pose loops while dragging; the farther the pointer
+// from the face anchor, the deeper the stretch (Pinch_01 -> Pinch_02). Releasing
+// plays PinchEnd + a reaction voice line.
+function startPinch() {
+  if (!spine || pinchActive) return;
+  if (state.introBlock) return;
+  if (state.busy === 'talk' && !isInteractionAvailable()) return;
+  if (!has('Pinch_01_M') && !has('Pinch_01')) return;
+  clearTimers();
+  pinchActive = true;
+  pinchDeep = false;
+  state.busy = 'pinch';
+  blockInteraction('pinch', true);
+  spine.state.setAnimation(1, has('Pinch_01_M') ? 'Pinch_01_M' : 'Pinch_01', true);
+  if (has('Pinch_01_A')) spine.state.setAnimation(2, 'Pinch_01_A', true);
+  log('捏頰 (拖曳)');
+}
+
+function updatePinch() {
+  if (!spine || !pinchActive) return;
+  // deepen to Pinch_02 when the pointer is dragged well off the face anchor.
+  const deep = has('Pinch_02_M') || has('Pinch_02');
+  if (deep && !pinchDeep) {
+    const b = headBone();
+    if (b) {
+      const g = spine.toGlobal({ x: b.worldX, y: b.worldY });
+      if (Math.hypot(mouse.x - g.x, mouse.y - g.y) > HEAD_PAT_RADIUS * spine.scale.x * 1.5) {
+        pinchDeep = true;
+        spine.state.setAnimation(1, has('Pinch_02_M') ? 'Pinch_02_M' : 'Pinch_02', true);
+        if (has('Pinch_02_A')) spine.state.setAnimation(2, 'Pinch_02_A', true);
+        playReactionVoice();
+        log('捏頰 → 更深');
+      }
+    }
+  }
+  // subtle face pull toward the finger for the drag feel (Touch_Point bone)
+  const b = headBone();
+  if (b) {
+    const rest = b.parent.localToWorld({ x: b.data.x, y: b.data.y });
+    const c = spine.worldTransform.applyInverse({ x: mouse.x, y: mouse.y });
+    let dx = c.x - rest.x, dy = c.y - rest.y;
+    const d = Math.hypot(dx, dy);
+    const max = HEAD_PAT_RADIUS;
+    if (d > max) { dx *= max / d; dy *= max / d; }
+    const k = 0.25;
+    setBoneWorld(b, b.worldX + (rest.x + dx - b.worldX) * k, b.worldY + (rest.y + dy - b.worldY) * k);
+  }
+}
+
+function endPinch() {
+  if (!spine || !pinchActive) return;
+  pinchActive = false;
+  state.busy = null;
+  blockInteraction('pinch', false);
+  if (has('PinchEnd_01_M')) spine.state.setAnimation(1, 'PinchEnd_01_M', false);
+  if (has('PinchEnd_01_A')) spine.state.setAnimation(2, 'PinchEnd_01_A', false);
+  playReactionVoice();
+  after(1200, () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
+  log('捏頰結束');
+}
+
+// ---- Touch (戳) ----
+// Face tap / press: a quick poke (Touch_02, the 0.33 s jolt) on a short tap,
+// or the longer Touch_01 on a press; repeated pokes chain. Releasing plays the
+// TouchEnd + a reaction line.
+function startTouch() {
+  if (!spine) return;
+  if (state.introBlock) return;
+  if (state.busy === 'talk' && !isInteractionAvailable()) return;
+  if (!has('Touch_01_M') && !has('Touch_02_M')) return;
+  clearTimers();
+  state.busy = 'touch';
+  blockInteraction('touch', true);
+  const now = performance.now();
+  const quick = (now - (touchLastAt || 0)) < 900;   // rapid poke → jolt variant
+  touchLastAt = now;
+  let clip = has('Touch_01_M') ? 'Touch_01_M' : null;
+  if (has('Touch_02_M') && quick) clip = 'Touch_02_M';
+  if (clip) spine.state.setAnimation(1, clip, false);
+  playReactionVoice();
+  after(700, () => endTouch());
+  log(quick ? '戳 (poke)' : '觸摸');
+}
+let touchLastAt = 0;
+
+function endTouch() {
+  if (!spine || state.busy !== 'touch') return;
+  state.busy = null;
+  blockInteraction('touch', false);
+  if (has('TouchEnd_01_M')) spine.state.setAnimation(1, 'TouchEnd_01_M', false);
+  after(1200, () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
+  log('觸摸結束');
+}
+
+// ---- HandFollow (手部跟隨) ----
+// Drag anywhere: the character's hand tracks the cursor via a position/IK bone
+// (like the eye follow), HandFollow_01 loops while moving and HandFollow_02 pulses
+// on drag. Release plays HandFollowEnd + a reaction line.
+function startHandFollow() {
+  if (!spine || handFollowActive) return;
+  if (state.introBlock) return;
+  if (state.busy === 'talk' && !isInteractionAvailable()) return;
+  if (!has('HandFollow_01_M')) return;
+  clearTimers();
+  handFollowActive = true;
+  state.busy = 'handfollow';
+  blockInteraction('handfollow', true);
+  spine.state.setAnimation(1, 'HandFollow_01_M', true);
+  if (has('HandFollow_01_A')) spine.state.setAnimation(2, 'HandFollow_01_A', true);
+  playReactionVoice();
+  log('手部跟隨');
+}
+
+function updateHandFollow() {
+  if (!spine || !handFollowActive || !handFollowBone) return;
+  // drive the hand position bone toward the cursor (eased), inside its rig.
+  const rest = handFollowBone.parent.localToWorld({ x: handFollowBone.data.x, y: handFollowBone.data.y });
+  const c = spine.worldTransform.applyInverse({ x: mouse.x, y: mouse.y });
+  let dx = c.x - rest.x, dy = c.y - rest.y;
+  const d = Math.hypot(dx, dy);
+  const max = 220;
+  if (d > max) { dx *= max / d; dy *= max / d; }
+  const k = 0.35;
+  setBoneWorld(handFollowBone,
+    handFollowBone.worldX + (rest.x + dx - handFollowBone.worldX) * k,
+    handFollowBone.worldY + (rest.y + dy - handFollowBone.worldY) * k);
+  // pulse HandFollow_02 once-swap while the pointer moves quickly, then restore
+  // the HandFollow_01 loop once the 0.2 s pulse on track 1 completes (otherwise
+  // the arm would drop to the idle pose mid-drag).
+  const now = performance.now();
+  if (has('HandFollow_02_M') && !state.blockInteractionOnPlay) {
+    if (updateHandFollow._lx === undefined) updateHandFollow._lx = mouse.x;
+    const moving = Math.abs(mouse.x - updateHandFollow._lx) > 4;
+    if (moving && now - (updateHandFollow._last || 0) > 600) {
+      updateHandFollow._last = now;
+      spine.state.setAnimation(1, 'HandFollow_02_M', false);
+    } else if (!spine.state.getCurrent(1)) {
+      spine.state.setAnimation(1, 'HandFollow_01_M', true);
+    }
+    updateHandFollow._lx = mouse.x;
+  }
+}
+
+function endHandFollow() {
+  if (!spine || !handFollowActive) return;
+  handFollowActive = false;
+  state.busy = null;
+  blockInteraction('handfollow', false);
+  if (has('HandFollowEnd_01_M')) spine.state.setAnimation(1, 'HandFollowEnd_01_M', false);
+  if (has('HandFollowEnd_01_A')) spine.state.setAnimation(2, 'HandFollowEnd_01_A', false);
+  playReactionVoice();
+  after(1400, () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
+  log('手部跟隨結束');
+}
+
+// ---- input routing for the special gestures ----
+// Dispatched directly inside the pointer handlers (see onPointerDown / Move / Up):
+//   pinch / touch consume the face region (replacing Pat), handfollow owns the
+//   drag anywhere (replacing Look). Detection is driven by setupInteraction().
 
 let currentLobbyVoiceFolder = null;
 // 語音語言：jp（預設）/ kr。KR 資料夾 = voice/KR_<Folder 去 JP_>；缺檔 fallback JP。
@@ -3814,6 +4030,7 @@ async function loadLobby(name) {
     spine.state.data.defaultMix = 0.2;
     setupLipHook(spine);
     setupEyes();
+    setupInteraction();
     app.stage.addChild(spine);
     currentLobby = name;
   } catch (e) {
@@ -4019,8 +4236,13 @@ function onPointerDown(e) {
   downPos = { x: e.clientX, y: e.clientY };
   longPressTimer = setTimeout(() => {
     if (downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) < 10) {
-      // Hold gesture: on the head region → Pat, anywhere else → Look.
-      if (isHeadRegion(e.clientX, e.clientY)) startPat();
+      // Hold gesture: on the head region → Pat (or the special Pinch/Touch when
+      // the lobby owns it), anywhere else → Look (or HandFollow when owned).
+      if (interactionMode === 'pinch') startPinch();
+      else if (isHeadRegion(e.clientX, e.clientY)) {
+        if (interactionMode === 'touch') startTouch();
+        else startPat();
+      } else if (interactionMode === 'handfollow') startHandFollow();
       else startLook();
     }
   }, 420);
@@ -4037,8 +4259,12 @@ function onPointerMove(e) {
   if (longPressTimer && downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 7) {
     clearTimeout(longPressTimer);
     if (state.busy === null) {
-      if (isHeadRegion(downPos.x, downPos.y)) startPat();
-      else startLook();
+      // Special gestures first: HandFollow owns any drag, Pinch owns the face drag.
+      if (interactionMode === 'handfollow' && has('HandFollow_01_M')) startHandFollow();
+      else if (isHeadRegion(downPos.x, downPos.y)) {
+        if (interactionMode === 'pinch') startPinch();
+        else startPat();
+      } else startLook();
     }
   }
   hud.classList.toggle('idle', performance.now() - userActiveAt > 2600);
@@ -4049,13 +4275,19 @@ function onPointerUp(e) {
   if (downPos) {
     const dt = performance.now() - downTime;
     const d = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
-    // Quick tap (short, still) → Talk (one-shot _M + _A + voice). A tap while
-    // a hold is active is ignored — the hold branches below handle the release.
-    if (dt < 340 && d < 10 && !state.introBlock && state.busy !== 'look' && state.busy !== 'pat') {
-      playTalk();
+    // Quick tap (short, still) → Talk (one-shot _M + _A + voice); for Touch
+    // lobbies a face-region tap is the poke reaction instead. A tap while a hold
+    // is active is ignored — the hold branches below handle the release.
+    if (dt < 340 && d < 10 && !state.introBlock && state.busy !== 'look' &&
+        state.busy !== 'pat' && state.busy !== 'pinch' && state.busy !== 'handfollow' && state.busy !== 'touch') {
+      if (interactionMode === 'touch' && isHeadRegion(e.clientX, e.clientY)) startTouch();
+      else playTalk();
     }
   }
-  if (state.busy === 'look') endLook();
+  if (pinchActive) endPinch();
+  else if (handFollowActive) endHandFollow();
+  else if (state.busy === 'touch') endTouch();
+  else if (state.busy === 'look') endLook();
   else if (patting) endPat();
   downPos = null;
   downTime = 0;
