@@ -34,12 +34,12 @@ jobs:
             if [ -n "$TAG" ] && [ "$TAG" != "v" ]; then
               for pkg in assets_assets-player intro; do
                 gh release download "$TAG" --repo Augus1217/BA-MemorialLobby-Assets \
-                  --pattern "${pkg}-*.tar.gz" --clobber -D . 2>/dev/null \
+                  --pattern "assets-${pkg}-*.tar.gz" --clobber -D . 2>/dev/null \
                   && echo "  ✓ $pkg ($TAG)" \
                   || echo "::warning::Failed to download ${pkg} ($TAG)"
               done
               # 解壓所有已下載的 tar.gz
-              for f in assets_assets-player-*.tar.gz intro-*.tar.gz; do
+              for f in assets-assets-player-*.tar.gz assets-intro-*.tar.gz; do
                 [ -f "$f" ] && tar xzf "$f" -C . && rm -f "$f"
               done
             else
