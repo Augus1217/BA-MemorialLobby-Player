@@ -28,6 +28,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Download game assets from Worker
+        run: |
+          if [ ! -d assets/bgm ]; then
+            echo "=== Downloading game assets from Worker ==="
+            WORKER_BASE="https://ba-assets.imlindora.workers.dev"
+            VER=$(curl -sf "$WORKER_BASE/latest/assets_version.json" | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || echo "")
+            if [ -n "$VER" ]; then
+              for pkg in assets-player assets-intro; do
+                curl -sf "$WORKER_BASE/v${VER}/${pkg}-v${VER}.tar.gz" | tar xz -C .
+              done
+              echo "Assets downloaded (v${VER})"
+            else
+              echo "::warning::Failed to fetch version from Worker, using local assets if any"
+            fi
+          else
+            echo "Assets already present, skipping download"
+          fi
+
       - name: Build renderer (Vite)
         run: npx vite build
 
@@ -67,6 +85,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Download game assets from Worker
+        run: |
+          if [ ! -d assets/bgm ]; then
+            echo "=== Downloading game assets from Worker ==="
+            WORKER_BASE="https://ba-assets.imlindora.workers.dev"
+            VER=$(curl -sf "$WORKER_BASE/latest/assets_version.json" | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || echo "")
+            if [ -n "$VER" ]; then
+              for pkg in assets-player assets-intro; do
+                curl -sf "$WORKER_BASE/v${VER}/${pkg}-v${VER}.tar.gz" | tar xz -C .
+              done
+              echo "Assets downloaded (v${VER})"
+            else
+              echo "::warning::Failed to fetch version from Worker, using local assets if any"
+            fi
+          else
+            echo "Assets already present, skipping download"
+          fi
+
       - name: Build renderer (Vite)
         run: npx vite build
 
@@ -99,6 +135,24 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Download game assets from Worker
+        run: |
+          if [ ! -d assets/bgm ]; then
+            echo "=== Downloading game assets from Worker ==="
+            WORKER_BASE="https://ba-assets.imlindora.workers.dev"
+            VER=$(curl -sf "$WORKER_BASE/latest/assets_version.json" | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || echo "")
+            if [ -n "$VER" ]; then
+              for pkg in assets-player assets-intro; do
+                curl -sf "$WORKER_BASE/v${VER}/${pkg}-v${VER}.tar.gz" | tar xz -C .
+              done
+              echo "Assets downloaded (v${VER})"
+            else
+              echo "::warning::Failed to fetch version from Worker, using local assets if any"
+            fi
+          else
+            echo "Assets already present, skipping download"
+          fi
 
       - name: Build renderer (Vite)
         run: npx vite build

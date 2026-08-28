@@ -1,13 +1,7 @@
 node_modules/
-# assets/：只追蹤網頁版核心資產（Pages 部署需要）；spine/bgm/voice/scene 不入 git
+# assets/：不追蹤任何遊戲素材（全部從 Worker 串流）；只保留我們的 metadata
 assets/*
 !assets/data/
-!assets/ui/
-!assets/fonts/
-!assets/students/
-!assets/clickfx/
-!assets/intro/
-!assets/loading/
 !assets/lobby_index.json
 dist/
 release/
