@@ -864,7 +864,11 @@ function dialogTypeFor(voiceId) {
 function subtitlePick(voiceId) {
   if (!SUBTITLES) return null;
   const id = voiceId.toLowerCase();
-  let hit = SUBTITLES[voiceId] ?? SUBTITLES[id];
+  // 先命中者若是「空殼」（dict 內 jp/tw/en/kr 全空字串，fuse 管線對未匹配
+  // 事件的佔位條目，v2026.0827.1 起混入 2,527 筆）視同 miss，繼續往下找
+  // lowercase/退化匹配——否則骨架事件字串（MixedCase）會被空殼擋掉，氣泡全滅。
+  const useful = (x) => x != null && (typeof x === 'string' ? !!x : Object.values(x).some(Boolean));
+  let hit = [SUBTITLES[voiceId], SUBTITLES[id]].find(useful);
   // 表格條數與音檔拆句不同步（如 Shiroko：表格 G1..G4 各1條，音檔 _1.._4 單檔；
   // 但同角色另一皮膚 DevName 撞名時，規則稿可能只剩 _G_I 形式）——
   // 單 index 語音退化匹配「同群組第一條」的翻譯。
@@ -872,7 +876,7 @@ function subtitlePick(voiceId) {
     const m = id.match(/^(.+_memoriallobby_\d+)$/);
     if (m) hit = SUBTITLES[m[1] + '_1'];
   }
-  if (hit == null) return null;
+  if (!useful(hit)) return null;
   if (typeof hit === 'string') return { text: hit, lang: null };
   // 字幕語言跟隨介面語言（langMode：tw/jp/cn/en/kr）；無該語言時 fallback：
   // cn→tw、kr→jp，再退到任一可用語言。
@@ -4295,7 +4299,22 @@ function onPointerUp(e) {
 
 // ---- Tap To Start：asset check 完成後顯示，點擊進入 lobby ----
 // loadingScreen 的影片背景持續播放；此處只把 spinner 換成 TAP TO START，
-// 並播 pv-a.ogg 音軌（資源由 main 的 intro-media handler 提供）。
+// 並接手 pv-a.ogg 音軌（音軌在 init() 一啟動就提前起播，不被更新檢查擋住）。
+
+// 提前起播的 intro 音軌（pv-a.ogg）；showTapToStart 重用同一元素
+let _introAudio = null;
+function startIntroAudioEarly() {
+  // fire-and-forget：任何失敗都靜默（web 首訪 intro 包未裝 → introMedia 為 null）
+  try {
+    Promise.resolve(window.ba?.introMedia?.()).then((media) => {
+      if (!media?.audio || _introAudio) return;
+      const a = new Audio(media.audio);
+      a.play().catch(() => {});
+      _introAudio = a;
+    }).catch(() => {});
+  } catch {}
+}
+
 function showTapToStart() {
   return new Promise(async (resolve) => {
     const ls = document.getElementById('loadingScreen');
@@ -4305,13 +4324,15 @@ function showTapToStart() {
     // dev：URL 帶 autostart=1 時跳過等待（自動化測試 / hash 直連 lobby）
     if (/autostart=1/.test(location.search + location.hash)) { fadeOutLoadingScreen(); resolve(); return; }
     let finished = false;
-    let audio = null;
     let guard = null;
+    // 音軌已由 startIntroAudioEarly() 提前起播；此處只在尚未起播時補播
     try {
-      const media = window.ba && window.ba.introMedia ? await window.ba.introMedia() : null;
-      if (media && media.audio) {
-        audio = new Audio(media.audio);
-        audio.play().catch(() => {});
+      if (!_introAudio) {
+        const media = window.ba && window.ba.introMedia ? await window.ba.introMedia() : null;
+        if (media && media.audio) {
+          _introAudio = new Audio(media.audio);
+          _introAudio.play().catch(() => {});
+        }
       }
     } catch {}
     const finish = () => {
@@ -4319,7 +4340,7 @@ function showTapToStart() {
       finished = true;
       clearTimeout(guard);
       document.removeEventListener('keydown', onKey);
-      if (audio) { audio.pause(); audio = null; }
+      if (_introAudio) { _introAudio.pause(); _introAudio = null; }
       fadeOutLoadingScreen();
       resolve();
     };
@@ -4528,6 +4549,10 @@ async function showAssetDownload(assetInfo) {
 }
 
 async function init() {
+  // ---- intro PV 音軌（pv-a.ogg）：一啟動就起播，不等更新檢查／下載 ----
+  // （web 首訪 intro 包未裝時 introMedia 為 null → 靜默跳過；showTapToStart 會補播）
+  startIntroAudioEarly();
+
   // ---- i18n: load UI dictionary first so the asset-check panel and every
   // later message renders in the user's language. Falls back to zh-TW source
   // strings when the dict is missing (dev without assets/data).
