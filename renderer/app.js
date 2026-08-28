@@ -180,6 +180,9 @@ const log = (s) => console.log('[lobby]', s);
   // SpineClip IntroMix 資料（從 assets/spine/<Lobby>/<Lobby>-*.json 讀取）
   // key = 動畫名（如 "Talk_01_M"），value = { IntroMix, UseDefaultIntroMix }
   let CLIP_CONFIGS = {};
+  // Title 開場喊聲索引（assets/data/title_voices.json）：
+  // { "JP_Aru": ["Aru_Title.ogg"], ... } → assets/voice_title/<folder>/<file>
+  let TITLE_VOICES = null;
  let SCHEDULE = null;
  let BGM_MAP = {};
  let ORDER = [];
@@ -4369,6 +4372,21 @@ function showTapToStart() {
     };
     if (indicator) indicator.style.display = 'none';
     if (tts) tts.style.display = 'block';
+    // 標題畫面出現：隨機播放一位學生的「ブルーアーカイブ！」開場喊聲
+    // （遊戲同款時機；語音位於 core 包 voice_title/，此時必已下載）
+    try {
+      if (TITLE_VOICES) {
+        const folders = Object.keys(TITLE_VOICES);
+        const folder = folders[Math.floor(Math.random() * folders.length)];
+        const files = TITLE_VOICES[folder] || [];
+        const file = files[Math.floor(Math.random() * files.length)];
+        if (folder && file) {
+          const shout = new Audio(assetUrl(`assets/voice_title/${folder}/${file}`));
+          shout.volume = 1.0;
+          shout.play().catch(() => {});
+        }
+      }
+    } catch {}
     document.addEventListener('pointerdown', finish, { once: true });
     document.addEventListener('keydown', onKey);
     // 60 秒保險：無論如何都放行，避免卡在標題畫面
@@ -4684,6 +4702,13 @@ async function init() {
   } catch (e) {
     console.warn('[lobby] SpineClip IntroMix 載入失敗', e);
     CLIP_CONFIGS = {};
+  }
+  // Title 開場喊聲索引
+  try {
+    TITLE_VOICES = await fetchRetry('assets/data/title_voices.json').then(r => r.json());
+  } catch (e) {
+    console.warn('[lobby] title_voices 載入失敗', e);
+    TITLE_VOICES = null;
   }
   try {
     FLASH_TABLE = normalizeFlashTable(await fetchRetry('assets/data/flash_curves.json').then(r => r.json()));
