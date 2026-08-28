@@ -1111,6 +1111,8 @@ function setBgm(filename) {
     bgmAudio.src = '';
     bgmAudio = null;
   }
+  // 標題 BGM 接手時停掉 intro PV 音軌，避免兩首同時響
+  if (_introAudio) { _introAudio.pause(); _introAudio = null; }
   if (!bgmOn || !filename) return;
   const audio = new Audio(assetUrl(`assets/bgm/${filename}`));
   audio.loop = true;
