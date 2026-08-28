@@ -1,0 +1,366 @@
+{
+  "Idle_01": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "LookEnd_01_A": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "LookEnd_01_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Look_01_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "PatEnd_01_A": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "PatEnd_01_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Pat_01_A": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Pat_01_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Start_Idle_01": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "Talk_01_A": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_01_M": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_02_A": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_02_M": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_03_A": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_03_M": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_04_A": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_04_M": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_05_A": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_05_M": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Look_01_A": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_06_A": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_06_M": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Butterfly_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Snow_00_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Look_02_A": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Look_02_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Eye_Close_01": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Idle_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Pat_02_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Ear_L_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Ear_L_02_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Ear_R_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_07_A": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_07_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Eye_Close": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Start_Idle_02": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "Idle_02": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "BG_00_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "BG_Loop_00_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Clouds_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "sakura_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "Snow_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Breath_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Idle_Aurora_01": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "star_00_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "star_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "star_02_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "DeV_Start_Idle_01": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "PinchEnd_01_A": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "PinchEnd_01_M": {
+    "IntroMix": 0.10000000149011612,
+    "UseDefaultIntroMix": 0
+  },
+  "Pinch_01_A": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Pinch_01_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "Idle_Light_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "TouchEnd_01_M": {
+    "IntroMix": 1.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Touch_01_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Touch_02_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "BG_Light": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "BG_con": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "Start_idle_01": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "Idle": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "Pat_02_A": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Sweat_00_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Sweat_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Sakura_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Sakura_02_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Idle_01_R2": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "Ghost_01_R": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Idle_R_01": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "HandFollowEnd_01_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "HandFollow_01_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "HandFollow_02_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Pinch_01": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Pinch_02": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "frog_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "leaf_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Pinch_02_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Idle_02_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Idle_Cloud_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Idle_Light_02_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "Pat2_01_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Pat2_02_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "PatEnd2_01_M": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "Touch_End_01_M": {
+    "IntroMix": 0.4000000059604645,
+    "UseDefaultIntroMix": 0
+  },
+  "water_drop_01_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Smok_00_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_08_A": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Talk_08_M": {
+    "IntroMix": 0.30000001192092896,
+    "UseDefaultIntroMix": 0
+  },
+  "Cloud_00_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  },
+  "Light": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "Start_Idle_00": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 1
+  },
+  "Train_00_R": {
+    "IntroMix": 0.0,
+    "UseDefaultIntroMix": 0
+  }
+}

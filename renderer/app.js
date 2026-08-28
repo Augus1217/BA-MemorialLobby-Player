@@ -1249,7 +1249,7 @@ function restTracks() {
 // 遊戲的 SkeletonDataAsset 是靜態值，BA code 在播放時用 IntroMix 覆蓋。
 // spine.js 不知道 SpineClip，所以要這裡手動設定 entry.mixDuration。
 function setAnimationWithClipMix(track, animName, loop) {
-  const entry = setAnimationWithClipMix(track, animName, loop);
+  const entry = spine.state.setAnimation(track, animName, loop);
   const cfg = CLIP_CONFIGS[animName];
   if (cfg && !cfg.UseDefaultIntroMix) {
     entry.mixDuration = cfg.IntroMix;
