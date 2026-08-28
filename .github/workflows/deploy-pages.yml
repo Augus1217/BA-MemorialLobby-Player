@@ -31,7 +31,7 @@ jobs:
             WORKER_BASE="https://ba-assets.imlindora.workers.dev"
             VER=$(curl -sf "$WORKER_BASE/latest/assets_version.json" | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || echo "")
             if [ -n "$VER" ]; then
-              for pkg in assets-player intro; do
+              for pkg in assets_assets-player intro; do
                 URL="$WORKER_BASE/v${VER}/${pkg}-v${VER}.tar.gz"
                 if curl -sf "$URL" -o /tmp/$pkg.tar.gz; then
                   if tar xzf /tmp/$pkg.tar.gz -C .; then
