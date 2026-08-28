@@ -31,12 +31,21 @@ jobs:
             WORKER_BASE="https://ba-assets.imlindora.workers.dev"
             VER=$(curl -sf "$WORKER_BASE/latest/assets_version.json" | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || echo "")
             if [ -n "$VER" ]; then
-              for pkg in assets-player assets-intro; do
-                curl -sf "$WORKER_BASE/v${VER}/${pkg}-v${VER}.tar.gz" | tar xz -C .
+              for pkg in assets-player intro; do
+                URL="$WORKER_BASE/v${VER}/${pkg}-v${VER}.tar.gz"
+                if curl -sf "$URL" -o /tmp/$pkg.tar.gz; then
+                  if tar xzf /tmp/$pkg.tar.gz -C .; then
+                    echo "  ✓ $pkg (v${VER})"
+                  else
+                    echo "::warning::Failed to extract ${pkg} (v${VER})"
+                  fi
+                  rm -f /tmp/$pkg.tar.gz
+                else
+                  echo "::warning::Failed to download ${pkg} (v${VER}), build will use any local assets"
+                fi
               done
-              echo "Assets downloaded (v${VER})"
             else
-              echo "::warning::Failed to fetch version from Worker, using local assets if any"
+              echo "::warning::Failed to fetch version from Worker, build will use any local assets"
             fi
           else
             echo "Assets already present, skipping download"
