@@ -4562,9 +4562,6 @@ async function init() {
   buildLangSegs();
   applyI18n();
 
-  // ---- 標題畫面 BGM：檢查更新中就開始播（進 lobby 後被 setBgm 換成大廳曲）----
-  if (bgmOn) setBgm('Theme_152_Title.ogg');
-
   // ---- Asset check: show download UI if assets missing ----
   // loadingScreen 保持顯示（spinner），檢查／下載完成後才換成 TAP TO START。
   if (window.ba?.checkAssets) {
