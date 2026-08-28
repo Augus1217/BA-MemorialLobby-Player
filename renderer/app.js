@@ -4685,7 +4685,6 @@ async function init() {
     console.warn('[lobby] SpineClip IntroMix 載入失敗', e);
     CLIP_CONFIGS = {};
   }
-  }
   try {
     FLASH_TABLE = normalizeFlashTable(await fetchRetry('assets/data/flash_curves.json').then(r => r.json()));
   } catch (e) {
