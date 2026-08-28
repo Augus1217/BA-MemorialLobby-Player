@@ -172,11 +172,14 @@ const log = (s) => console.log('[lobby]', s);
    let bgCenterX = 0, bgCenterY = 0;   // bg 內容的世界座標中心
    let sceneCenterX = 0, sceneCenterY = 0; // scene 內容的世界座標中心
   let sceneStabTimer = null; // (unused)
- let currentLobby = null;
- let LOBBY_INDEX = {};
- // 由 Unity dump 抽出的每 lobby Transform（scripts/extract_lobby_transforms.py）：
- // bg.mode "char"=與本體同變換（如 CH0060BG_home），"fill"=獨立座標系（如 Akari/Yuzu_BG）
- let LOBBY_TRANSFORMS = null;
+  let currentLobby = null;
+  let LOBBY_INDEX = {};
+  // 由 Unity dump 抽出的每 lobby Transform（scripts/extract_lobby_transforms.py）：
+  // bg.mode "char"=與本體同變換（如 CH0060BG_home），"fill"=獨立座標系（如 Akari/Yuzu_BG）
+  let LOBBY_TRANSFORMS = null;
+  // SpineClip IntroMix 資料（從 assets/spine/<Lobby>/<Lobby>-*.json 讀取）
+  // key = 動畫名（如 "Talk_01_M"），value = { IntroMix, UseDefaultIntroMix }
+  let CLIP_CONFIGS = {};
  let SCHEDULE = null;
  let BGM_MAP = {};
  let ORDER = [];
@@ -677,8 +680,8 @@ function startPinch() {
   pinchDeep = false;
   state.busy = 'pinch';
   blockInteraction('pinch', true);
-  spine.state.setAnimation(1, has('Pinch_01_M') ? 'Pinch_01_M' : 'Pinch_01', true);
-  if (has('Pinch_01_A')) spine.state.setAnimation(2, 'Pinch_01_A', true);
+  setAnimationWithClipMix(1, has('Pinch_01_M') ? 'Pinch_01_M' : 'Pinch_01', true);
+  if (has('Pinch_01_A')) setAnimationWithClipMix(2, 'Pinch_01_A', true);
   log('捏頰 (拖曳)');
 }
 
@@ -692,8 +695,8 @@ function updatePinch() {
       const g = spine.toGlobal({ x: b.worldX, y: b.worldY });
       if (Math.hypot(mouse.x - g.x, mouse.y - g.y) > HEAD_PAT_RADIUS * spine.scale.x * 1.5) {
         pinchDeep = true;
-        spine.state.setAnimation(1, has('Pinch_02_M') ? 'Pinch_02_M' : 'Pinch_02', true);
-        if (has('Pinch_02_A')) spine.state.setAnimation(2, 'Pinch_02_A', true);
+        setAnimationWithClipMix(1, has('Pinch_02_M') ? 'Pinch_02_M' : 'Pinch_02', true);
+        if (has('Pinch_02_A')) setAnimationWithClipMix(2, 'Pinch_02_A', true);
         playReactionVoice();
         log('捏頰 → 更深');
       }
@@ -718,8 +721,8 @@ function endPinch() {
   pinchActive = false;
   state.busy = null;
   blockInteraction('pinch', false);
-  if (has('PinchEnd_01_M')) spine.state.setAnimation(1, 'PinchEnd_01_M', false);
-  if (has('PinchEnd_01_A')) spine.state.setAnimation(2, 'PinchEnd_01_A', false);
+  if (has('PinchEnd_01_M')) setAnimationWithClipMix(1, 'PinchEnd_01_M', false);
+  if (has('PinchEnd_01_A')) setAnimationWithClipMix(2, 'PinchEnd_01_A', false);
   playReactionVoice();
   after(1200, () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
   log('捏頰結束');
@@ -742,7 +745,7 @@ function startTouch() {
   touchLastAt = now;
   let clip = has('Touch_01_M') ? 'Touch_01_M' : null;
   if (has('Touch_02_M') && quick) clip = 'Touch_02_M';
-  if (clip) spine.state.setAnimation(1, clip, false);
+  if (clip) setAnimationWithClipMix(1, clip, false);
   playReactionVoice();
   after(700, () => endTouch());
   log(quick ? '戳 (poke)' : '觸摸');
@@ -753,7 +756,7 @@ function endTouch() {
   if (!spine || state.busy !== 'touch') return;
   state.busy = null;
   blockInteraction('touch', false);
-  if (has('TouchEnd_01_M')) spine.state.setAnimation(1, 'TouchEnd_01_M', false);
+  if (has('TouchEnd_01_M')) setAnimationWithClipMix(1, 'TouchEnd_01_M', false);
   after(1200, () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
   log('觸摸結束');
 }
@@ -771,8 +774,8 @@ function startHandFollow() {
   handFollowActive = true;
   state.busy = 'handfollow';
   blockInteraction('handfollow', true);
-  spine.state.setAnimation(1, 'HandFollow_01_M', true);
-  if (has('HandFollow_01_A')) spine.state.setAnimation(2, 'HandFollow_01_A', true);
+  setAnimationWithClipMix(1, 'HandFollow_01_M', true);
+  if (has('HandFollow_01_A')) setAnimationWithClipMix(2, 'HandFollow_01_A', true);
   playReactionVoice();
   log('手部跟隨');
 }
@@ -799,9 +802,9 @@ function updateHandFollow() {
     const moving = Math.abs(mouse.x - updateHandFollow._lx) > 4;
     if (moving && now - (updateHandFollow._last || 0) > 600) {
       updateHandFollow._last = now;
-      spine.state.setAnimation(1, 'HandFollow_02_M', false);
+      setAnimationWithClipMix(1, 'HandFollow_02_M', false);
     } else if (!spine.state.getCurrent(1)) {
-      spine.state.setAnimation(1, 'HandFollow_01_M', true);
+      setAnimationWithClipMix(1, 'HandFollow_01_M', true);
     }
     updateHandFollow._lx = mouse.x;
   }
@@ -812,8 +815,8 @@ function endHandFollow() {
   handFollowActive = false;
   state.busy = null;
   blockInteraction('handfollow', false);
-  if (has('HandFollowEnd_01_M')) spine.state.setAnimation(1, 'HandFollowEnd_01_M', false);
-  if (has('HandFollowEnd_01_A')) spine.state.setAnimation(2, 'HandFollowEnd_01_A', false);
+  if (has('HandFollowEnd_01_M')) setAnimationWithClipMix(1, 'HandFollowEnd_01_M', false);
+  if (has('HandFollowEnd_01_A')) setAnimationWithClipMix(2, 'HandFollowEnd_01_A', false);
   playReactionVoice();
   after(1400, () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
   log('手部跟隨結束');
@@ -1241,6 +1244,21 @@ function restTracks() {
   spine.state.setEmptyAnimation(2, 0.45);
 }
 
+// 動畫播放 wrapper：讀取 SpineClip 的 IntroMix，覆蓋 defaultMix
+// SpineClip.IntroMix (UseDefaultIntroMix=false) 比 state.defaultMix 更精確，
+// 遊戲的 SkeletonDataAsset 是靜態值，BA code 在播放時用 IntroMix 覆蓋。
+// spine.js 不知道 SpineClip，所以要這裡手動設定 entry.mixDuration。
+function setAnimationWithClipMix(track, animName, loop) {
+  const entry = setAnimationWithClipMix(track, animName, loop);
+  const cfg = CLIP_CONFIGS[animName];
+  if (cfg && !cfg.UseDefaultIntroMix) {
+    entry.mixDuration = cfg.IntroMix;
+  } else {
+    entry.mixDuration = spine.state.data.defaultMix;
+  }
+  return entry;
+}
+
 async function playTalk() {
   if (!spine) return;
   // ---- BlockInteraction constraint from reversed code ----
@@ -1272,8 +1290,8 @@ async function playTalk() {
     const pool = withVoice.length ? withVoice : talks;
     const m = pick(pool);
     const a = m.replace(/_M$/, '_A');
-    spine.state.setAnimation(1, m, false);
-    if (animNames().includes(a)) spine.state.setAnimation(2, a, false);
+    setAnimationWithClipMix(1, m, false);
+    if (animNames().includes(a)) setAnimationWithClipMix(2, a, false);
     else spine.state.setEmptyAnimation(2, 0.3);
 
     // ---- Balloon lifecycle (reversed ChatDialog.<CoDialog>d__43.MoveNext) ----
@@ -1409,8 +1427,8 @@ function startLook() {
   blockInteraction('look', true);      // mirrors [this+0xc8].Add(requester)
   state.blockInteractionOnPlay = true; // mirrors byte [+0xb0]
 
-  spine.state.setAnimation(1, 'Look_01_M', true);
-  if (has('Look_01_A')) spine.state.setAnimation(2, 'Look_01_A', true);
+  setAnimationWithClipMix(1, 'Look_01_M', true);
+  if (has('Look_01_A')) setAnimationWithClipMix(2, 'Look_01_A', true);
   log('抓眼 (hold)');
 }
 
@@ -1419,8 +1437,8 @@ function endLook() {
   state.busy = null;
   blockInteraction('look', false);
   state.blockInteractionOnPlay = false;
-  spine.state.setAnimation(1, 'LookEnd_01_M', false);
-  if (has('LookEnd_01_A')) spine.state.setAnimation(2, 'LookEnd_01_A', false);
+  setAnimationWithClipMix(1, 'LookEnd_01_M', false);
+  if (has('LookEnd_01_A')) setAnimationWithClipMix(2, 'LookEnd_01_A', false);
   after(500, () => {
     if (state.busy || patting) return;
     restTracks();
@@ -1437,8 +1455,8 @@ function startPat() {
   if (!has('Pat_01_M')) { patting = false; return; }
   clearTimers();              // interrupt an ongoing talk / look
   state.busy = 'pat';
-  spine.state.setAnimation(1, 'Pat_01_M', true);
-  if (has('Pat_01_A')) spine.state.setAnimation(2, 'Pat_01_A', true);
+  setAnimationWithClipMix(1, 'Pat_01_M', true);
+  if (has('Pat_01_A')) setAnimationWithClipMix(2, 'Pat_01_A', true);
   log('摸頭');
 }
 
@@ -1447,8 +1465,8 @@ function endPat() {
   patting = false;
   if (state.busy !== 'pat') return;
   state.busy = null;
-  spine.state.setAnimation(1, 'PatEnd_01_M', false);
-  if (has('PatEnd_01_A')) spine.state.setAnimation(2, 'PatEnd_01_A', false);
+  setAnimationWithClipMix(1, 'PatEnd_01_M', false);
+  if (has('PatEnd_01_A')) setAnimationWithClipMix(2, 'PatEnd_01_A', false);
   after(1200, () => {
     if (state.busy || patting) return;
     restTracks();
@@ -1713,7 +1731,7 @@ function playStart() {
       for (const clip of bodyClips) {
         const isIdle = clip.anim === idleClip;
         if (first) {
-          spine.state.setAnimation(0, clip.anim, isIdle, Math.max(0, clip.start));
+          setAnimationWithClipMix(0, clip.anim, isIdle, Math.max(0, clip.start));
           first = false;
         } else {
           const gap = Math.max(0, clip.start - schedEnd);
@@ -1734,7 +1752,7 @@ function playStart() {
     // completion of the intro clears the lock (see onTrackComplete).
     state.introBlock = true;
     startIntroClock();
-    const introEntry = spine.state.setAnimation(0, introName, false);
+    const introEntry = setAnimationWithClipMix(0, introName, false);
     // Hold track 0 in the setup pose for the Timeline's body start delay (Akari:
     // 3.0s — the Akari_Scene spine + opening flash run first), so the intro clip
     // runs bodyStart -> bodyStart+10.3333s and the Idle hand-off lands at
@@ -1745,7 +1763,7 @@ function playStart() {
     // bg 與本體同在 bodyStart(3s) 進場；scene 特寫從 0s 播放，本體進場（白閃）時移除。
     startBgSequence();
   } else {
-    spine.state.setAnimation(0, idleClip, true);
+    setAnimationWithClipMix(0, idleClip, true);
     startBgSequence();
   }
 }
@@ -1762,7 +1780,7 @@ function memoryLobbySkip() {
   introWindowEnd = 0;
   closeupArmAt = -1;
   removeSceneCloseup();
-  spine.state.setAnimation(0, idleClip || 'Idle_01', true);
+  setAnimationWithClipMix(0, idleClip || 'Idle_01', true);
   startBgSequence({ skip: true });
   log('skip to idle');
 }
@@ -3369,13 +3387,13 @@ async function startAnimExport() {
   }
 
   if (clipType === 'talk') {
-    spine.state.setAnimation(1, track1, false);
-    if (track2) spine.state.setAnimation(2, track2, false);
+    setAnimationWithClipMix(1, track1, false);
+    if (track2) setAnimationWithClipMix(2, track2, false);
     else spine.state.setEmptyAnimation(2, 0.3);
   } else if (clipType === 'start') {
     spine.state.setEmptyAnimation(1, 0.3);
     spine.state.setEmptyAnimation(2, 0.3);
-    spine.state.setAnimation(0, animName, false);   // animName = resolveStartClip()
+    setAnimationWithClipMix(0, animName, false);   // animName = resolveStartClip()
     startIntroClock();
   } else {
     restTracks();             // idle：清掉可能殘留的 talk/摸頭 track
@@ -4067,7 +4085,7 @@ async function loadLobby(name) {
   fitted = false;
   // frame on the Idle pose (mesh geometry only exists after a render), then play the intro
   idleClip = resolveIdleClip();
-  spine.state.setAnimation(0, idleClip, true);
+  setAnimationWithClipMix(0, idleClip, true);
   let frames = 0;
   const waitFit = () => {
     if (++frames < 3) requestAnimationFrame(waitFit);
@@ -4659,6 +4677,14 @@ async function init() {
     TIMELINES = await fetchRetry('assets/data/lobby_timelines.json').then(r => r.json());
   } catch {
     TIMELINES = null;   // 缺檔 → 走 resolveStartClip fallback
+  }
+  // SpineClip IntroMix：從 data/clip_intro_mix.json 一次載入所有動畫的 mix 資料
+  try {
+    CLIP_CONFIGS = await fetchRetry('assets/data/clip_intro_mix.json').then(r => r.json());
+  } catch (e) {
+    console.warn('[lobby] SpineClip IntroMix 載入失敗', e);
+    CLIP_CONFIGS = {};
+  }
   }
   try {
     FLASH_TABLE = normalizeFlashTable(await fetchRetry('assets/data/flash_curves.json').then(r => r.json()));
