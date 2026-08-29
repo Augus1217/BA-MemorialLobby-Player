@@ -6,9 +6,13 @@ self.addEventListener('install', (e) => self.skipWaiting());
 
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
-    // 清掉舊版本快取（ba-web.js 換版時會開新快取）
+    // 清掉舊版本快取。__baActiveCache 未定義時（SW 剛安裝、尚未收到
+    // ba-web 廣播）不可刪——否则會把所有 ba-* 快取清光，使用者卡死。
     const names = await caches.keys();
-    await Promise.all(names.filter((n) => n.startsWith(CACHE_PREFIX) && n !== self.__baActiveCache).map((n) => caches.delete(n)));
+    const keep = self.__baActiveCache;
+    if (typeof keep === 'string') {
+      await Promise.all(names.filter((n) => n.startsWith(CACHE_PREFIX) && n !== keep).map((n) => caches.delete(n)));
+    }
     await self.clients.claim();
   })());
 });

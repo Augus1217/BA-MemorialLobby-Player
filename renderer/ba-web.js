@@ -34,14 +34,16 @@ async function cache() {
   return _cache;
 }
 
-// 版本切換時清掉舊快取（tag 內容 immutable，換版即全換）
+// 版本切換時開新快取並通知 SW；舊快取延後到新包安裝成功才刪
+// （先刪後裝的話，下載中斷 = 使用者資產全毀且無法自癒）。
 async function switchVersionCache(ver) {
-  const oldVer = lsGet(LS_VERSION, '0');
   _cache = await caches.open(CACHE_PREFIX + ver);
   lsSet(LS_VERSION, ver);
-  if (oldVer !== ver && oldVer !== '0') {
-    try { await caches.delete(CACHE_PREFIX + oldVer); } catch {}
-  }
+  // 立即通知 SW 指向新快取（原本只在頁面載入 1.5s 後通知一次，
+  // 換版後 SW 永遠指向舊快取名）
+  try {
+    navigator.serviceWorker?.controller?.postMessage({ type: 'ba-cache', cache: CACHE_PREFIX + ver });
+  } catch {}
 }
 
 async function fetchRemoteVersion() {
@@ -179,7 +181,20 @@ const ba = {
     const installed = readInstalled();
     const localVersion = lsGet(LS_VERSION, null);
     const streaming = lsGet(LS_STREAMING, '1') === '1';
-    const coreOk = !!(remote?.packages && installed['core'] === remote.packages['core']?.sha256);
+    // sha 一致之外，還要驗證快取裡真的有哨兵檔——版本切換中斷會留下
+    // 「sha 已記但快取空/損毀」的狀態，不驗證的話永遠不會自癒。
+    let coreOk = !!(remote?.packages && installed['core'] === remote.packages['core']?.sha256);
+    if (coreOk) {
+      try {
+        coreOk = !!(await cacheGet('data/lobby_index.json'));
+      } catch { coreOk = false; }
+      if (!coreOk) {
+        // 快取損毀：清除安裝記錄，強制重裝
+        delete installed['core'];
+        delete installed['intro'];
+        writeInstalled(installed);
+      }
+    }
 
     let needsDownloadPacks = [];
     if (remote?.packages) {
@@ -234,7 +249,19 @@ const ba = {
         results.push({ name, ok: false, error: e.message });
       }
     }
-    if (results.some((r) => r.ok)) lsSet(LS_VERSION, meta.version);
+    if (results.some((r) => r.ok)) {
+      lsSet(LS_VERSION, meta.version);
+      // 新包安裝成功 → 通知 SW 指向新快取，並清掉其他舊快取（釋放空間）
+      try {
+        navigator.serviceWorker?.controller?.postMessage({ type: 'ba-cache', cache: CACHE_PREFIX + meta.version });
+      } catch {}
+      try {
+        const names = await caches.keys();
+        await Promise.all(names
+          .filter((n) => n.startsWith(CACHE_PREFIX) && n !== CACHE_PREFIX + meta.version)
+          .map((n) => caches.delete(n)));
+      } catch {}
+    }
     return results;
   },
 
