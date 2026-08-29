@@ -6,23 +6,12 @@
     <link rel="icon" href="./favicon.ico" />
   <title>BA Memorial Lobby</title>
   <style>
-    /* Game talk-font assets (extracted from BA bundles): M PLUS 1p (JP),
-       Noto Sans TC (TW/簡), Noto Sans (EN). Rendered offline via @font-face. */
-    @font-face {
-      font-family: 'BA MPlus1p';
-      src: url('assets/fonts/BA-MPLUS1p-Medium.ttf') format('truetype');
-      font-weight: 400; font-style: normal;
-    }
-    @font-face {
-      font-family: 'BA NotoSansTC';
-      src: url('assets/fonts/BA-NotoSansTC-Medium.otf') format('opentype');
-      font-weight: 400; font-style: normal;
-    }
-    @font-face {
-      font-family: 'BA NotoSans';
-      src: url('assets/fonts/BA-NotoSans-Regular.ttf') format('truetype');
-      font-weight: 400; font-style: normal;
-    }
+    /* Game talk-font assets moved out of static distribution: the 3 official
+       fonts (M PLUS 1p / Noto Sans TC / Noto Sans) are now registered at
+       runtime from assets/fonts/ via FontFace (served by SW cache from the
+       assets-player pack). Fallbacks (system fonts) apply until registered.
+       Only the boot font (loading/font.otf) stays @font-face for the loading
+       screen, which renders before any pack install. */
     /* BA PC mouse cursor (PCIcon_MousePoint extracted from game bundles), hotspot at arrow tip */
     html, body {
       margin: 0; padding: 0; height: 100%; overflow: hidden;

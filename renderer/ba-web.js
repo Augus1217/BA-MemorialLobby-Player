@@ -150,7 +150,7 @@ const ba = {
       const idx = await hit.json();
       return Object.keys(idx);
     }
-    const r = await fetch('./data/lobby_index.json');
+    const r = await fetch('assets/data/lobby_index.json');
     if (r.ok) return Object.keys(await r.json());
     return [];
   },

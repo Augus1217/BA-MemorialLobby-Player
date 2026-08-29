@@ -1,8 +1,10 @@
 node_modules/
-# assets/：不追蹤任何遊戲素材（全部從 Worker 串流）；只保留我們的 metadata
+# assets/：不追蹤遊戲素材（全部從 Worker 串流）。官方資料 assets/data/ 也一併
+# 撤出 public repo（改由 private Assets repo 的 core pack 串流，避免公開散佈
+# 官方遊戲資料）；只保留自製的 assets/ui/ui_i18n.json（app 自己的 UI 字典）。
 assets/*
-!assets/data/
-!assets/lobby_index.json
+!assets/ui/
+!assets/ui/ui_i18n.json
 dist/
 release/
 index.prod.html

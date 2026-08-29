@@ -70,7 +70,7 @@ let chatAnchor = null;
 let CHAT_ANCHORS = {};   // app lobby key -> { tx, ty, skY, skScale } from lobby_chat_anchors.json
 
 // ---- i18n (UI language, bound to the btnLang name-language cycle) ----
-// Dictionary: assets/data/ui_i18n.json — flat "key": text per UI lang
+// Dictionary: assets/ui/ui_i18n.json — flat "key": text per UI lang
 // (zh-TW / zh-CN / ja / en / ko). The chosen mode also drives student-name
 // fields (LANG_MODES below), so one button switches both. zh-TW is the source
 // of truth; t() falls back to it and finally to the raw key.
@@ -124,7 +124,7 @@ async function loadI18n() {
     }
   } catch {}
   try {
-    i18nDict = await fetchRetry('assets/data/ui_i18n.json').then(r => r.json());
+    i18nDict = await fetchRetry('assets/ui/ui_i18n.json').then(r => r.json());
   } catch (e) {
     console.warn('[lobby] ui_i18n 載入失敗，UI 文字退回原始碼字串', e);
     i18nDict = null;
@@ -137,6 +137,36 @@ function t(key, params) {
     ?? key;
   if (params) for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v);
   return s;
+}
+
+// ---- 聊天/對話 UI 字體：不再寫死在 index.html @font-face（官方字體不 static
+// 散佈），改為 runtime 從 assets/fonts/（pack 安裝後由 SW 快取提供）動態
+// 註冊 FontFace。未載入前以系統字體 fallback，註冊成功後瀏覽器自動重繪。
+let _fontsTries = 0;
+async function loadGameFonts() {
+  const defs = [
+    { family: 'BA MPlus1p',    file: 'assets/fonts/BA-MPLUS1p-Medium.ttf',      fmt: 'truetype' },
+    { family: 'BA NotoSansTC', file: 'assets/fonts/BA-NotoSansTC-Medium.otf',   fmt: 'opentype' },
+    { family: 'BA NotoSans',   file: 'assets/fonts/BA-NotoSans-Regular.ttf',    fmt: 'truetype' },
+  ];
+  const missing = [];
+  for (const { family, file, fmt } of defs) {
+    try {
+      const face = new FontFace(family, `url('${assetUrl(file)}') format('${fmt}')`);
+      await face.load();
+      document.fonts.add(face);
+      console.log(`[lobby] 字體已註冊: ${family}`);
+    } catch (e) {
+      missing.push(family);
+      console.warn(`[lobby] 字體 ${family} 載入失敗（pack 未裝？），退回系統字體`, e);
+    }
+  }
+  // pack 通常稍後才裝好（autoStreamBootstrap 已等完）；若仍失敗，排隊重試
+  // 幾次，讓 SW 快取就緒後自動補上。
+  if (missing.length && _fontsTries < 4) {
+    _fontsTries++;
+    setTimeout(loadGameFonts, 3000 * _fontsTries);
+  }
 }
 
 // Walk static DOM: data-i18n -> textContent, data-i18n-title -> title,
@@ -4728,6 +4758,9 @@ async function init() {
   await app.init({ resizeTo: window, antialias: true, backgroundColor: 0x05060d, autoDensity: true });
   const canvas = app.canvas;
   document.getElementById('app').appendChild(canvas);
+
+  // ---- 聊天字體：runtime 註冊（官方字體由 pack/SW 提供，不 static 散佈）----
+  loadGameFonts();
 
   // ---- BA Click FX（蔚藍檔案點擊特效；設定可關閉，切換後下次啟動生效）----
   try {

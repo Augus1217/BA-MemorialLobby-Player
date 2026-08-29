@@ -29,33 +29,27 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== location.origin) return;
   if (!url.pathname.includes('/assets/')) return;
   if (e.request.method !== 'GET') return;
-  // data/（ui_i18n、字幕表等）會隨 app 更新而變動 → network-first，
-  // 失敗才退快取；其餘大型資產（spine/voice/bgm…immutable tag 內容）維持 cache-first。
-  const networkFirst = url.pathname.includes('/assets/data/');
+  // 全部同源 assets 一律 cache-first（含 data/）：資料走 private Assets repo 的
+  // 版本化 core pack（ba-assets-v<ver>），activate 時已清掉舊版快取，故 cache
+  // 內容與 app/js 版本一致；network 只作離線/未安裝時的兜底。此模式回傳
+  // pack 安裝的內容，避免 Pages 上無 assets/data 而 network-first 產生 404。
   e.respondWith((async () => {
-    if (networkFirst) {
-      try {
-        const fresh = await fetch(e.request);
-        if (fresh.ok) {
-          const cacheNames = await caches.keys();
-          for (const n of cacheNames) {
-            if (!n.startsWith(CACHE_PREFIX)) continue;
-            const c = await caches.open(n);
-            c.put(e.request, fresh.clone());
-            break;
-          }
-        }
-        return fresh;
-      } catch {
-        // offline → fall through to cache
-      }
-    }
     const cacheNames = await caches.keys();
     for (const n of cacheNames) {
       if (!n.startsWith(CACHE_PREFIX)) continue;
-      const hit = await caches.open(n).then((c) => c.match(e.request));
+      const c = await caches.open(n);
+      const hit = await c.match(e.request);
       if (hit) return hit;
     }
-    return fetch(e.request);
+    const fresh = await fetch(e.request);
+    if (fresh.ok) {
+      const cacheNames2 = await caches.keys();
+      for (const n of cacheNames2) {
+        if (!n.startsWith(CACHE_PREFIX)) continue;
+        await caches.open(n).then((c) => c.put(e.request, fresh.clone()));
+        break;
+      }
+    }
+    return fresh;
   })());
 });

@@ -623,7 +623,7 @@ function dirStats(dir) {
 // installed.json 的 pack key → 磁碟路徑清單（與 build_assets.py 打包規則一一對應）
 function packPaths(key) {
   const assetsDir = getAssetsDir();
-  if (key === 'core') return ['data', 'students', 'ui', 'loading'].map(s => path.join(assetsDir, s));
+  if (key === 'core') return ['data', 'students', 'ui', 'loading', 'fonts'].map(s => path.join(assetsDir, s));
   if (key === 'intro') return [path.join(assetsDir, 'intro')];
   if (key.startsWith('lobby/')) {
     const nm = key.slice('lobby/'.length);
