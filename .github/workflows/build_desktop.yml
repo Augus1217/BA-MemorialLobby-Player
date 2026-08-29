@@ -38,7 +38,7 @@ jobs:
             if [ -n "$TAG" ] && [ "$TAG" != "v" ]; then
               for pkg in assets-player intro; do
                 gh release download "$TAG" --repo Augus1217/BA-MemorialLobby-Assets \
-                  --pattern "assets-${pkg}-*.tar.gz" --clobber -D . 2>/dev/null \
+                  --pattern "assets-${pkg}-*.tar.gz" --clobber -D . \
                   && echo "  ✓ $pkg ($TAG)" \
                   || echo "::warning::Failed to download ${pkg} ($TAG)"
               done
@@ -101,7 +101,7 @@ jobs:
             if [ -n "$TAG" ] && [ "$TAG" != "v" ]; then
               for pkg in assets-player intro; do
                 gh release download "$TAG" --repo Augus1217/BA-MemorialLobby-Assets \
-                  --pattern "assets-${pkg}-*.tar.gz" --clobber -D . 2>/dev/null \
+                  --pattern "assets-${pkg}-*.tar.gz" --clobber -D . \
                   && echo "  ✓ $pkg ($TAG)" \
                   || echo "::warning::Failed to download ${pkg} ($TAG)"
               done
@@ -158,7 +158,7 @@ jobs:
             if [ -n "$TAG" ] && [ "$TAG" != "v" ]; then
               for pkg in assets-player intro; do
                 gh release download "$TAG" --repo Augus1217/BA-MemorialLobby-Assets \
-                  --pattern "assets-${pkg}-*.tar.gz" --clobber -D . 2>/dev/null \
+                  --pattern "assets-${pkg}-*.tar.gz" --clobber -D . \
                   && echo "  ✓ $pkg ($TAG)" \
                   || echo "::warning::Failed to download ${pkg} ($TAG)"
               done
