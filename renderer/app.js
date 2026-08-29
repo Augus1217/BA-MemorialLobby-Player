@@ -180,6 +180,11 @@ const log = (s) => console.log('[lobby]', s);
   // SpineClip IntroMix 資料（從 assets/spine/<Lobby>/<Lobby>-*.json 讀取）
   // key = 動畫名（如 "Talk_01_M"），value = { IntroMix, UseDefaultIntroMix }
   let CLIP_CONFIGS = {};
+  // per-lobby SpineClip 互動圖（assets/data/clip_graph.json，由遊戲 bundle 的
+  // SpineClip ScriptableObject 直接解析）：key = lobby 資料夾名（如 CH0242_home）
+  // → 動畫名 → { Track, PlayMode, FinishMode, Loop, NextClip, Sync, ... }。
+  // 進階手勢沿用真實遊戲的 Track / FM=PlayNext(_01 → _02 循環) / End 命名。
+  let CLIP_GRAPH = {};
   // Title 開場喊聲索引（assets/data/title_voices.json）：
   // { "JP_Aru": ["Aru_Title.ogg"], ... } → assets/voice_title/<folder>/<file>
   let TITLE_VOICES = null;
@@ -628,26 +633,12 @@ function applyEyeFollow(self) {
 // over the base 摸頭 (Pat) on the face region for the characters that own them.
 let interactionMode = null;    // 'pinch' | 'touch' | 'handfollow' | null
 let pinchActive = false;       // pinch drag in progress
-let pinchDeep = false;         // voice/animation switched to the deeper Pinch_02
 let handFollowBone = null;     // skeleton position bone driven toward the cursor
 let handFollowActive = false;
-
-// Available memorial-lobby voices for the current lobby (media ids, lowercase).
-function reactionVoices() {
-  if (!validVoices) return [];
-  return [...validVoices].filter(v => /memoriallobby/i.test(v));
-}
-function playReactionVoice() {
-  const pool = reactionVoices();
-  if (!pool.length) return;
-  const pick = pool[Math.floor(Math.random() * pool.length)];
-  playVoice(pick);
-}
 
 function setupInteraction() {
   interactionMode = null;
   pinchActive = false;
-  pinchDeep = false;
   handFollowBone = null;
   handFollowActive = false;
   if (!spine) return;
@@ -670,53 +661,26 @@ function setupInteraction() {
 }
 
 // ---- Pinch (拖曳捏頰) ----
-// Face drag: the stretched pose loops while dragging; the farther the pointer
-// from the face anchor, the deeper the stretch (Pinch_01 -> Pinch_02). Releasing
-// plays PinchEnd + a reaction voice line.
+// 按住 → 依 clip_graph 播 Pinch_01_M（舊 lobby 直接循環 / 現代 lobby 一次後自動
+// 接 Pinch_02_M 循環）。釋放 → PinchEnd。遊戲本身即「01 一次 → 02
+// 循環」的 SpineClip 鏈（FM=PlayNext，見 clip_graph.json），不需額外距離推圖。
 function startPinch() {
   if (!spine || pinchActive) return;
   if (state.introBlock) return;
   if (state.busy === 'talk' && !isInteractionAvailable()) return;
-  if (!has('Pinch_01_M') && !has('Pinch_01')) return;
+  const main = has('Pinch_01_M') ? 'Pinch_01_M' : (has('Pinch_01') ? 'Pinch_01' : null);
+  if (!main) return;
   clearTimers();
   pinchActive = true;
-  pinchDeep = false;
   state.busy = 'pinch';
   blockInteraction('pinch', true);
-  setAnimationWithClipMix(1, has('Pinch_01_M') ? 'Pinch_01_M' : 'Pinch_01', true);
-  if (has('Pinch_01_A')) setAnimationWithClipMix(2, 'Pinch_01_A', true);
+  playHoldGesture(main);
   log('捏頰 (拖曳)');
 }
 
 function updatePinch() {
+  // 臉頰拉伸深度已由動畫自身鏈（Pinch_01→Pinch_02 循環）演進，此處保留為空。
   if (!spine || !pinchActive) return;
-  // deepen to Pinch_02 when the pointer is dragged well off the face anchor.
-  const deep = has('Pinch_02_M') || has('Pinch_02');
-  if (deep && !pinchDeep) {
-    const b = headBone();
-    if (b) {
-      const g = spine.toGlobal({ x: b.worldX, y: b.worldY });
-      if (Math.hypot(mouse.x - g.x, mouse.y - g.y) > HEAD_PAT_RADIUS * spine.scale.x * 1.5) {
-        pinchDeep = true;
-        setAnimationWithClipMix(1, has('Pinch_02_M') ? 'Pinch_02_M' : 'Pinch_02', true);
-        if (has('Pinch_02_A')) setAnimationWithClipMix(2, 'Pinch_02_A', true);
-        playReactionVoice();
-        log('捏頰 → 更深');
-      }
-    }
-  }
-  // subtle face pull toward the finger for the drag feel (Touch_Point bone)
-  const b = headBone();
-  if (b) {
-    const rest = b.parent.localToWorld({ x: b.data.x, y: b.data.y });
-    const c = spine.worldTransform.applyInverse({ x: mouse.x, y: mouse.y });
-    let dx = c.x - rest.x, dy = c.y - rest.y;
-    const d = Math.hypot(dx, dy);
-    const max = HEAD_PAT_RADIUS;
-    if (d > max) { dx *= max / d; dy *= max / d; }
-    const k = 0.25;
-    setBoneWorld(b, b.worldX + (rest.x + dx - b.worldX) * k, b.worldY + (rest.y + dy - b.worldY) * k);
-  }
 }
 
 function endPinch() {
@@ -724,50 +688,41 @@ function endPinch() {
   pinchActive = false;
   state.busy = null;
   blockInteraction('pinch', false);
-  if (has('PinchEnd_01_M')) setAnimationWithClipMix(1, 'PinchEnd_01_M', false);
-  if (has('PinchEnd_01_A')) setAnimationWithClipMix(2, 'PinchEnd_01_A', false);
-  playReactionVoice();
+  playGestureEnd(has('Pinch_01_M') ? resolveEndClip('Pinch_01_M') : 'PinchEnd_01_M');
   after(1200, () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
   log('捏頰結束');
 }
 
 // ---- Touch (戳) ----
-// Face tap / press: a quick poke (Touch_02, the 0.33 s jolt) on a short tap,
-// or the longer Touch_01 on a press; repeated pokes chain. Releasing plays the
-// TouchEnd + a reaction line.
+// 按住臉部 → Touch_01_M（一次）自動接 Touch_02_M 循環至釋放；點一下 → quick
+// poke（._01 短暫後 immediately TouchEnd）。釋放播 TouchEnd —— CH0347 底線
+// 版 Touch_End_01_M 由 resolveEndClip 解析。移除舊的 700ms 硬排程（遊戲是
+// press-and-hold，非 tap-and-release-after-timeout）。
 function startTouch() {
   if (!spine) return;
   if (state.introBlock) return;
   if (state.busy === 'talk' && !isInteractionAvailable()) return;
-  if (!has('Touch_01_M') && !has('Touch_02_M')) return;
+  const main = has('Touch_01_M') ? 'Touch_01_M' : (has('Touch_02_M') ? 'Touch_02_M' : null);
+  if (!main) return;
   clearTimers();
   state.busy = 'touch';
   blockInteraction('touch', true);
-  const now = performance.now();
-  const quick = (now - (touchLastAt || 0)) < 900;   // rapid poke → jolt variant
-  touchLastAt = now;
-  let clip = has('Touch_01_M') ? 'Touch_01_M' : null;
-  if (has('Touch_02_M') && quick) clip = 'Touch_02_M';
-  if (clip) setAnimationWithClipMix(1, clip, false);
-  playReactionVoice();
-  after(700, () => endTouch());
-  log(quick ? '戳 (poke)' : '觸摸');
+  playHoldGesture(main);
+  log('戳 / 觸摸');
 }
-let touchLastAt = 0;
-
 function endTouch() {
   if (!spine || state.busy !== 'touch') return;
   state.busy = null;
   blockInteraction('touch', false);
-  if (has('TouchEnd_01_M')) setAnimationWithClipMix(1, 'TouchEnd_01_M', false);
+  playGestureEnd(resolveEndClip('Touch_01_M'));
   after(1200, () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
   log('觸摸結束');
 }
 
 // ---- HandFollow (手部跟隨) ----
-// Drag anywhere: the character's hand tracks the cursor via a position/IK bone
-// (like the eye follow), HandFollow_01 loops while moving and HandFollow_02 pulses
-// on drag. Release plays HandFollowEnd + a reaction line.
+// 拖曳任意處：hand bone 朝指標移動（eased），動畫走 HandFollow_01→02 循環鏈
+// （CH0310 Track2 / CH0334 Track1）。釋放播 HandFollowEnd。移除舊的
+// pointer-move pulse 換圖——遊戲的 02 是循環維持，由 PlayNext 鏈自動接上。
 function startHandFollow() {
   if (!spine || handFollowActive) return;
   if (state.introBlock) return;
@@ -777,9 +732,7 @@ function startHandFollow() {
   handFollowActive = true;
   state.busy = 'handfollow';
   blockInteraction('handfollow', true);
-  setAnimationWithClipMix(1, 'HandFollow_01_M', true);
-  if (has('HandFollow_01_A')) setAnimationWithClipMix(2, 'HandFollow_01_A', true);
-  playReactionVoice();
+  playHoldGesture('HandFollow_01_M');
   log('手部跟隨');
 }
 
@@ -796,21 +749,6 @@ function updateHandFollow() {
   setBoneWorld(handFollowBone,
     handFollowBone.worldX + (rest.x + dx - handFollowBone.worldX) * k,
     handFollowBone.worldY + (rest.y + dy - handFollowBone.worldY) * k);
-  // pulse HandFollow_02 once-swap while the pointer moves quickly, then restore
-  // the HandFollow_01 loop once the 0.2 s pulse on track 1 completes (otherwise
-  // the arm would drop to the idle pose mid-drag).
-  const now = performance.now();
-  if (has('HandFollow_02_M') && !state.blockInteractionOnPlay) {
-    if (updateHandFollow._lx === undefined) updateHandFollow._lx = mouse.x;
-    const moving = Math.abs(mouse.x - updateHandFollow._lx) > 4;
-    if (moving && now - (updateHandFollow._last || 0) > 600) {
-      updateHandFollow._last = now;
-      setAnimationWithClipMix(1, 'HandFollow_02_M', false);
-    } else if (!spine.state.getCurrent(1)) {
-      setAnimationWithClipMix(1, 'HandFollow_01_M', true);
-    }
-    updateHandFollow._lx = mouse.x;
-  }
 }
 
 function endHandFollow() {
@@ -818,9 +756,7 @@ function endHandFollow() {
   handFollowActive = false;
   state.busy = null;
   blockInteraction('handfollow', false);
-  if (has('HandFollowEnd_01_M')) setAnimationWithClipMix(1, 'HandFollowEnd_01_M', false);
-  if (has('HandFollowEnd_01_A')) setAnimationWithClipMix(2, 'HandFollowEnd_01_A', false);
-  playReactionVoice();
+  playGestureEnd(resolveEndClip('HandFollow_01_M'));
   after(1400, () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
   log('手部跟隨結束');
 }
@@ -1243,8 +1179,11 @@ function clearTimers() {
 
 function restTracks() {
   if (!spine) return;
+  // Track 5：CH0346 Touch 系動畫運行於 Track 5；Track 2：Pinch/HandFollow Sync
+  // （Pinch_01_A）+ 舊 lobby Pat/Look 的 _A。只處理互動軌，idle(track0) 不碰。
   spine.state.setEmptyAnimation(1, 0.45);
   spine.state.setEmptyAnimation(2, 0.45);
+  spine.state.setEmptyAnimation(5, 0.45);
 }
 
 // 動畫播放 wrapper：讀取 SpineClip 的 IntroMix，覆蓋 defaultMix
@@ -1260,6 +1199,95 @@ function setAnimationWithClipMix(track, animName, loop) {
     entry.mixDuration = spine.state.data.defaultMix;
   }
   return entry;
+}
+
+function addAnimationWithClipMix(track, animName, loop, delay = 0) {
+  const entry = spine.state.addAnimation(track, animName, loop, delay);
+  const cfg = CLIP_CONFIGS[animName];
+  if (cfg && !cfg.UseDefaultIntroMix) {
+    entry.mixDuration = cfg.IntroMix;
+  } else {
+    entry.mixDuration = spine.state.data.defaultMix;
+  }
+  return entry;
+}
+
+// ---- per-lobby clip graph (資產 clip_graph.json) ----
+// 回傳目前 lobby 的某動畫 SpineClip 設定，無此 lobby / 動畫時回傳 null（非特殊
+// lobby 保持既有行為）。欄位直接來自遊戲解剖：Track、Loop、FinishMode(PlayNext=3,
+// 播完接 NextClip)、Sync（同一 Clip 於另一 Track 同時播放）、BlockInteractionOnPlay。
+function clipCfg(name) {
+  const L = CLIP_GRAPH && CLIP_GRAPH[currentLobby];
+  return (L && L[name]) || null;
+}
+
+// 依遊戲資料播「按住手勢」動畫：
+//   * 現代 lobby（Loop=false, FinishMode=PlayNext）：_01_M 播一次後自動接
+//     NextClip（_02_M, Loop）並維持循環——按住期間即 02 循環。
+//   * 舊 lobby（Loop=true）：直接循環 _01_M。
+//   * Sync 清單（如 CH0242 Pinch_01_A）依各自 Track 同時播放。
+// syncHint：無 clip_graph 資料（一般 lobby）時的手動 _A 對應清單。
+function playHoldGesture(main, syncHint = null) {
+  if (!spine || !has(main)) return null;
+  spine.state.setEmptyAnimation(3, 0);   // 暫停眼球隨機眨眼 overlay（Eye_Close_01）
+  const cfg = clipCfg(main);
+  const track = cfg ? (cfg.Track || 1) : 1;
+  if (cfg && !cfg.Loop) {
+    setAnimationWithClipMix(track, main, false);
+    // FM=PlayNext 的續播目標：優先吃圖裡的 NextClip；遇到圖為 null 但存在同族
+    // _02（例：CH0346 Touch_02_M 於 Track5）時直接接上，維持按住循環的遊戲行為。
+    let next = cfg.NextClip;
+    if (!next) {
+      const sib = main.replace(/_(0\d)(_M)?$/, '_02$2');
+      if (sib !== main && has(sib)) next = sib;
+    }
+    if (next && has(next)) addAnimationWithClipMix(track, next, true, 0);
+  } else {
+    setAnimationWithClipMix(track, main, true);
+  }
+  let syncs = cfg ? (cfg.Sync || []) : (syncHint || []);
+  for (const s0 of syncs) {
+    const s = (typeof s0 === 'string') ? s0 : (s0.name || s0);
+    if (!s || !has(s)) continue;
+    const scfg = clipCfg(s);
+    setAnimationWithClipMix(scfg ? (scfg.Track || 2) : 2, s, scfg ? !!scfg.Loop : true);
+  }
+  return cfg;
+}
+
+// 釋放時播放 End 動畫（從 mainName 依遊戲命名規則解析：
+// TouchStart→TouchEnd / Touch_End，HandFollow→HandFollowEnd 等），含 Sync 對應。
+function playGestureEnd(endName) {
+  if (!spine || !has(endName)) return;
+  spine.state.setEmptyAnimation(3, 0);   // 收斂時同樣暫停眨眼 overlay
+  const cfg = clipCfg(endName);
+  const track = cfg ? (cfg.Track || 1) : 1;
+  setAnimationWithClipMix(track, endName, false);
+  const twin = endName.replace(/_M$/, '_A');
+  let syncs = cfg ? (cfg.Sync || []) : null;
+  if (!syncs || !syncs.length) syncs = has(twin) ? [twin] : [];
+  for (const s0 of syncs) {
+    const s = (typeof s0 === 'string') ? s0 : (s0.name || s0);
+    if (!s || !has(s)) continue;
+    const scfg = clipCfg(s);
+    setAnimationWithClipMix(scfg ? (scfg.Track || 2) : 2, s, false);
+  }
+}
+
+// 依「_01_M → End_01_M / _End_01_M」的遊戲命名對照找出釋放動畫（吃 CH0347
+// 底線版 Touch_End_01_M，也吃一般 TouchEnd_01_M）。
+function resolveEndClip(mainName) {
+  const candidates = [
+    mainName.replace(/_(0\d)_M$/, 'End_01_M'),
+    mainName.replace(/_(0\d)_M$/, '_End_01_M')
+  ];
+  if (/^Pat2_/.test(mainName)) {
+    candidates.unshift(mainName.replace(/^Pat2_(0\d)_M$/, 'PatEnd2_01_M'));
+  }
+  for (const c of candidates) {
+    if (has(c)) return c;
+  }
+  return candidates[0];
 }
 
 async function playTalk() {
@@ -1408,12 +1436,14 @@ function nextVoiceToken() { return ++voiceToken; }
 // Look (抓眼) — a hold interaction, VERIFIED:
 //   * BA2LW recreation (Look.cs) uses IPointerDownHandler/IPointerUpHandler, so
 //     Look = press-and-hold, not a tap.
-//   * SpineClip assets (SpineLobbies/*_home/*.json) show Look_01_M Loop=1 (loop
-//     while held) and LookEnd_01_M/LookEnd_01_A Loop=0 (release). Look_01_M is a
-//     single-keyframe pose on the eye-globe bones (dur 0.00) — it flags "look
-//     mode"; the actual eye tracking is the per-frame Touch_Eye bone movement
-//     that applyEyeFollow() performs (see setupEyes), which the face transform
-//     constraints relay to the eyes.
+//   * SpineClip assets (clip_graph.json, 直接解析自遊戲 bundle) show the hold
+//     semantics per lobby: 現代 lobby Look_01_M Loop=0 + FinishMode=PlayNext →
+//     Look_02_M Loop=1（CH0310 全部 Track2）；舊 lobby Look_01_M Loop=1（直接
+//     循環）。釋放播 LookEnd_01_M（CH0326 有 Sync LookEnd_01_A）。
+//   * Look_01_M is a single-keyframe pose on the eye-globe bones (dur 0.00) — it
+//     flags "look mode"; the actual eye tracking is the per-frame Touch_Eye bone
+//     movement that applyEyeFollow() performs (see setupEyes), which the face
+//     transform constraints relay to the eyes.
 // On release the LookEnd plays and Touch_Eye eases back to its setup pose.
 // BodyTouchCB carries no screen coordinate, so Pat-vs-Look is routed here by the
 // head region test (Touch_Eye/Touch_Point anchor).
@@ -1430,8 +1460,9 @@ function startLook() {
   blockInteraction('look', true);      // mirrors [this+0xc8].Add(requester)
   state.blockInteractionOnPlay = true; // mirrors byte [+0xb0]
 
-  setAnimationWithClipMix(1, 'Look_01_M', true);
-  if (has('Look_01_A')) setAnimationWithClipMix(2, 'Look_01_A', true);
+  // 依 clip_graph：現代 lobby = Look_01_M 一次 → Look_02_M 循環（Track 依圖）；
+  // 舊 lobby = Loop=true 直接循環。Sync（如 Look_01_A）同現行規則。
+  playHoldGesture('Look_01_M', has('Look_01_A') ? ['Look_01_A'] : null);
   log('抓眼 (hold)');
 }
 
@@ -1440,8 +1471,7 @@ function endLook() {
   state.busy = null;
   blockInteraction('look', false);
   state.blockInteractionOnPlay = false;
-  setAnimationWithClipMix(1, 'LookEnd_01_M', false);
-  if (has('LookEnd_01_A')) setAnimationWithClipMix(2, 'LookEnd_01_A', false);
+  playGestureEnd(resolveEndClip('Look_01_M'));
   after(500, () => {
     if (state.busy || patting) return;
     restTracks();
@@ -1450,17 +1480,25 @@ function endLook() {
   log('抓眼結束');
 }
 
+// CH0346/CH0347 同時帶 Pat 與 Pat2 兩組摸頭（骨骼/觸發區完全相同，SpineClip 欄位
+// 除名稱外無差異——遊戲端差異只在 prefab 對應的觸碰區，本地無該資料）。以隨機
+// 交替模擬其兩組動畫皆有可播放性的行為（對應遊戲 UILobby.MemoryRandom 圖樣）。
+function pickPatGroup() {
+  return has('Pat2_01_M') && Math.random() < 0.5 ? 'Pat2' : 'Pat';
+}
+
 function startPat() {
   if (!spine || patting) return;
   if (state.introBlock) return;                 // intro timeline locks input
   if (state.busy === 'talk' && !isInteractionAvailable()) return; // blocked by dialog
   patting = true;
-  if (!has('Pat_01_M')) { patting = false; return; }
+  state.patGroup = pickPatGroup();
+  const main = state.patGroup + '_01_M';
+  if (!has(main)) { patting = false; state.patGroup = null; return; }
   clearTimers();              // interrupt an ongoing talk / look
   state.busy = 'pat';
-  setAnimationWithClipMix(1, 'Pat_01_M', true);
-  if (has('Pat_01_A')) setAnimationWithClipMix(2, 'Pat_01_A', true);
-  log('摸頭');
+  playHoldGesture(main, has(state.patGroup + '_01_A') ? [state.patGroup + '_01_A'] : null);
+  log('摸頭 (' + state.patGroup + ')');
 }
 
 function endPat() {
@@ -1468,8 +1506,9 @@ function endPat() {
   patting = false;
   if (state.busy !== 'pat') return;
   state.busy = null;
-  setAnimationWithClipMix(1, 'PatEnd_01_M', false);
-  if (has('PatEnd_01_A')) setAnimationWithClipMix(2, 'PatEnd_01_A', false);
+  const main = (state.patGroup || 'Pat') + '_01_M';
+  state.patGroup = null;
+  playGestureEnd(resolveEndClip(main));
   after(1200, () => {
     if (state.busy || patting) return;
     restTracks();
@@ -1481,6 +1520,18 @@ function endPat() {
 function scheduleAutonomy() {
   clearTimeout(state.autonomy);
   state.autonomy = null;
+  // 隨機眨眼（遊戲 Eye_Close_01：Track 3, PlayMode=RandomTiming, FM=PlayIdle）。
+  // 僅在閒置無互動時排程；gesture 開始會 clearTimers() 取消，結束後再恢復。
+  if (!spine || state.introBlock) return;
+  if (state.busy || state.blockInteractionOnPlay) return;
+  if (!has('Eye_Close_01')) return;
+  state.autonomy = setTimeout(() => {
+    if (!spine || state.busy || state.introBlock) return;
+    if (state.blockInteractionOnPlay || !has('Eye_Close_01')) return;
+    setAnimationWithClipMix(3, 'Eye_Close_01', false);
+    const d = spine.state.data.skeletonData.findAnimation('Eye_Close_01');
+    state.autonomy = setTimeout(scheduleAutonomy, (d ? d.duration : 0.4) * 1000 + 700);
+  }, 1800 + Math.random() * 4200);
 }
 
 // ---- idle clip switching (reversed PortraitSpineCharacter.set_ClipToPlayOnIdle) ----
@@ -4245,6 +4296,45 @@ function isHeadRegion(sx, sy) {
   return Math.hypot(sx - g.x, sy - g.y) <= r;
 }
 
+// 臉頰（Touch_Point 骨）區：骨架自帶 Touch_Point_Key_press / Touch_Point_Rot_press
+// 按壓 keyframe（例：CH0347），即「特別反應」的嵌入點——Pinch/Touch/HandFollow 按
+// 住該區播放，頭區維持 Pat/Pat2 摸頭。
+let faceAnchorBone = null;
+const FACE_PAT_RADIUS = 85;    // spine units around the Touch_Point cheek anchor
+const FACE_GESTURE = { pinch: 'Pinch', touch: 'Touch', handfollow: 'HandFollow' };
+function faceBone() {
+  if (faceAnchorBone) return faceAnchorBone;
+  if (!spine) return null;
+  faceAnchorBone =
+    spine.skeleton.findBone('Touch_Point') ||
+    spine.skeleton.findBone('Touch_Eye') ||
+    null;
+  return faceAnchorBone;
+}
+// 該 lobby 是否擁有某特別手勢（依實際 clip 名稱判斷，相容舊 lobby）。
+function ownsFaceGesture(mode) {
+  const base = FACE_GESTURE[mode];
+  if (!base) return false;
+  return animNames().some(n => n.startsWith(base + '_'));
+}
+function isFaceRegion(sx, sy) {
+  const b = faceBone();
+  if (!b) return false;
+  const g = spine.toGlobal({ x: b.worldX, y: b.worldY });
+  const r = FACE_PAT_RADIUS * spine.scale.x;
+  return Math.hypot(sx - g.x, sy - g.y) <= r;
+}
+
+// 按住區路由：臉頰→特別手勢（Pinch/Touch/HandFollow），頭→Pat/Pat2，其餘→Look。
+// 特別 lobby 在臉頰區保留特別反應，頭區仍可撫摸（Pat/Pat2 交替）。
+function gestureForHold(sx, sy) {
+  if (interactionMode && ownsFaceGesture(interactionMode) && isFaceRegion(sx, sy)) {
+    return interactionMode;
+  }
+  if (isHeadRegion(sx, sy)) return 'head';
+  return 'look';
+}
+
 // ---- input: tap → Talk, press-and-hold / press-and-drag → Look, on head → Pat ----
 // VERIFIED interaction model (JP community wiki wikiru + GameWith + NoxPlayer):
 //   * tap               → Talk (one-shot _M + _A + voice)
@@ -4263,13 +4353,13 @@ function onPointerDown(e) {
   downPos = { x: e.clientX, y: e.clientY };
   longPressTimer = setTimeout(() => {
     if (downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) < 10) {
-      // Hold gesture: on the head region → Pat (or the special Pinch/Touch when
-      // the lobby owns it), anywhere else → Look (or HandFollow when owned).
-      if (interactionMode === 'pinch') startPinch();
-      else if (isHeadRegion(e.clientX, e.clientY)) {
-        if (interactionMode === 'touch') startTouch();
-        else startPat();
-      } else if (interactionMode === 'handfollow') startHandFollow();
+      // Hold gesture: cheek → the lobby's special Pinch/Touch/HandFollow when it
+      // owns one, head → Pat (or Pat2 alternate), anywhere else → Look.
+      const g = gestureForHold(e.clientX, e.clientY);
+      if (g === 'pinch') startPinch();
+      else if (g === 'touch') startTouch();
+      else if (g === 'handfollow') startHandFollow();
+      else if (g === 'head') startPat();
       else startLook();
     }
   }, 420);
@@ -4286,12 +4376,17 @@ function onPointerMove(e) {
   if (longPressTimer && downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 7) {
     clearTimeout(longPressTimer);
     if (state.busy === null) {
-      // Special gestures first: HandFollow owns any drag, Pinch owns the face drag.
-      if (interactionMode === 'handfollow' && has('HandFollow_01_M')) startHandFollow();
-      else if (isHeadRegion(downPos.x, downPos.y)) {
-        if (interactionMode === 'pinch') startPinch();
-        else startPat();
-      } else startLook();
+      // HandFollow owns any drag (hand chases the finger anywhere) — the wiki's
+      //特有手札 lesson: 掻きむしり/手に乗せる follow the finger; Pinch/Touch own
+      // only the cheek (Touch_Point) gesture, head keeps Pat, rest is Look.
+      if (interactionMode === 'handfollow' && has('HandFollow_01_M')) { startHandFollow(); }
+      else {
+        const g = gestureForHold(downPos.x, downPos.y);
+        if (g === 'pinch') startPinch();
+        else if (g === 'touch') startTouch();
+        else if (g === 'head') startPat();
+        else startLook();
+      }
     }
   }
   hud.classList.toggle('idle', performance.now() - userActiveAt > 2600);
@@ -4307,7 +4402,7 @@ function onPointerUp(e) {
     // is active is ignored — the hold branches below handle the release.
     if (dt < 340 && d < 10 && !state.introBlock && state.busy !== 'look' &&
         state.busy !== 'pat' && state.busy !== 'pinch' && state.busy !== 'handfollow' && state.busy !== 'touch') {
-      if (interactionMode === 'touch' && isHeadRegion(e.clientX, e.clientY)) startTouch();
+      if (interactionMode === 'touch' && isFaceRegion(e.clientX, e.clientY)) startTouch();
       else playTalk();
     }
   }
@@ -4702,6 +4797,13 @@ async function init() {
   } catch (e) {
     console.warn('[lobby] SpineClip IntroMix 載入失敗', e);
     CLIP_CONFIGS = {};
+  }
+  // per-lobby SpineClip 互動圖（Track/Loop/NextClip/Sync 直接來自遊戲 bundle）
+  try {
+    CLIP_GRAPH = await fetchRetry('assets/data/clip_graph.json').then(r => r.json());
+  } catch (e) {
+    console.warn('[lobby] SpineClip 互動圖載入失敗', e);
+    CLIP_GRAPH = {};
   }
   // Title 開場喊聲索引
   try {
