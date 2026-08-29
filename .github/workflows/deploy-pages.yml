@@ -47,6 +47,10 @@ jobs:
           else
             echo "Assets already present, skipping download"
           fi
+          # 官方 ui 圖（氣泡/游標）不得進 Pages：delete 使其 url() 保持 runtime
+          # 解析（SW 由 assets-player/core pack 提供），避免 vite 打包成 hash 洩漏。
+          rm -f assets/ui/Common_Balloon_Type2.png assets/ui/Lobby_balloon.png \
+                assets/ui/Lobby_balloon2.png assets/ui/PCIcon_MousePoint.png
           true
       - run: npm run build
       - uses: actions/configure-pages@v5
