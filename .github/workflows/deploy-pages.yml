@@ -25,22 +25,21 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Download game assets from Worker
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ ! -d assets/bgm ]; then
-            echo "=== Downloading game assets from Assets repo release ==="
-            TAG="v$(curl -sf https://ba-assets.imlindora.workers.dev/latest/assets_version.json | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || echo "")"
-            if [ -n "$TAG" ] && [ "$TAG" != "v" ]; then
+            echo "=== Downloading game assets from Worker ==="
+            WORKER_BASE="https://ba-assets.imlindora.workers.dev"
+            VER=$(curl -sf "$WORKER_BASE/latest/assets_version.json" | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || echo "")
+            if [ -n "$VER" ]; then
               for pkg in assets-player intro; do
-                gh release download "$TAG" --repo Augus1217/BA-MemorialLobby-Assets \
-                  --pattern "assets-${pkg}-*.tar.gz" --clobber -D . \
-                  && echo "  ✓ $pkg ($TAG)" \
-                  || echo "::warning::Failed to download ${pkg} ($TAG)"
-              done
-              # 解壓所有已下載的 tar.gz
-              for f in assets-assets-player-*.tar.gz assets-intro-*.tar.gz; do
-                [ -f "$f" ] && tar xzf "$f" -C . && rm -f "$f"
+                # tar_pack 檔名格式：assets-<key>-v<ver>.tar.gz（assets- 前綴）
+                URL="$WORKER_BASE/v${VER}/assets-${pkg}-v${VER}.tar.gz"
+                if curl -sf "$URL" -o /tmp/pkg.tar.gz && tar xzf /tmp/pkg.tar.gz -C .; then
+                  echo "  ✓ $pkg (v${VER})"
+                else
+                  echo "::warning::Failed to download ${pkg} (v${VER}), build will use any local assets"
+                fi
+                rm -f /tmp/pkg.tar.gz
               done
             else
               echo "::warning::Failed to resolve version, build will use any local assets"
@@ -48,6 +47,7 @@ jobs:
           else
             echo "Assets already present, skipping download"
           fi
+          true
       - run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
