@@ -4711,6 +4711,36 @@ async function showAssetDownload(assetInfo) {
   });
 }
 
+// 官方 boot 素材（title.webm / spinner.png / font.otf）只存在 private Assets
+// core pack，執行期由 web 的 SW cache 或桌面的 userData（app://）串流提供，
+// 不進 Player repo。首頁剛載入時（SW 尚未裝好 core、或桌面 core 還在下載）
+// 這些引用會 404 退化；等到 core 就緒後呼叫本函式重新觸發載入，讓標題影片／
+// 轉圈／官方字體在 boot 畫面補出。重設 src 前先 removeAttribute 以強制重送請求。
+async function applyBootAssets() {
+  const url = (p) => assetUrl(p);
+  const v = document.getElementById('loadingVideo');
+  if (v) {
+    const src = v.querySelector('source');
+    if (src) src.remove();
+    v.removeAttribute('src');
+    v.src = url('assets/loading/title.webm');
+    try { v.load(); } catch {}
+  }
+  const s = document.getElementById('loadingSpinner');
+  if (s) {
+    s.removeAttribute('src');
+    s.src = url('assets/loading/spinner.png');
+  }
+  // 官方 boot 字體：@font-face 首屏失敗不會自動重試，改以 FontFace 顯式註冊
+  try {
+    if (!document.fonts.check('1em "BA Font"')) {
+      const f = new FontFace('BA Font', `url("${url('assets/loading/font.otf')}")`);
+      await f.load();
+      document.fonts.add(f);
+    }
+  } catch { /* 首屏無素材時靜默降級系統字體 */ }
+}
+
 async function init() {
   // ---- intro PV 音軌（pv-a.ogg）：一啟動就起播，不等更新檢查／下載 ----
   // （web 首訪 intro 包未裝時 introMedia 為 null → 靜默跳過；showTapToStart 會補播）
@@ -4754,6 +4784,10 @@ async function init() {
       console.warn('[lobby] Asset check failed/skipped:', e.message);
     }
   }
+
+  // core 裝好（已安裝或剛自動補齊）後，重新觸發 boot 官方素材載入
+  // （首屏 SW/檔案尚無素材時的 404 會在這裡補回）
+  applyBootAssets();
 
   await app.init({ resizeTo: window, antialias: true, backgroundColor: 0x05060d, autoDensity: true });
   const canvas = app.canvas;
