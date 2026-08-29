@@ -36,7 +36,7 @@ jobs:
             echo "=== Downloading game assets from Assets repo release ==="
             TAG="v$(curl -sf https://ba-assets.imlindora.workers.dev/latest/assets_version.json | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || echo "")"
             if [ -n "$TAG" ] && [ "$TAG" != "v" ]; then
-              for pkg in assets_assets-player intro; do
+              for pkg in assets-player intro; do
                 gh release download "$TAG" --repo Augus1217/BA-MemorialLobby-Assets \
                   --pattern "assets-${pkg}-*.tar.gz" --clobber -D . 2>/dev/null \
                   && echo "  ✓ $pkg ($TAG)" \
@@ -99,7 +99,7 @@ jobs:
             echo "=== Downloading game assets from Assets repo release ==="
             TAG="v$(curl -sf https://ba-assets.imlindora.workers.dev/latest/assets_version.json | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || echo "")"
             if [ -n "$TAG" ] && [ "$TAG" != "v" ]; then
-              for pkg in assets_assets-player intro; do
+              for pkg in assets-player intro; do
                 gh release download "$TAG" --repo Augus1217/BA-MemorialLobby-Assets \
                   --pattern "assets-${pkg}-*.tar.gz" --clobber -D . 2>/dev/null \
                   && echo "  ✓ $pkg ($TAG)" \
@@ -156,7 +156,7 @@ jobs:
             echo "=== Downloading game assets from Assets repo release ==="
             TAG="v$(curl -sf https://ba-assets.imlindora.workers.dev/latest/assets_version.json | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || echo "")"
             if [ -n "$TAG" ] && [ "$TAG" != "v" ]; then
-              for pkg in assets_assets-player intro; do
+              for pkg in assets-player intro; do
                 gh release download "$TAG" --repo Augus1217/BA-MemorialLobby-Assets \
                   --pattern "assets-${pkg}-*.tar.gz" --clobber -D . 2>/dev/null \
                   && echo "  ✓ $pkg ($TAG)" \
