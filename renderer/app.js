@@ -18,19 +18,20 @@ const loadingText = document.getElementById('loadingText');
 const errEl = document.getElementById('err');
 const fadeEl = document.getElementById('fade');
 const whiteFlashEl = document.getElementById('whiteflash');
-const btnPrev = document.getElementById('btnPrev');
-const btnNext = document.getElementById('btnNext');
-const btnBgm = document.getElementById('btnBgm');
 const btnSkip = document.getElementById('btnSkip');
-const btnLang = document.getElementById('btnLang');
-const btnFull = document.getElementById('btnFull');
 const btnStudents = document.getElementById('btnStudents');
 const sidePanel = document.getElementById('sidePanel');
 const sbSearch = document.getElementById('sbSearch');
 const sbList = document.getElementById('sbList');
 const sbClose = document.getElementById('sbClose');
-const btnExport = document.getElementById('btnExport');
-const btnSettings = document.getElementById('btnSettings');
+const btnCtlBgm = document.getElementById('btnCtlBgm');
+const btnCtlFull = document.getElementById('btnCtlFull');
+const btnCtlFocus = document.getElementById('btnCtlFocus');
+const btnCtlExport = document.getElementById('btnCtlExport');
+const btnCtlSettings = document.getElementById('btnCtlSettings');
+const btnCtlVignette = document.getElementById('btnCtlVignette');
+const ctlVoiceSegs = document.getElementById('ctlVoiceSegs');
+const fxEl = document.getElementById('fx');
 const exportPanel = document.getElementById('exportPanel');
 const expChar = document.getElementById('expChar');
 const expStart = document.getElementById('expStart');
@@ -69,7 +70,7 @@ const chatText = document.getElementById('chatText');
 let chatAnchor = null;
 let CHAT_ANCHORS = {};   // app lobby key -> { tx, ty, skY, skScale } from lobby_chat_anchors.json
 
-// ---- i18n (UI language, bound to the btnLang name-language cycle) ----
+// ---- i18n (UI language, bound to the settings/側欄語言 cycle) ----
 // Dictionary: assets/ui/ui_i18n.json — flat "key": text per UI lang
 // (zh-TW / zh-CN / ja / en / ko). The chosen mode also drives student-name
 // fields (LANG_MODES below), so one button switches both. zh-TW is the source
@@ -116,7 +117,7 @@ function detectUiLang() {
 async function loadI18n() {
   uiLang = detectUiLang();
   // Keep the name-language mode in sync so character names follow the UI
-  // language on first load / explicit override; btnLang re-syncs afterwards.
+  // language on first load / explicit override; 設定切語言後再同步。
   try {
     if (fromUrlLang() || !localStorage.getItem('ba_lang')) {
       localStorage.setItem('ba_lang', uiLang);
@@ -137,6 +138,45 @@ function t(key, params) {
     ?? key;
   if (params) for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v);
   return s;
+}
+
+// ---- 側欄控制區文字：自建小字典，不依賴 pack 的 ui_i18n（SW 快取會蓋過
+// Pages 副本，改 pack 字典需整個資源重建）。放 app.js 立即對所有語言生效。
+const CTL_I18N = {
+  bgm:       { 'zh-TW': '音樂',          'zh-CN': '音乐',      'ja': '音楽',                'en': 'Music',                'ko': '음악' },
+  full:      { 'zh-TW': '全螢幕',        'zh-CN': '全屏',      'ja': 'フルスクリーン',      'en': 'Fullscreen',           'ko': '전체 화면' },
+  fullExit:  { 'zh-TW': '結束全螢幕',    'zh-CN': '退出全屏',  'ja': 'フルスクリーン解除',  'en': 'Exit fullscreen',      'ko': '전체 화면 종료' },
+  focus:     { 'zh-TW': '專注模式',      'zh-CN': '专注模式',  'ja': 'フォーカスモード',    'en': 'Focus mode',           'ko': '집중 모드' },
+  export:    { 'zh-TW': '匯出影片',      'zh-CN': '导出视频',  'ja': '動画を書き出す',      'en': 'Export video',         'ko': '영상 내보내기' },
+  settings:  { 'zh-TW': '設定',          'zh-CN': '设置',      'ja': '設定',                'en': 'Settings',             'ko': '설정' },
+  vignette:  { 'zh-TW': '電影燈光效果',  'zh-CN': '电影灯光效果', 'ja': '映画ライト効果',    'en': 'Cinematic lighting',   'ko': '시네마 조명 효과' },
+  voiceLang: { 'zh-TW': '語音',          'zh-CN': '语音',      'ja': 'ボイス',              'en': 'Voice',                'ko': '보이스' },
+  voiceJp:   { 'zh-TW': '日文',          'zh-CN': '日文',      'ja': '日本語',              'en': 'JP',                   'ko': '일본어' },
+  voiceKr:   { 'zh-TW': '韓文',          'zh-CN': '韩文',      'ja': '韓国語',              'en': 'KR',                   'ko': '한국어' },
+};
+
+function ctlText(key) {
+  const m = CTL_I18N[key];
+  return m ? (m[i18nTag(uiLang)] || m['zh-TW'] || key) : key;
+}
+
+function applyCtlI18n() {
+  const setLabel = (key, el) => {
+    if (!el) return;
+    const tt = el.querySelector?.('.tt');
+    if (tt) tt.textContent = ctlText(key);
+    el.title = ctlText(key);
+  };
+  setLabel('bgm', btnCtlBgm);
+  setLabel('export', btnCtlExport);
+  setLabel('settings', btnCtlSettings);
+  setLabel('focus', btnCtlFocus);
+  setLabel('vignette', btnCtlVignette);
+  const vl = document.getElementById('ctlVoiceLbl');
+  if (vl) vl.textContent = ctlText('voiceLang');
+  for (const b of (ctlVoiceSegs?.querySelectorAll('button') ?? [])) {
+    b.textContent = ctlText(b.dataset.ck || (b.dataset.v === 'kr' ? 'voiceKr' : 'voiceJp'));
+  }
 }
 
 // ---- 聊天/對話 UI 字體：不再寫死在 index.html @font-face（官方字體不 static
@@ -1108,7 +1148,7 @@ function retryBgmIfSilent() {
 
 function toggleBgm() {
   bgmOn = !bgmOn;
-  btnBgm.classList.toggle('off', !bgmOn);
+  btnCtlBgm.classList.toggle('off', !bgmOn);
   if (!bgmOn && bgmAudio) {
     bgmAudio.pause();
   } else if (bgmOn) {
@@ -2951,6 +2991,7 @@ function setUiLanguage(mode) {
   if (currentLobby) renderStudentName(currentLobby);
   if (sidePanel.classList.contains('open')) renderSidebar();
   syncSettingsLangSegs();
+  applyCtlI18n();
   log(t('log.lang', { label: langLabel(langMode), ui: i18nTag(langMode) }));
 }
 
@@ -2971,22 +3012,26 @@ function syncSettingsLangSegs() {
   }
 }
 
-// ---- 語音語言（jp/kr）----
+// ---- 語音語言（jp/kr）：側欄控制區為主；settings 殘留 segs（若有）同步 ----
 const setVoiceLangSegs = document.getElementById('setVoiceLangSegs');
 function syncVoiceLangSegs() {
-  if (!setVoiceLangSegs) return;
-  for (const b of setVoiceLangSegs.querySelectorAll('button')) {
-    b.classList.toggle('on', b.dataset.v === voiceLang);
+  for (const root of [setVoiceLangSegs, ctlVoiceSegs]) {
+    if (!root) continue;
+    for (const b of root.querySelectorAll('button')) {
+      b.classList.toggle('on', b.dataset.v === voiceLang);
+    }
   }
 }
-setVoiceLangSegs?.addEventListener('click', async (e) => {
+function onVoiceLangClick(e) {
   const b = e.target.closest('button');
   if (!b || b.dataset.v === voiceLang) return;
   voiceLang = b.dataset.v;
   try { localStorage.setItem('ba_voiceLang', voiceLang); } catch {}
   syncVoiceLangSegs();
   log('voice lang: ' + voiceLang);
-});
+}
+setVoiceLangSegs?.addEventListener('click', onVoiceLangClick);
+ctlVoiceSegs?.addEventListener('click', onVoiceLangClick);
 
 function settingsStreaming() {
   return window.ba?.getStreamingMode
@@ -4928,9 +4973,7 @@ async function init() {
   });
   document.addEventListener('mouseleave', () => { mouse.active = false; });
   window.addEventListener('blur', () => { mouse.active = false; });
-  btnPrev.addEventListener('click', () => switchLobby(-1));
-  btnNext.addEventListener('click', () => switchLobby(1));
-  btnBgm.addEventListener('click', toggleBgm);
+  btnCtlBgm.addEventListener('click', toggleBgm);
   // Skip button mirrors the game: UILobby.OnClickMemoryLobbySkip opens a
   // UIPopup_System confirm first; MemoryLobbySkip() runs only on OK.
   const skipConfirmEl = document.getElementById('skipConfirm');
@@ -4940,13 +4983,15 @@ async function init() {
   document.getElementById('skipYes')?.addEventListener('click', () => { closeSkipConfirm(); memoryLobbySkip(); });
   document.getElementById('skipNo')?.addEventListener('click', closeSkipConfirm);
   skipConfirmEl?.addEventListener('click', (e) => { if (e.target === skipConfirmEl) closeSkipConfirm(); });
-  // ---- focus mode (cinema) ---- btnLang repurposed as focus mode toggle
+  // ---- focus mode (cinema) ---- 側欄「專注模式」開關
   const toggleFocusMode = (on) => {
     if (on === undefined) on = !document.body.classList.contains('focusMode');
     document.body.classList.toggle('focusMode', on);
+    btnCtlFocus?.classList.toggle('on', on);
+    btnCtlFocus?.classList.toggle('off', !on);
     log('focus mode ' + (on ? 'on' : 'off'));
   };
-  btnLang.addEventListener('click', () => toggleFocusMode());
+  btnCtlFocus.addEventListener('click', () => toggleFocusMode());
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && document.body.classList.contains('focusMode')) {
       toggleFocusMode(false);
@@ -4954,8 +4999,23 @@ async function init() {
     }
   });
 
+  // ---- 電影燈光效果（#fx 電影暈影）開關，持久化 ----
+  let vignetteOn = true;
+  try { vignetteOn = localStorage.getItem('ba_vignette') !== '0'; } catch {}
+  const syncVignetteUI = () => {
+    fxEl.style.display = vignetteOn ? '' : 'none';
+    btnCtlVignette?.classList.toggle('on', vignetteOn);
+    btnCtlVignette?.classList.toggle('off', !vignetteOn);
+  };
+  btnCtlVignette?.addEventListener('click', () => {
+    vignetteOn = !vignetteOn;
+    try { localStorage.setItem('ba_vignette', vignetteOn ? '1' : '0'); } catch {}
+    syncVignetteUI();
+  });
+  syncVignetteUI();
+
   // ---- settings panel ----
-  btnSettings.addEventListener('click', toggleSettingsPanel);
+  btnCtlSettings.addEventListener('click', toggleSettingsPanel);
   setClose.addEventListener('click', toggleSettingsPanel);
 
   btnStudents.addEventListener('click', () => toggleSidebar());
@@ -4970,7 +5030,7 @@ async function init() {
   });
 
   // ---- video export UI ----
-  btnExport.addEventListener('click', openExportPanel);
+  btnCtlExport.addEventListener('click', openExportPanel);
   expCancel.addEventListener('click', closeExportPanel);
   expStart.addEventListener('click', () => { closeExportPanel(); startAnimExport(); });
   expBgm.addEventListener('click', () => { closeExportPanel(); exportBgm(); });
@@ -5013,9 +5073,11 @@ async function init() {
   // fullscreen toggle (button + F11 / F)
   const updateFullBtn = () => {
     const on = !!document.fullscreenElement;
-    btnFull.textContent = on ? '⤡' : '⤢';
-    btnFull.title = on ? t('hud.fullscreenExit') : t('hud.fullscreen');
-    btnFull.classList.toggle('off', false);
+    const key = on ? 'fullExit' : 'full';
+    btnCtlFull.querySelector('.tt').textContent = ctlText(key);
+    btnCtlFull.querySelector('.ico').textContent = on ? '⤡' : '⤢';
+    btnCtlFull.title = ctlText(key);
+    btnCtlFull.classList.toggle('off', false);
   };
   const toggleFullscreen = () => {
     if (document.fullscreenElement) {
@@ -5024,7 +5086,7 @@ async function init() {
       document.documentElement.requestFullscreen?.();
     }
   };
-  btnFull.addEventListener('click', toggleFullscreen);
+  btnCtlFull.addEventListener('click', toggleFullscreen);
   document.addEventListener('fullscreenchange', () => {
     updateFullBtn();
     if (spine && fitted) fitScene();
@@ -5036,6 +5098,8 @@ async function init() {
     }
   });
   updateFullBtn();
+  applyCtlI18n();
+  syncVoiceLangSegs();
 
   if (ORDER.length) {
     const m = location.hash.match(/[?#]lobby=([^&]+)/);
@@ -5081,15 +5145,14 @@ if (/PROBE=1/.test(location.search + location.hash)) {
       fxCanvas: !!document.querySelector('#fx canvas, .baclickfx, [id*="clickfx" i]'),
       uiLang,
       dictLoaded: !!i18nDict,
-      btnLangLabel: document.getElementById('btnLang')?.textContent,
+      ctlLabels: ['bgm', 'focus', 'vignette', 'voiceJp'].map(k => `${k}:${ctlText(k)}`).join(', '),
       loadingText: loadingText?.textContent,
       expTitle: document.querySelector('#exportPanel .panel-title')?.childNodes[0]?.textContent?.trim(),
       resWin: document.querySelector('[data-r="win"]')?.textContent,
       voiceCk: document.querySelector('label.ck span[data-i18n="exp.voice"]')?.textContent,
       searchPh: sbSearch.placeholder,
-      prevTitle: btnPrev.title,
-      langTitle: btnLang.title,
-      settingsBtnTitle: document.getElementById('btnSettings')?.title,
+      ctlVoiceLbl: document.getElementById('ctlVoiceLbl')?.textContent,
+      settingsBtnTitle: document.getElementById('btnCtlSettings')?.title,
       setLangSegs: document.getElementById('setLangSegs')?.children.length,
       setModeSegs: [...(document.getElementById('setModeSegs')?.children || [])].map(b => `${b.dataset.m}:${b.classList.contains('on') ? 1 : 0}`).join(','),
       setAssetsStatus: document.getElementById('setAssetsStatus')?.textContent?.slice(0, 80),

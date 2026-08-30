@@ -59,7 +59,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* minimal auto-hiding HUD */
+    /* minimal auto-hiding top HUD — 僅剩置中標題 + 右上跳過 */
     #hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
     #hud > * { pointer-events: auto; }
     .hudbar {
@@ -67,10 +67,9 @@
       display: flex; align-items: center;
       transition: opacity .6s ease, transform .6s ease;
     }
-    #hudTop { top: 0; padding: 22px 26px; justify-content: space-between; }
-    #hudBottom { bottom: 0; padding: 18px 26px; justify-content: center; }
+    #hudTop { top: 0; padding: 22px 26px; justify-content: center; }
+    #hudTop #btnSkip { position: absolute; right: 26px; }
     #hud.idle #hudTop { opacity: 0; transform: translateY(-12px); }
-    #hud.idle #hudBottom { opacity: 0; transform: translateY(12px); }
     #hud.idle { pointer-events: none; }
     #hud.idle > * { pointer-events: none; }
 
@@ -147,9 +146,37 @@
     #sbSearch:focus { border-color: rgba(169,182,255,.6); }
     #sbSearch::placeholder { color: rgba(210,220,255,.45); }
     #sbClose { width: 34px; height: 34px; border-radius: 6px; flex: none; }
-    #sbList { flex: 1; overflow-y: auto; padding: 6px 10px 20px; }
+    #sbList { flex: 2; min-height: 0; overflow-y: auto; padding: 6px 10px 20px; }
     #sbList::-webkit-scrollbar { width: 8px; }
     #sbList::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 4px; }
+    /* 左下控制區（側欄下 1/3）：完整描述文字的 HUD 按鈕 + 語音 + 燈光開關 */
+    #sbCtrl {
+      flex: 1; min-height: 0; overflow-y: auto;
+      border-top: 1px solid rgba(255,255,255,.12);
+      padding: 10px; display: flex; flex-direction: column; gap: 9px;
+    }
+    .ctl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .ctl-btn {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      background: rgba(255,255,255,.07); color: #dfe4ff;
+      border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
+      padding: 9px 10px; font-size: 12.5px; line-height: 1;
+      cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer;
+      transition: background .2s, border-color .2s, opacity .2s;
+    }
+    .ctl-btn:hover { background: rgba(255,255,255,.13); border-color: rgba(169,182,255,.4); }
+    .ctl-btn .ico { font-size: 15px; opacity: .92; flex: none; }
+    .ctl-btn .tt { text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ctl-btn.off { opacity: .45; }
+    .ctl-btn.on {
+      background: linear-gradient(135deg, rgba(96,150,255,.34), rgba(76,120,240,.3));
+      border-color: rgba(140,180,255,.6); color: #fff;
+      box-shadow: inset 0 0 8px rgba(96,150,255,.25);
+    }
+    .ctl-sep { height: 1px; background: rgba(255,255,255,.08); margin: 2px 0; }
+    .ctl-row { display: flex; align-items: center; gap: 8px; }
+    .ctl-row .lbl { font-size: 12px; color: #9aa4e0; letter-spacing: .08em; flex: 1; }
+    #ctlVoiceSegs button { min-width: 44px; font-size: 12px; }
     .sb-group-head {
       color: #9aa4e0; font-size: 12px; letter-spacing: .08em; font-weight: 600;
       padding: 12px 4px 4px; display: flex; align-items: baseline; gap: 8px;
@@ -508,20 +535,11 @@
   <div id="fx"></div>
   <div id="hud">
     <div id="hudTop" class="hudbar">
-      <button id="btnPrev" class="btn" data-i18n-title="hud.prev" title="上一位">‹</button>
       <div id="titleBlock">
         <div id="charName"></div>
         <div id="subName">MEMORIAL LOBBY</div>
       </div>
-      <button id="btnNext" class="btn" data-i18n-title="hud.next" title="下一位">›</button>
-    </div>
-    <div id="hudBottom" class="hudbar">
-      <button id="btnSkip" class="btn" style="margin-right:20px" data-i18n-title="hud.skip" title="跳過開始動畫">&#8811;</button>
-      <button id="btnLang" class="btn" data-i18n-title="hud.focus" title="專注模式">&#9673;</button>
-      <button id="btnFull" class="btn" style="margin-left:10px" data-i18n-title="hud.fullscreen" title="全螢幕">⤢</button>
-      <button id="btnBgm" class="btn" style="margin-left:10px" data-i18n-title="hud.bgm" title="音樂">♪</button>
-      <button id="btnExport" class="btn" style="margin-left:10px" data-i18n-title="hud.export" title="匯出影片">⏺</button>
-      <button id="btnSettings" class="btn" style="margin-left:10px" data-i18n-title="hud.settings" title="設定">⚙</button>
+      <button id="btnSkip" class="btn" data-i18n-title="hud.skip" title="跳過開始動畫">&#8811;</button>
     </div>
   </div>
 
@@ -532,6 +550,24 @@
       <button id="sbClose" class="btn" data-i18n-title="sidebar.close" title="收合">×</button>
     </div>
     <div id="sbList"></div>
+    <div id="sbCtrl">
+      <div class="ctl-grid">
+        <button id="btnCtlBgm" class="ctl-btn" title="音樂"><span class="ico">♪</span><span class="tt" data-ck="bgm">音樂</span></button>
+        <button id="btnCtlFull" class="ctl-btn" title="全螢幕"><span class="ico">⤢</span><span class="tt" data-ck="full">全螢幕</span></button>
+        <button id="btnCtlFocus" class="ctl-btn" title="專注模式"><span class="ico">◎</span><span class="tt" data-ck="focus">專注模式</span></button>
+        <button id="btnCtlExport" class="ctl-btn" title="匯出影片"><span class="ico">⏺</span><span class="tt" data-ck="export">匯出影片</span></button>
+        <button id="btnCtlSettings" class="ctl-btn" title="設定"><span class="ico">⚙</span><span class="tt" data-ck="settings">設定</span></button>
+        <button id="btnCtlVignette" class="ctl-btn" title="電影燈光效果"><span class="ico">◐</span><span class="tt" data-ck="vignette">電影燈光效果</span></button>
+      </div>
+      <div class="ctl-sep"></div>
+      <div class="ctl-row">
+        <span class="lbl" id="ctlVoiceLbl">語音</span>
+        <div class="segs" id="ctlVoiceSegs">
+          <button data-v="jp" data-ck="voiceJp">日文</button>
+          <button data-v="kr" data-ck="voiceKr">韓文</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="loading"><div class="spin"></div><span id="loadingText" data-i18n="loading.loading">載入中</span></div>
@@ -624,14 +660,6 @@
         </div>
       </div>
       <div id="setStreamingDesc" data-i18n="set.modeStreamingDesc">串流模式：初始只下載核心資源，進入大廳時才下載該角色的資料。可離線播放已下載過的大廳。</div>
-      <div class="panel-row" style="margin-top:10px;">
-        <span class="lbl" data-i18n="set.voiceLang">語音語言</span>
-        <div class="segs" id="setVoiceLangSegs">
-          <button data-v="jp" data-i18n="set.voiceJp">日文</button>
-          <button data-v="kr" data-i18n="set.voiceKr">韓文</button>
-        </div>
-      </div>
-      <div id="setVoiceLangDesc" data-i18n="set.voiceLangDesc">韓文語音為 Global 版內建 KR 配音；部分角色缺韓文檔時自動播放日文。</div>
     </div>
 
     <div class="set-section">
