@@ -132,9 +132,39 @@ async function loadI18n() {
   }
 }
 
+// 本機備援字典：pack 的 ui_i18n.json（SW cache-first 優先）缺這些 key 時立即生效，
+// 避免選單顯示成原始 key（skip.title / set.space.*…）。pack 未來補 key 仍優先。
+const LOCAL_I18N = {
+  'skip.title':   { 'zh-TW': '紀念大廳的開始動畫', 'zh-CN': '纪念大厅的开幕动画', 'ja': '記念ホールのオープニング', 'en': 'Memorial lobby opening', 'ko': '메모리얼 로비 오프닝' },
+  'skip.confirm': { 'zh-TW': '是否跳過開場動畫？', 'zh-CN': '是否跳过开场动画？', 'ja': 'オープニングをスキップしますか？', 'en': 'Skip the opening?', 'ko': '오프닝을 건너뛸까요?' },
+  'skip.cancel':  { 'zh-TW': '取消', 'zh-CN': '取消', 'ja': 'キャンセル', 'en': 'Cancel', 'ko': '취소' },
+  'skip.ok':      { 'zh-TW': '確定', 'zh-CN': '确定', 'ja': 'OK', 'en': 'OK', 'ko': '확인' },
+  'set.list':        { 'zh-TW': '角色列表', 'zh-CN': '角色列表', 'ja': 'キャラクターリスト', 'en': 'Student list', 'ko': '캐릭터 목록' },
+  'set.jpOnly':      { 'zh-TW': '顯示日服限定角色', 'zh-CN': '显示日服限定角色', 'ja': '日服限定キャラを表示', 'en': 'Show JP-only students', 'ko': '일섭 한정 캐릭터 표시' },
+  'set.jpOnlyDesc':  { 'zh-TW': '日服限定角色只有日文語音（沒有韓文語音）。', 'zh-CN': '日服限定角色只有日文语音（没有韩文语音）。', 'ja': '日服限定キャラは日本語ボイスのみです（韓国語ボイスなし）。', 'en': 'JP-only students have Japanese voice only (no Korean voice).', 'ko': '일섭 한정 캐릭터는 일본어 보이스만 있습니다 (한국어 보이스 없음).' },
+  'sidebar.pinned':  { 'zh-TW': '已釘選', 'zh-CN': '已钉选', 'ja': 'ピン留め', 'en': 'Pinned', 'ko': '고정됨' },
+  'sidebar.others':  { 'zh-TW': '其他', 'zh-CN': '其他', 'ja': 'その他', 'en': 'Others', 'ko': '기타' },
+  'set.space.title':  { 'zh-TW': '管理空間', 'zh-CN': '管理空间', 'ja': '容量管理', 'en': 'Storage', 'ko': '저장 공간' },
+  'set.space.open':   { 'zh-TW': '檢視已下載資源', 'zh-CN': '查看已下载资源', 'ja': 'ダウンロード済みを表示', 'en': 'View downloaded packs', 'ko': '다운로드 목록 보기' },
+  'set.space.close':  { 'zh-TW': '收合資源清單', 'zh-CN': '收起资源列表', 'ja': '一覧を閉じる', 'en': 'Collapse list', 'ko': '목록 접기' },
+  'set.space.empty':  { 'zh-TW': '沒有可管理的資源。', 'zh-CN': '没有可管理的资源。', 'ja': '管理できるリソースはありません。', 'en': 'No managed resources.', 'ko': '관리할 리소스가 없습니다.' },
+  'set.space.summary':{ 'zh-TW': '{n} 個資源包（約 {size}）', 'zh-CN': '{n} 个资源包（约 {size}）', 'ja': '{n} 個のパック（約 {size}）', 'en': '{n} packs (≈ {size})', 'ko': '팩 {n}개 (약 {size})' },
+  'set.space.delete': { 'zh-TW': '刪除', 'zh-CN': '删除', 'ja': '削除', 'en': 'Delete', 'ko': '삭제' },
+  'set.space.locked': { 'zh-TW': '必要資源', 'zh-CN': '必要资源', 'ja': '必須リソース', 'en': 'Required', 'ko': '필수 리소스' },
+  'set.space.confirm':{ 'zh-TW': '確定刪除 {key}？', 'zh-CN': '确定删除 {key}？', 'ja': '{key} を削除しますか？', 'en': 'Delete {key}?', 'ko': '{key}을(를) 삭제할까요?' },
+  'set.space.kindCore':  { 'zh-TW': '核心', 'zh-CN': '核心', 'ja': 'コア', 'en': 'Core', 'ko': '코어' },
+  'set.space.kindIntro': { 'zh-TW': '開場', 'zh-CN': '开场', 'ja': 'オープニング', 'en': 'Intro', 'ko': '오프닝' },
+  'set.space.kindLobby': { 'zh-TW': '大廳', 'zh-CN': '大厅', 'ja': 'ホール', 'en': 'Lobby', 'ko': '로비' },
+  'set.space.kindVoice': { 'zh-TW': '語音', 'zh-CN': '语音', 'ja': 'ボイス', 'en': 'Voice', 'ko': '보이스' },
+};
+
 function t(key, params) {
-  let s = i18nDict?.[i18nTag(uiLang)]?.[key]
+  const tag = i18nTag(uiLang);
+  let s =
+    i18nDict?.[tag]?.[key]
     ?? i18nDict?.[I18N_TAG_FALLBACK]?.[key]
+    ?? LOCAL_I18N[key]?.[tag]
+    ?? LOCAL_I18N[key]?.[I18N_TAG_FALLBACK]
     ?? key;
   if (params) for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v);
   return s;
@@ -2977,6 +3007,7 @@ const setLangSegs = document.getElementById('setLangSegs');
 const setModeSegs = document.getElementById('setModeSegs');
 const setCursorCk = document.getElementById('setCursorCk');
 const setClickFxCk = document.getElementById('setClickFxCk');
+const setJpOnlyCk = document.getElementById('setJpOnlyCk');
 const setAssetsStatus = document.getElementById('setAssetsStatus');
 const setDownloadBtn = document.getElementById('setDownloadBtn');
 const setAssetsProgress = document.getElementById('setAssetsProgress');
@@ -3127,6 +3158,7 @@ function settingsPref(key, dflt) {
 function syncSettingsEffectCks() {
   if (setCursorCk) setCursorCk.checked = settingsPref('ba_cursor', true);
   if (setClickFxCk) setClickFxCk.checked = settingsPref('ba_clickfx', true);
+  if (setJpOnlyCk) setJpOnlyCk.checked = settingsPref('ba_jpOnly', true);
 }
 
 // ---- 管理空間（已下載資源包檢視 + 刪除）----
@@ -3925,19 +3957,46 @@ function groupMatches(g, q) {
   return g.children.some(c => c.key.toLowerCase().includes(q) || variantText(g, c).toLowerCase().includes(q));
 }
 
+const PIN_SVG_OUTLINE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 10.2C19 15 12 21 12 21S5 15 5 10.2a7 7 0 0 1 14 0z"/><circle cx="12" cy="10.2" r="2.6"/></svg>';
+const PIN_SVG_FILLED  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 10.2C19 15 12 21 12 21S5 15 5 10.2a7 7 0 0 1 14 0z" fill="currentColor" stroke="none"/><circle cx="12" cy="10.2" r="2.6"/></svg>';
+
+const PIN_KEY = 'ba_pinned';
+function readPins() {
+  try { return new Set(JSON.parse(localStorage.getItem(PIN_KEY) || '[]')); } catch { return new Set(); }
+}
+function writePins(set) {
+  try { localStorage.setItem(PIN_KEY, JSON.stringify([...set])); } catch {}
+}
+function togglePin(core) {
+  const s = readPins();
+  if (s.has(core)) s.delete(core); else s.add(core);
+  writePins(s);
+  if (sidePanel.classList.contains('open')) renderSidebar();
+}
+
+// 日服限定（僅日文語音）判斷：看最新版 manifest 有沒有該角色的韓文語音包
+// （voice/KR_<Core>，manifest key 保留原始大小寫、sidebar core 為小寫 → 忽略大小寫）。
+// 解析前/未知 → 視為有（不隱藏）。
+function groupHasKrVoice(core) {
+  const p = _assetInfo?.packages;
+  if (!p) return true;
+  const low = core.toLowerCase();
+  return Object.keys(p).some(k => k.length > 9 && k.startsWith('voice/KR_') && k.slice(9).toLowerCase() === low);
+}
+
 function renderSidebar() {
   const q = sbSearch.value.trim().toLowerCase();
+  const showJpOnly = settingsPref('ba_jpOnly', true);
+  const pinned = readPins();
   sbList.innerHTML = '';
   let shown = 0;
-  for (const g of buildSidebarGroups()) {
-    if (!groupMatches(g, q)) continue;
+
+  const renderGroup = (g) => {
     const nameMatch = !q || g.display.toLowerCase().includes(q)
       || (g.rec && SIDEBAR_FIELDS.some(f => g.rec[f] && g.rec[f].toLowerCase().includes(q)));
     const kids = nameMatch
       ? g.children
       : g.children.filter(c => c.key.toLowerCase().includes(q) || variantText(g, c).toLowerCase().includes(q));
-    if (!kids.length) continue;
-    shown += kids.length;
     for (const c of kids) {
       const b = document.createElement('button');
       b.className = 'sb-item';
@@ -3950,11 +4009,50 @@ function renderSidebar() {
         img.alt = '';
         b.appendChild(img);
       }
-      b.appendChild(document.createTextNode(variantText(g, c)));
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = variantText(g, c);
+      b.appendChild(name);
+      const isPin = pinned.has(g.core);
+      const pin = document.createElement('span');
+      pin.className = 'sb-pin' + (isPin ? ' is-pin' : '');
+      pin.title = t('sidebar.pinned');
+      pin.innerHTML = isPin ? PIN_SVG_FILLED : PIN_SVG_OUTLINE;
+      pin.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        togglePin(g.core);
+      });
+      b.appendChild(pin);
       if (c.key === currentLobby) b.classList.add('cur');
       sbList.appendChild(b);
+      shown++;
     }
+  };
+
+  const groups = [];
+  for (const g of buildSidebarGroups()) {
+    if (!groupMatches(g, q)) continue;
+    if (!showJpOnly && !groupHasKrVoice(g.core)) continue;   // 日服限定過濾
+    groups.push(g);
   }
+  const pinnedGroups = groups.filter(g => pinned.has(g.core));
+  const restGroups = groups.filter(g => !pinned.has(g.core));
+
+  if (pinnedGroups.length) {
+    const h = document.createElement('div');
+    h.className = 'sb-group-head pinned-head';
+    h.textContent = `${t('sidebar.pinned')} (${pinnedGroups.length})`;
+    sbList.appendChild(h);
+    for (const g of pinnedGroups) renderGroup(g);
+  }
+  if (pinnedGroups.length && restGroups.length) {
+    const h = document.createElement('div');
+    h.className = 'sb-group-head';
+    h.textContent = t('sidebar.others');
+    sbList.appendChild(h);
+  }
+  for (const g of restGroups) renderGroup(g);
   if (!shown) {
     const e = document.createElement('div');
     e.className = 'sb-empty';
@@ -5046,6 +5144,10 @@ async function init() {
     try { localStorage.setItem('ba_clickfx', setClickFxCk.checked ? '1' : '0'); } catch {}
     showToast(t('set.restartHint'));
   });
+  if (setJpOnlyCk) setJpOnlyCk.addEventListener('change', () => {
+    try { localStorage.setItem('ba_jpOnly', setJpOnlyCk.checked ? '1' : '0'); } catch {}
+    if (sidePanel.classList.contains('open')) renderSidebar();
+  });
   setModeSegs.addEventListener('click', async (e) => {
     const b = e.target.closest('button');
     if (!b || b.classList.contains('on')) return;
@@ -5073,10 +5175,9 @@ async function init() {
   // fullscreen toggle (button + F11 / F)
   const updateFullBtn = () => {
     const on = !!document.fullscreenElement;
-    const key = on ? 'fullExit' : 'full';
-    btnCtlFull.querySelector('.tt').textContent = ctlText(key);
-    btnCtlFull.querySelector('.ico').textContent = on ? '⤡' : '⤢';
-    btnCtlFull.title = ctlText(key);
+    btnCtlFull.classList.toggle('is-full', on);
+    btnCtlFull.querySelector('.tt').textContent = ctlText(on ? 'fullExit' : 'full');
+    btnCtlFull.title = ctlText(on ? 'fullExit' : 'full');
     btnCtlFull.classList.toggle('off', false);
   };
   const toggleFullscreen = () => {
@@ -5146,6 +5247,11 @@ if (/PROBE=1/.test(location.search + location.hash)) {
       uiLang,
       dictLoaded: !!i18nDict,
       ctlLabels: ['bgm', 'focus', 'vignette', 'voiceJp'].map(k => `${k}:${ctlText(k)}`).join(', '),
+      skipTitle: t('skip.title'),
+      skipOk: document.getElementById('skipYes')?.textContent,
+      jpOnlyCk: document.getElementById('setJpOnlyCk')?.checked,
+      krPacks: Object.keys(_assetInfo?.packages ?? {}).filter(k => k.startsWith('voice/KR_')).length,
+      krKeep: (() => { let n = 0; if (!_assetInfo?.packages) return -1; for (const g of buildSidebarGroups()) if (groupHasKrVoice(g.core)) n++; return n; })(),
       loadingText: loadingText?.textContent,
       expTitle: document.querySelector('#exportPanel .panel-title')?.childNodes[0]?.textContent?.trim(),
       resWin: document.querySelector('[data-r="win"]')?.textContent,

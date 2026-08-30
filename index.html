@@ -193,6 +193,26 @@
     .sb-item.cur { background: rgba(80,95,180,.45); color: #fff; }
     .sb-empty { color: rgba(210,220,255,.5); font-size: 13px; padding: 22px 8px; text-align: center; }
 
+    /* 手繪 SVG 圖示（取代原 HUD 的 Unicode 符號字） */
+    .ctl-btn .ico svg, #btnSkip svg {
+      width: 18px; height: 18px; display: block; flex: none;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,.55));
+    }
+    .ctl-btn .fs-out { display: none; }
+    .ctl-btn.is-full .fs-in  { display: none; }
+    .ctl-btn.is-full .fs-out { display: block; }
+
+    /* 側欄釘選（sb-pin）：名字截斷 + 圖釘開關 */
+    .sb-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sb-pin {
+      flex: none; width: 26px; height: 24px; margin: -4px -6px -4px 2px;
+      display: flex; align-items: center; justify-content: center;
+      color: #9aa4e0; border-radius: 6px; opacity: .72;
+    }
+    .sb-pin svg { width: 15px; height: 15px; }
+    .sb-pin:hover { background: rgba(90,105,200,.35); color: #fff; opacity: 1; }
+    .sb-pin.is-pin { color: #ffd76b; opacity: 1; }
+
     /* export panel (video export) */
     #exportPanel, #settingsPanel {
       position: fixed; z-index: 60; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -539,7 +559,7 @@
         <div id="charName"></div>
         <div id="subName">MEMORIAL LOBBY</div>
       </div>
-      <button id="btnSkip" class="btn" data-i18n-title="hud.skip" title="跳過開始動畫">&#8811;</button>
+      <button id="btnSkip" class="btn" data-i18n-title="hud.skip" title="跳過開始動畫"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 6l6.5 6-6.5 6z"/><path d="M13.5 6l6.5 6-6.5 6z"/></svg></button>
     </div>
   </div>
 
@@ -552,12 +572,12 @@
     <div id="sbList"></div>
     <div id="sbCtrl">
       <div class="ctl-grid">
-        <button id="btnCtlBgm" class="ctl-btn" title="音樂"><span class="ico">♪</span><span class="tt" data-ck="bgm">音樂</span></button>
-        <button id="btnCtlFull" class="ctl-btn" title="全螢幕"><span class="ico">⤢</span><span class="tt" data-ck="full">全螢幕</span></button>
-        <button id="btnCtlFocus" class="ctl-btn" title="專注模式"><span class="ico">◎</span><span class="tt" data-ck="focus">專注模式</span></button>
-        <button id="btnCtlExport" class="ctl-btn" title="匯出影片"><span class="ico">⏺</span><span class="tt" data-ck="export">匯出影片</span></button>
-        <button id="btnCtlSettings" class="ctl-btn" title="設定"><span class="ico">⚙</span><span class="tt" data-ck="settings">設定</span></button>
-        <button id="btnCtlVignette" class="ctl-btn" title="電影燈光效果"><span class="ico">◐</span><span class="tt" data-ck="vignette">電影燈光效果</span></button>
+        <button id="btnCtlBgm" class="ctl-btn" title="音樂"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 17.2V6.2l7.6-1.9v12.4"/><path d="M6.9 16.9a2 2 0 1 0 4.1-.1 2 2 0 0 0-4.1.1z"/><path d="M14.5 15.6a2 2 0 1 0 4.1-.1 2 2 0 0 0-4.1.1z"/></svg></span><span class="tt" data-ck="bgm">音樂</span></button>
+        <button id="btnCtlFull" class="ctl-btn" title="全螢幕"><span class="ico"><svg class="fs-in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4.5h4.5"/><path d="M15.5 4.5H20V9"/><path d="M20 15v4.5h-4.5"/><path d="M8.5 19.5H4V15"/></svg><svg class="fs-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4.5V9H4.5"/><path d="M15 4.5V9h4.5"/><path d="M15 19.5V15h4.5"/><path d="M9 19.5V15H4.5"/></svg></span><span class="tt" data-ck="full">全螢幕</span></button>
+        <button id="btnCtlFocus" class="ctl-btn" title="專注模式"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.1"/><circle cx="12" cy="12" r="4.3"/><circle cx="12" cy="12" r="1.15" fill="currentColor" stroke="none"/></svg></span><span class="tt" data-ck="focus">專注模式</span></button>
+        <button id="btnCtlExport" class="ctl-btn" title="匯出影片"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7.2" width="13.4" height="9.6" rx="2.4"/><circle cx="9.7" cy="12" r="2.6"/><path d="M16.4 10.2l4.6-2.2v8l-4.6-2.2"/></svg></span><span class="tt" data-ck="export">匯出影片</span></button>
+        <button id="btnCtlSettings" class="ctl-btn" title="設定"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.4"/><path d="M12 3.5V7"/><path d="M20.5 12H17"/><path d="M3.5 12H7"/><path d="M12 20.5V17"/><path d="M6.2 6.2l2.3 2.3"/><path d="M17.8 6.2l-2.3 2.3"/><path d="M6.2 17.8l2.3-2.3"/><path d="M17.8 17.8l-2.3-2.3"/></svg></span><span class="tt" data-ck="settings">設定</span></button>
+        <button id="btnCtlVignette" class="ctl-btn" title="電影燈光效果"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><path d="M12 3.8a8.2 8.2 0 0 1 0 16.4z" fill="currentColor" stroke="none" opacity=".4"/></svg></span><span class="tt" data-ck="vignette">電影燈光效果</span></button>
       </div>
       <div class="ctl-sep"></div>
       <div class="ctl-row">
@@ -666,6 +686,12 @@
       <div class="set-head" data-i18n="set.effects">視覺效果</div>
       <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setCursorCk"> <span data-i18n="set.cursor">BA 遊標</span></label>
       <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setClickFxCk"> <span data-i18n="set.clickfx">點擊特效 (Click FX)</span></label>
+    </div>
+
+    <div class="set-section">
+      <div class="set-head" data-i18n="set.list">角色列表</div>
+      <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setJpOnlyCk" checked> <span data-i18n="set.jpOnly">顯示日服限定角色</span></label>
+      <div style="font-size:11px; color:#9aa4e0; margin-top:2px; line-height:1.7;" data-i18n="set.jpOnlyDesc">日服限定角色只有日文語音（沒有韓文語音）。</div>
     </div>
 
     <div class="set-section">
