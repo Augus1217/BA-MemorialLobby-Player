@@ -1428,69 +1428,39 @@ async function playTalk() {
     // ---- Balloon lifecycle (reversed ChatDialog.<CoDialog>d__43.MoveNext) ----
     // The balloon is ONE persistent element for the whole talk: each recorded
     // Talk voice event (lobby_voice_schedule.json) switches the text in place,
-    // each line is held `audioClip.length + 0.5`, and the balloon closes (with
-    // the CSS .4s fade) after the LAST line's hold — NOT at every voice's end
-    // (that flickered the box between lines and cut it off early), and NOT at
-    // the full animation length (Talk_04_M runs 40s with its last line at 32.9s).
+    // and the balloon stays up until the Talk animation on track 1 plays all the
+    // way through — 收合時機是「Talk 動作做完」，不是最後一句音檔播完
+    // （音檔常比動畫早結束，例如 Talk_04_M 跑 40s、最後一句卻在 32.9s）。
+    // 由下方輪詢偵測動畫結束的瞬間收合（CSS .4s fade）；supersede 時
+    // dialogSession 已換代 → finally 的收尾不會誤關新一輪的氣泡。
     const anim = spine.state.data.skeletonData.findAnimation(m);
     const animMs = (anim?.duration ?? 2.0) * 1000;
     const startToken = voiceToken;
     const t0 = performance.now();
 
-    const lines = schAnim[m]?.voice || [];
-    const lastLine = lines.length ? lines[lines.length - 1] : null;
-    if (lastLine) {
-      // Watch the last line's voice event fire, then hold `length + 0.5` and
-      // close the balloon — independently of the animation still running on
-      // track 1 (busy stays held until the clip finishes, below).
-      (async () => {
-        const deadline = t0 + animMs + 1000;
-        let fired = false;
-        // Phase 1 — wait until the last line's voice event fires, or the
-        // animation passes the line's recorded time (events dispatch on the
-        // next rAF, so `t` can cross the event time a frame early).
-        while (performance.now() < deadline) {
-          if (session !== dialogSession) return;
-          const tr = spine.state.tracks[1];
-          const animEnd = tr?.animationEnd || animMs;
-          const t = tr ? tr.animationTime : animEnd;
-          if (lastVoiceName === lastLine.name) { fired = true; break; }
-          if (t >= lastLine.t - 0.05 || t >= animEnd - 0.05) break;
-          await new Promise((r) => setTimeout(r, 50));
-        }
-        // Phase 2 — grace for the async event→playVoice dispatch before giving
-        // up (a missingMedia/skipped last line has no audio; close shortly after
-        // its recorded time instead of leaving the balloon up till anim end).
-        for (let i = 0; i < 20 && !fired; i++) {
-          if (session !== dialogSession) return;
-          if (lastVoiceName === lastLine.name) { fired = true; break; }
-          await new Promise((r) => setTimeout(r, 50));
-        }
-        if (session !== dialogSession) return;
-        if (fired) {
-          await lastVoicePromise;             // last line audio + 0.5
-          if (session !== dialogSession) return;
-        }
-        dialogActive = false;
-        hideChat();                           // .4s CSS fade, not instant
-      })();
-    }
-
     // Poll until the talk animation on track 1 has played through (animationTime
     // reached its end). This keeps `busy` / blockInteractionOnPlay held (mirroring
     // byte [+0xb0]) so a new line can't start until the current talk clip finishes,
-    // even though the balloon already closed after the last line's +0.5 hold.
-    // Guarantees multi-line talks (e.g. Talk_01_M: events at 1.33s and 8.60s) run
-    // to completion instead of cutting after the first line. Bail early if the
-    // interaction was superseded.
+    // and doubles as the balloon's close trigger: 對話框在 Talk 動作做完的那一幀收合
+    // （不是最後一句音檔播完時）。Guarantees multi-line talks (e.g. Talk_01_M:
+    // events at 1.33s and 8.60s) run to completion instead of cutting after the
+    // first line. Bail early if the interaction was superseded.
     let voiceFired = false;
     const deadline = t0 + animMs + 500;
     while (performance.now() < deadline) {
       if (state.busy !== 'talk') return;
       const tr = spine.state.tracks[1];
       const animEnd = tr?.animationEnd || animMs;
-      const animDone = tr ? tr.animationTime >= animEnd - 0.05 : true;
-      if (animDone) { voiceFired = voiceToken > startToken; break; }
+      const animDone = tr ? tr.getAnimationTime ? tr.getAnimationTime() >= animEnd - 0.05 : tr.animationTime >= animEnd - 0.05 : true;
+      if (animDone) {
+        voiceFired = voiceToken > startToken;
+        // Talk 動作已完成 — 對話框此刻才收（而非追最後一句音檔）。
+        if (session === dialogSession) {
+          dialogActive = false;
+          hideChat();
+        }
+        break;
+      }
       await new Promise((r) => setTimeout(r, 60));
     }
 
@@ -1981,6 +1951,51 @@ window.ba_debug = {
     });
   },
   subtitleKeys: () => (SUBTITLES ? Object.keys(SUBTITLES).length : -1),
+  // headless 驗證「對話框在 Talk 動畫跑完後才收」(PROBE only)：記錄 balloon
+  // open/close 時刻與 track1 動畫進度。回傳 [{t, animTime, remain, close}]。
+  talkTiming: async () => {
+    if (!spine) return null;
+    const c = document.getElementById('chatDialog');
+    const rec = { events: [], anim: [], e: null };
+    let open = c.classList.contains('show');
+    const t0 = performance.now();
+    const mark = (s) => rec.events.push({ s, t: +(performance.now() - t0) / 1000 });
+    if (open) mark('wasOpen');
+    const obs = new MutationObserver(() => {
+      const on = c.classList.contains('show');
+      if (on !== open) { open = on; mark(on ? 'open' : 'close'); }
+    });
+    obs.observe(c, { attributes: true, attributeFilter: ['class'] });
+    const iv = setInterval(() => {
+      try {
+        const e = spine.state.getCurrent(1);
+        if (!e || !e.animation) return;
+        const at = typeof e.getAnimationTime === 'function' ? e.getAnimationTime() : (e.animationTime ?? 0);
+        const end = e.animationEnd ?? e.animation.duration;
+        if (!(at > 0) && !(end > 0)) return;
+        rec.anim.push({
+          t: +((performance.now() - t0) / 1000).toFixed(2),
+          at: +at.toFixed(2),
+          end: +end.toFixed(2),
+          rem: +((end - at)).toFixed(2),
+          nm: e.animation.name,
+          tt: +((e.trackTime ?? 0)).toFixed(2),
+          autom: spine.autoUpdate === true,
+          ts: spine.state.timeScale,
+        });
+      } catch (err) { rec.e = String(err); }
+    }, 30);
+    await playTalk();
+    clearInterval(iv);
+    const e = spine.state.getCurrent(1);
+    rec.final = {
+      anim: e && e.animation ? e.animation.name : null,
+      at: e ? +((typeof e.getAnimationTime === 'function' ? e.getAnimationTime() : 0)).toFixed(2) : null,
+      end: e ? +((e.animationEnd ?? e.animation?.duration ?? 0)).toFixed(2) : null,
+      balloonOpen: c.classList.contains('show'),
+    };
+    return rec;
+  },
   triggerLook: (on) => on ? startLook() : endLook(),
   triggerPat: (on) => on ? startPat() : endPat(),
   skipMemoryLobby: () => memoryLobbySkip(),
