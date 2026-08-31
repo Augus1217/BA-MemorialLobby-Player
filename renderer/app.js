@@ -1,4 +1,4 @@
-import { Application, Assets, Texture, Sprite, MeshSimple, BlurFilter, Cache } from 'pixi.js';
+import { Application, Assets, Texture, Sprite, MeshSimple, Container, BlurFilter, ColorMatrixFilter, Cache, UniformGroup, GlProgram, Filter } from 'pixi.js';
 import { Spine, ScaleTimeline } from '@esotericsoftware/spine-pixi-v8';
 import { Vector2 } from '@esotericsoftware/spine-core';
 import { i as initClickFx } from '../assets/clickfx/clickFx.js';
@@ -293,13 +293,16 @@ const log = (s) => console.log('[lobby]', s);
  let ORDER = [];
  let STUDENT_ICONS = {};
 
-// kivo.wiki 光線修復: 所有角色的 top light slot 改為 Screen 混色
-// (對照 kivo 修復版 skel: CH0070_home top_light blendMode = 3)
-const isTopLightSlot = (name) => {
-  const s = name.replace(/\s+/g, ' ');
-  return /top[\s_]*light/i.test(s)
-    || /^light[\s_]*top[\s_]*(\d|_|$)/i.test(s)
-    || /^T_light$/i.test(s);
+// kivo.wiki 光線修復公式：Additive 槽且名稱含 light/flare → Screen 混色。
+// 比對 kivo _fix skel 實證（Hanako 3/3、CH0220 8/8、Seia 1/1 個 Additive 槽全改）。
+// 不能「全部 Additive→Screen」：全庫 4296 個 Additive 槽中有眼睛/背景/光暈等
+// 非光效槽（kivo 未修角色在站上仍維持 Additive），名稱過濾才不會改壞眼睛。
+const fixAdditiveSlots = (obj) => {
+  let n = 0;
+  for (const slot of obj.skeleton.slots) {
+    if (slot.data.blendMode === 1 && /light|flare/i.test(slot.data.name)) { slot.data.blendMode = 3; n++; }
+  }
+  return n;
 };
 
 // ---- camera (lobby_camera_config.json) ----
@@ -2025,6 +2028,43 @@ window.ba_debug = {
       slots: spine.skeleton.slots.map(s => s.data.name),
     };
   },
+  freeze: (on) => {
+    const list = [spine, scene, bg].filter(Boolean);
+    for (const s of list) { try { s.state.timeScale = on ? 0 : 1; } catch {} }
+    return on ? 'frozen' : 'unfrozen';
+  },
+  lightSlots: () => {
+    if (!spine) return null;
+    const out = [];
+    for (const s of spine.skeleton.slots) {
+      if (/light/i.test(s.data.name)) out.push(`${s.data.name}=${s.data.blendMode}`);
+    }
+    return out;
+  },
+  post: {
+    on: () => { baPostOn = true; try { localStorage.setItem('ba_post', '1'); } catch {} applyPostGrade(currentLobby); return baPostOn; },
+    off: () => { baPostOn = false; try { localStorage.setItem('ba_post', '0'); } catch {} if (postWrap) postWrap.filters = []; return baPostOn; },
+    mode: (m) => { if (m === 'faithful' || m === 'mild') { POST_MODE = m; try { localStorage.setItem('ba_post_mode', m); } catch {} applyPostGrade(currentLobby); } return POST_MODE; },
+    get status() { return { on: baPostOn, mode: POST_MODE, cfg: baPostCfgFor(currentLobby), filter: !!baPostFilter, stageF: app?.stage?.filters?.length ?? 0, onStage: !!(baPostFilter && app?.stage?.filters?.some(f => f === baPostFilter)) }; },
+    apply: (lobby) => applyPostGrade(lobby || currentLobby),
+    cpu: (rgb, lobby) => baPostCpu(rgb, baPostCfgFor(lobby || currentLobby)),
+    test: (rgb, lobby) => { const c = baPostCfgFor(lobby || currentLobby); return c ? { in: rgb, cfg: c, out: baPostCpu(rgb, c) } : null; },
+    reload: async () => { for (const k of Object.keys(POST_CONFIG)) delete POST_CONFIG[k]; POST_CONFIG_LOAD = null; await loadPostConfig(); return Object.keys(POST_CONFIG).length; },
+    stageTint: (v) => { try { app.stage.filters = [new ColorMatrixFilter({ brightness: Number(v) ?? 3 })]; return app.stage.filters.length + ''; } catch (e) { return 'ERR ' + e.message; } },
+    clearFilters: () => { app.stage.filters = []; return app.stage.filters.length; },
+    renderNow: () => { app.render(); return 'rendered'; },
+    present: async () => { app.render(); await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); return 'presented'; },
+    readPix: (fx, fy) => {
+      try {
+        app.render();
+        const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl');
+        const cw = gl.drawingBufferWidth, ch = gl.drawingBufferHeight;
+        const px = new Uint8Array(4);
+        gl.readPixels(Math.min(Math.max(0, Math.floor((fx ?? 0.5) * cw)), cw - 1), Math.min(Math.max(0, Math.floor((fy ?? 0.5) * ch)), ch - 1), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        return [...px];
+      } catch (e) { return 'ERR ' + e.message; }
+    },
+  },
   sceneInfo: () => {
     if (!scene) return null;
     const cur = scene.state.getCurrent(0);
@@ -2331,7 +2371,7 @@ window.ba_debug = {
   dbgTopLight: () => {
     if (!spine) return null;
     return spine.skeleton.slots
-      .filter(s => isTopLightSlot(s.data.name))
+      .filter(s => s.data.blendMode === 3 || s.data.blendMode === 1)
       .map(s => `${s.data.name}=${s.data.blendMode}`);
   },
   setTimeScale: (v) => { if (spine) spine.state.timeScale = v; },
@@ -4083,6 +4123,215 @@ function toggleSidebar(force) {
   if (open) renderSidebar();
 }
 
+// ==================== BA 後製色調還原（各 lobby 的 Volume 資料復刻） ====================
+// 資料來源：spinelobbies-<lobby>-_mxdependency-assets-* bundle 內的
+// ColorAdjustments / LiftGammaGain / DepthOfField / PaniniProjection / ChromaticAberration。
+// 以單一 full-screen Filter 附加到 app.stage，模擬 URP：sRGB→linear→exposure→gain/lift→(選用 tone)→gamma→contrast/saturation。
+const POST_VERT = `
+in vec2 aPosition;
+out vec2 vTextureCoord;
+uniform vec4 uInputSize;
+uniform vec4 uOutputFrame;
+uniform vec4 uOutputTexture;
+vec4 filterVertexPosition( void ) {
+  vec2 position = aPosition * uOutputFrame.zw + uOutputFrame.xy;
+  position.x = position.x * (2.0 / uOutputTexture.x) - 1.0;
+  position.y = position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) - uOutputTexture.z;
+  return vec4(position, 0.0, 1.0);
+}
+vec2 filterTextureCoord( void ) {
+  return aPosition * (uOutputFrame.zw * uInputSize.zw);
+}
+void main(void) {
+  gl_Position = filterVertexPosition();
+  vTextureCoord = filterTextureCoord();
+}
+`;
+const POST_FRAG = `
+in vec2 vTextureCoord;
+out vec4 finalColor;
+uniform sampler2D uTexture;
+uniform float uOn;
+uniform float uExp;
+uniform float uCon;
+uniform float uSat;
+uniform float uChroma;
+uniform vec3 uGain;
+uniform vec3 uLift;
+uniform vec3 uGam;
+uniform vec3 uCF;
+uniform vec4 uPanini;
+const float MIDGRAY = 0.4135884;
+float srgb2lin(float c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
+float lin2srgb(float c) { return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055; }
+float log10f(float x) { return log(x) / 2.302585093; }
+// URP PaniniProjection.shader — Panini_Generic（d>0 時）；座標空間：uv→view(ndc*viewExtents*scale)→cyl→回 uv
+vec2 paniniUv(vec2 uv) {
+  float d = uPanini.z;
+  if (d <= 0.001) return uv;
+  vec2 vp = (2.0 * uv - 1.0) * uPanini.xy * uPanini.w;
+  float viewDist = 1.0 + d;
+  float hypSq = vp.x * vp.x + viewDist * viewDist;
+  float isectD = vp.x * d;
+  float disc = max(hypSq - isectD * isectD, 0.0);
+  float cylDistMinusD = (-isectD * vp.x + viewDist * sqrt(disc)) / hypSq;
+  float cylDist = cylDistMinusD + d;
+  vec2 cylPos = vp * (cylDist / viewDist);
+  return (cylPos / (cylDist - d)) / uPanini.xy * 0.5 + 0.5;
+}
+// URP UberPost — ChromaticAberration（3 sample，r@uv / g@uv+d / b@uv+2d）
+vec3 sampleWarp(vec2 uv) {
+  vec2 c2 = 2.0 * uv - 1.0;
+  vec2 end = uv - c2 * dot(c2, c2) * uChroma;
+  vec2 delta = (end - uv) / 3.0;
+  float r = texture(uTexture, paniniUv(uv)).r;
+  float g = texture(uTexture, paniniUv(delta + uv)).g;
+  float b = texture(uTexture, paniniUv(delta * 2.0 + uv)).b;
+  return vec3(r, g, b);
+}
+void main() {
+  vec4 c = texture(uTexture, vTextureCoord);
+  if (uOn <= 0.5 || c.a <= 0.003) { finalColor = c; return; }
+  vec3 rgb = sampleWarp(vTextureCoord);
+  // === URP LutBuilderHdr（HDR grading）+ UberPost 等價管線 ===
+  vec3 lin = vec3(srgb2lin(max(rgb.r, 0.0)), srgb2lin(max(rgb.g, 0.0)), srgb2lin(max(rgb.b, 0.0)));
+  // uber：input *= postExposure（線性）；LUT 索引前 saturate(LinearToLogC(input))
+  lin *= uExp;
+  vec3 lg = vec3(0.241514 * log10f(max(5.555556 * lin.r, 1e-6)) + 0.584878,
+                 0.241514 * log10f(max(5.555556 * lin.g, 1e-6)) + 0.584878,
+                 0.241514 * log10f(max(5.555556 * lin.b, 1e-6)) + 0.584878);
+  lg = clamp(lg, 0.0, 1.0);
+  // LUT builder：contrast（LogC 空間）
+  lg = (lg - MIDGRAY) * uCon + MIDGRAY;
+  lin = vec3((pow(10.0, (lg.r - 0.584878) / 0.241514) - 0.047995) / 5.555556,
+             (pow(10.0, (lg.g - 0.584878) / 0.241514) - 0.047995) / 5.555556,
+             (pow(10.0, (lg.b - 0.584878) / 0.241514) - 0.047995) / 5.555556);
+  // LUT builder：colorFilter → max(0) → Lift/Gamma/Gain → saturation
+  lin *= uCF;
+  lin = max(lin, 0.0);
+  lin = lin * uGain + uLift;
+  lin = sign(lin) * pow(abs(lin), uGam);
+  float luma = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+  lin = vec3(luma) + uSat * (lin - vec3(luma));
+  // uber：LinearToSRGB 輸出
+  vec3 outc = vec3(lin2srgb(clamp(lin.r, 0.0, 1.0)), lin2srgb(clamp(lin.g, 0.0, 1.0)), lin2srgb(clamp(lin.b, 0.0, 1.0)));
+  finalColor = vec4(outc * c.a, c.a);
+}
+`;
+let baPostFilter = null;
+let postWrap = null;
+// pixi v8 的 RenderGroup 忽略 root stage 上的 filter（實測 built-in 亦無作用），
+// 故把動態場景全部掛到 stage 下的 wrapper，filter 綁在 wrapper 上。
+function ensurePostWrap() {
+  if (!postWrap) { postWrap = new Container(); postWrap.name = 'postWrap'; app.stage.addChild(postWrap); }
+  for (const c of [...app.stage.children]) {
+    if (c === postWrap) continue;
+    app.stage.removeChild(c);
+    postWrap.addChild(c);
+  }
+  return postWrap;
+}
+function ensurePostFilter() {
+  if (baPostFilter) return baPostFilter;
+  try {
+    const baPostUniforms = new UniformGroup({
+      uOn: { value: 0, type: 'f32' },
+      uExp: { value: 1, type: 'f32' },
+      uCon: { value: 1, type: 'f32' },
+      uSat: { value: 1, type: 'f32' },
+      uChroma: { value: 0, type: 'f32' },
+      uGain: { value: [1, 1, 1], type: 'vec3<f32>' },
+      uLift: { value: [0, 0, 0], type: 'vec3<f32>' },
+      uGam: { value: [1, 1, 1], type: 'vec3<f32>' },
+      uCF: { value: [1, 1, 1], type: 'vec3<f32>' },
+      uPanini: { value: [1.1547, 0.57735, 0, 1], type: 'vec4<f32>' },
+    });
+    baPostFilter = new Filter({
+      glProgram: GlProgram.from({ vertex: POST_VERT, fragment: POST_FRAG }),
+      resources: { baPostUniforms },
+    });
+    baPostFilter._uniforms = baPostUniforms;
+  } catch (e) { baPostFilter = null; log('post filter 初始化失敗: ' + e.message); }
+  return baPostFilter;
+}
+
+const POST_CONFIG = {};
+let POST_CONFIG_LOAD = null;
+function loadPostConfig() {
+  if (POST_CONFIG_LOAD) return POST_CONFIG_LOAD;
+  if (globalThis.__BA_TEST_CFG) Object.assign(POST_CONFIG, globalThis.__BA_TEST_CFG);
+  POST_CONFIG_LOAD = (async () => {
+    try { Object.assign(POST_CONFIG, await (await fetch(assetUrl('assets/data/lobby_post_config.json'))).json()); }
+    catch (e) { log('[post] config 載入失敗: ' + e.message); }
+  })();
+  return POST_CONFIG_LOAD;
+}
+let baPostOn = false;
+try { baPostOn = localStorage.getItem('ba_post') === '1'; } catch {}
+// mild = 跳過 exposure（官方 5.5EV 是補償遊戲內更暗的客製 shader；我們的 unlit 重現直接套會爆白）
+// faithful = 完整照官方數值。panini/chroma/LGG 兩種模式都套。
+let POST_MODE = 'mild';
+try { POST_MODE = localStorage.getItem('ba_post_mode') === 'faithful' ? 'faithful' : 'mild'; } catch {}
+const baPostCfgFor = (lobby) => POST_CONFIG[(lobby || '').toLowerCase()] || null;
+// URP Panini：viewExtents = (aspect*tan(fov/2), tan(fov/2))；fov 遊戲端未知，假設 60
+function postPaniniParams(cfg) {
+  const d = cfg.p ? cfg.p[0] : 0;
+  const crop = cfg.p ? (cfg.p.length > 1 ? cfg.p[1] : 1) : 0;
+  const tanH = Math.tan(60 * Math.PI / 360);
+  const aspect = app.renderer.width / Math.max(1, app.renderer.height);
+  const vex = [aspect * tanH, tanH];
+  let scaleF = 1;
+  if (d > 0) {
+    const fit = (v) => { const hyp = Math.sqrt(v * v + 1); const cd = 1 / hyp + d; return (1 / hyp) * ((1 + d) / cd); };
+    scaleF = Math.min(fit(vex[0]), fit(vex[1]));
+  }
+  const s = 1 + (scaleF - 1) * crop;
+  return [vex[0], vex[1], d, s];
+}
+function applyPostGrade(lobby) {
+  if (!ensurePostFilter()) return null;
+  const cfg = baPostOn ? baPostCfgFor(lobby) : null;
+  const w = ensurePostWrap();
+  if (!cfg) { w.filters = []; return null; }
+  const u = baPostFilter.resources.baPostUniforms.uniforms;
+  u.uOn = 1;
+  u.uExp = POST_MODE === 'mild' ? 1 : (cfg.e ?? 1);
+  u.uCon = cfg.c ?? 1;
+  u.uSat = cfg.s ?? 1;
+  u.uChroma = cfg.ch ?? 0;
+  u.uGain = cfg.g || [1, 1, 1];
+  u.uLift = cfg.l || [0, 0, 0];
+  u.uGam = cfg.gm || [1, 1, 1];
+  u.uCF = cfg.cf || [1, 1, 1];
+  u.uPanini = postPaniniParams(cfg);
+  baPostFilter.resources.baPostUniforms.update();
+  w.filters = [baPostFilter];
+  return { lobby, mode: POST_MODE };
+}
+// CPU 對照版：與 shader 完全同序（空間效果 chroma/panini 不在內，驗證時 config 需拿掉 ch/p）
+function baPostCpu(rgb, cfg) {
+  const G2L = c => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  const L2G = c => c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+  const MID = 0.4135884;
+  const e = POST_MODE === 'mild' ? 1 : (cfg.e ?? 1);
+  let lin = rgb.map(v => G2L(Math.max(v, 0)));
+  lin = lin.map(v => v * e);
+  let lg = lin.map(v => 0.241514 * Math.log10(Math.max(5.555556 * v, 1e-6)) + 0.584878);
+  lg = lg.map(v => Math.min(Math.max(v, 0), 1));
+  lg = lg.map(v => (v - MID) * (cfg.c ?? 1) + MID);
+  lin = lg.map(v => (Math.pow(10, (v - 0.584878) / 0.241514) - 0.047995) / 5.555556);
+  const cf = cfg.cf || [1, 1, 1];
+  lin = lin.map((v, i) => v * cf[i]);
+  lin = lin.map(v => Math.max(v, 0));
+  const gain = cfg.g || [1, 1, 1], lift = cfg.l || [0, 0, 0], gam = cfg.gm || [1, 1, 1];
+  lin = lin.map((v, i) => v * gain[i] + lift[i]);
+  lin = lin.map((v, i) => Math.sign(v) * Math.pow(Math.abs(v), gam[i]));
+  const luma = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+  const sat = cfg.s ?? 1;
+  lin = lin.map(v => luma + sat * (v - luma));
+  return lin.map(v => Math.round(L2G(Math.min(Math.max(v, 0), 1)) * 255));
+}
+
 function selectLobby(key) {
   if (exporting) return;
   if (key === currentLobby) { toggleSidebar(false); return; }
@@ -4106,9 +4355,7 @@ async function loadScene(entry) {
       await Assets.load(skel);
       await Assets.load(atlas);
       const obj = Spine.from({ skeleton: skel, atlas });
-      for (const slot of obj.skeleton.slots) {
-        if (isTopLightSlot(slot.data.name)) slot.data.blendMode = 3;
-      }
+      fixAdditiveSlots(obj);
       // 不在此自動播放——由 startBgSequence 依 BA 時間軸統一驅動（避免搶在
       // intro 之前就跑 idle 迴圈，導致 startBgSequence 的冪等判斷誤判而跳過開場）。
       return obj;
@@ -4284,9 +4531,7 @@ async function loadLobby(name) {
       : [];
     await Promise.all(charAssets.map(a => Assets.load(a)));
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
-    for (const slot of spine.skeleton.slots) {
-      if (isTopLightSlot(slot.data.name)) slot.data.blendMode = 3;
-    }
+    fixAdditiveSlots(spine);
     const sch = SCHEDULE?.lobbies?.[name];
     currentLobbyVoiceFolder = sch?.voiceFolder || null;
     voiceSkip.clear();
@@ -4344,6 +4589,8 @@ async function loadLobby(name) {
   scheduleAutonomy();
   loadingEl.classList.remove('show');
   fadeOut();
+  try { await loadPostConfig(); } catch (e) {}
+  applyPostGrade(name);
   log(`${name} 載入完成 — ${prettyName(name)}`);
 }
 
@@ -5042,6 +5289,14 @@ async function init() {
   } catch (e) {
     console.warn('[lobby] 白色閃爍曲線資料載入失敗，使用內建模板', e);
   }
+  // BA 後製色調（per-lobby volume 資料）；POST=1 / POST=0（query 或 hash）可強制開關
+  loadPostConfig();
+  try {
+    let postVal = new URL(location.href).searchParams.get('POST');
+    if (postVal === null) { const m = /(?:^|[?#])POST=([01])/.exec(location.hash); postVal = m ? m[1] : null; }
+    if (postVal !== null) { baPostOn = postVal === '1'; try { localStorage.setItem('ba_post', baPostOn ? '1' : '0'); } catch {} }
+  } catch (e) {}
+  applyPostGrade(currentLobby);
   await loadSubtitles();
   try {
     const br = await fetchRetry('assets/data/lobby_bgm_mapping.csv');
@@ -5061,6 +5316,7 @@ async function init() {
 
   // camera smoothing
   app.ticker.add(() => {
+    if (baPostOn) ensurePostWrap();
     if (spine && fitted) applyCamera(CAMERA.weight);
     tickWhiteFlash();
   });
@@ -5265,6 +5521,7 @@ if (/PROBE=1/.test(location.search + location.hash)) {
       skipTitle: t('skip.title'),
       skipOk: document.getElementById('skipYes')?.textContent,
       jpOnlyCk: document.getElementById('setJpOnlyCk')?.checked,
+      postOn: baPostOn, postCfg: baPostCfgFor(currentLobby)?.ca?.postExposure ?? null,
       krPacks: Object.keys(_assetInfo?.packages ?? {}).filter(k => k.startsWith('voice/KR_')).length,
       krKeep: (() => { let n = 0; if (!_assetInfo?.packages) return -1; for (const g of buildSidebarGroups()) if (groupHasKrVoice(g.core)) n++; return n; })(),
       loadingText: loadingText?.textContent,
