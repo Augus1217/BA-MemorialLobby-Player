@@ -198,9 +198,9 @@
       width: 18px; height: 18px; display: block; flex: none;
       filter: drop-shadow(0 1px 2px rgba(0,0,0,.55));
     }
-    .ctl-btn .fs-out { display: none; }
-    .ctl-btn.is-full .fs-in  { display: none; }
-    .ctl-btn.is-full .fs-out { display: block; }
+    .ctl-btn .ico svg.fs-out { display: none; }
+    .ctl-btn.is-full .ico svg.fs-in  { display: none; }
+    .ctl-btn.is-full .ico svg.fs-out { display: block; }
 
     /* 側欄釘選（sb-pin）：名字截斷 + 圖釘開關 */
     .sb-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -223,7 +223,7 @@
         0 24px 70px rgba(0,0,0,.65),
         inset 0 1px 0 rgba(160,190,255,.18),
         0 0 0 1px rgba(76,167,255,.08);
-      display: none; color: #e8ecff; backdrop-filter: blur(12px);
+      display: none; color: #e8ecff;
     }
     #exportPanel.open, #settingsPanel.open { display: block; animation: panelIn .22s ease-out; }
     @keyframes panelIn {
