@@ -3878,6 +3878,23 @@ function lobbyGroupInfo(key) {
   return { core: rest, labels, isDup };
 }
 
+// Per-costume sidebar icon key: keep the costume suffix (_swimsuit/...),
+// strip only the outer suffixes (_home/_teen/_multi/_gl) and leading "lobby".
+// e.g. hoshino_swimsuit_home -> hoshino_swimsuit. Returns null if nothing changes.
+function costumeIconKey(key) {
+  let rest = key.toLowerCase();
+  if (rest.startsWith('lobby')) rest = rest.slice(5);
+  let prev;
+  do {
+    prev = rest;
+    for (const suf of ['_home_gl', '_home', '_teen', '_multi', '_gl']) {
+      if (rest.endsWith(suf)) { rest = rest.slice(0, -suf.length); break; }
+    }
+  } while (rest !== prev);
+  if (rest === key.toLowerCase() || rest === (key.toLowerCase().replace(/^lobby/, ''))) return null;
+  return rest || null;
+}
+
 // ---- student display names (students_data.csv, keyed by file_id) ----
 // The same mode also selects the UI language via I18N_UI (see t()/applyI18n).
 const LANG_MODES = [
@@ -4056,7 +4073,7 @@ function renderSidebar() {
       const b = document.createElement('button');
       b.className = 'sb-item';
       b.dataset.key = c.key;
-      const ico = STUDENT_ICONS[c.info.core];
+      const ico = STUDENT_ICONS[costumeIconKey(c.key) || c.info.core] || STUDENT_ICONS[c.info.core];
       if (ico) {
         const img = document.createElement('img');
         img.className = 'sb-ico';
