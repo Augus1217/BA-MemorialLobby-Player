@@ -6,6 +6,7 @@ assets/*
 !assets/ui/
 !assets/ui/ui_i18n.json
 !assets/loading/
+!assets/clickfx/
 dist/
 release/
 index.prod.html
