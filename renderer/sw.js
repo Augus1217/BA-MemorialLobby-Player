@@ -43,7 +43,7 @@ self.addEventListener('fetch', (e) => {
       if (hit) return hit;
     }
     const fresh = await fetch(e.request);
-    if (fresh.ok && _activeCacheName) {
+    if (fresh.status === 200 && _activeCacheName) {
       const c = await caches.open(_activeCacheName);
       await c.put(e.request, fresh.clone());
     }
