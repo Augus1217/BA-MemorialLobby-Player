@@ -1,62 +1,54 @@
 // ba-web.js — GitHub Pages 版的 window.ba shim
-// 以 Cache Storage 取代桌面版的 assets/ 目錄；介面與 preload.js 完全對齊。
-// 資產來源：Cloudflare Worker（代理 GitHub Releases，含 CORS 與邊緣快取）。
+// 資產狀態全部寫在 Cache Storage 的 __meta 內（不再依賴 localStorage）。
+// ensureAssets(neededPacks, onProgress) 是唯一的啟動 gate：併發下載、去重、
+// 完成後只寫一次 __meta。SW 只看 active cache（O(1) 查找）。
 import { gunzipSync } from 'fflate';
 
 const WORKER_BASE = 'https://ba-assets.imlindora.workers.dev';
 const LATEST_VERSION_URL = `${WORKER_BASE}/latest/assets_version.json`;
 const CACHE_PREFIX = 'ba-assets-v';
-const LS_VERSION = 'ba_web_version';
-const LS_INSTALLED = 'ba_web_installed';
-const LS_STREAMING = 'ba_streaming';
 
 let _cache = null;
 let _versionMeta = null;
+const _inflight = new Map();          // "version:name" → Promise (去重)
 
-function lsGet(k, dflt) {
-  try { return localStorage.getItem(k) ?? dflt; } catch { return dflt; }
-}
-function lsSet(k, v) {
-  try { localStorage.setItem(k, v); } catch {}
-}
-function readInstalled() {
-  try { return JSON.parse(lsGet(LS_INSTALLED, '{}')); } catch { return {}; }
-}
-function writeInstalled(obj) {
-  lsSet(LS_INSTALLED, JSON.stringify(obj));
-}
-
-async function cache() {
-  if (!_cache) {
-    const ver = lsGet(LS_VERSION, '0');
-    _cache = await caches.open(CACHE_PREFIX + ver);
-  }
+// ---- cache helpers (no localStorage) ----
+async function activeCache() {
   return _cache;
 }
 
-// 版本切換時開新快取並通知 SW；舊快取延後到新包安裝成功才刪
-// （先刪後裝的話，下載中斷 = 使用者資產全毀且無法自癒）。
-async function switchVersionCache(ver) {
+async function openCache(ver) {
   _cache = await caches.open(CACHE_PREFIX + ver);
-  lsSet(LS_VERSION, ver);
-  // 立即通知 SW 指向新快取（原本只在頁面載入 1.5s 後通知一次，
-  // 換版後 SW 永遠指向舊快取名）
+  // 通知 SW 指向新快取（同時兼容舊版 'ba-cache' 類型）
   try {
-    navigator.serviceWorker?.controller?.postMessage({ type: 'ba-cache', cache: CACHE_PREFIX + ver });
+    navigator.serviceWorker?.controller?.postMessage({
+      type: 'ba-active-cache',
+      cache: CACHE_PREFIX + ver,
+    });
   } catch {}
+  return _cache;
 }
 
+// ---- __meta：寫在 cache 內，替代 localStorage LS_INSTALLED/LS_VERSION ----
+async function readMeta(c) {
+  if (!c) return {};
+  const r = await c.match('__meta');
+  if (!r) return {};
+  try { return await r.json(); } catch { return {}; }
+}
+async function writeMeta(c, obj) {
+  await c.put('__meta', new Response(JSON.stringify(obj), {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'immutable' },
+  }));
+}
+
+// ---- version manifest ----
 async function fetchRemoteVersion() {
   if (_versionMeta) return _versionMeta;
-  // 先問 Worker 最新 tag 有没有 manifest——Worker 只認 /v<tag>/ 路徑，
-  // 因此先打 latest release 的 manifest（GitHub 直鏈）取得版本號。
-  let meta = null;
-  try {
-    const r = await fetch(LATEST_VERSION_URL, { cache: 'no-store' });
-    if (r.ok) meta = await r.json();
-  } catch {}
-  if (!meta?.version) throw new Error('assets_version.json unavailable');
-  // 改用 Worker 路徑取包（CORS + 快取）
+  const r = await fetch(LATEST_VERSION_URL, { cache: 'no-store' });
+  if (!r.ok) throw new Error('assets_version.json unavailable');
+  const meta = await r.json();
+  if (!meta?.version) throw new Error('assets_version.json invalid');
   meta._base = `${WORKER_BASE}/v${meta.version}`;
   _versionMeta = meta;
   return meta;
@@ -66,16 +58,15 @@ function packUrl(meta, name) {
   return `${meta._base}/assets-${name.replace(/\//g, '_')}-v${meta.version}.tar.gz`;
 }
 
-// ---- mini tar parser（ustar；包內 arcname 為 assets/...，strip:1 對齊桌面版）----
+// ---- mini tar parser（ustar；strip:1） ----
 function untarGz(buf, onEntry) {
   const files = gunzipSync(new Uint8Array(buf));
   let off = 0;
   while (off + 512 <= files.length) {
     const header = files.subarray(off, off + 512);
-    if (header.every((b) => b === 0)) break; // 兩個全零 block 結尾
+    if (header.every((b) => b === 0)) break;
     let name = '';
     for (const b of header.subarray(0, 100)) { if (!b) break; name += String.fromCharCode(b); }
-    // ustar prefix 欄位（345..500）
     let prefix = '';
     for (const b of header.subarray(345, 345 + 155)) { if (!b) break; prefix += String.fromCharCode(b); }
     if (prefix) name = prefix + '/' + name;
@@ -90,10 +81,26 @@ function untarGz(buf, onEntry) {
   }
 }
 
-// 下載單一包並展開進 Cache Storage；回傳是否成功
+function guessMime(p) {
+  const ext = p.split('.').pop().toLowerCase();
+  return ({
+    mp4: 'video/mp4', webm: 'video/webm', ogg: 'audio/ogg', m4a: 'audio/mp4',
+    png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', json: 'application/json',
+    js: 'application/javascript', css: 'text/css', svg: 'image/svg+xml',
+    atlas: 'text/plain', skel: 'application/octet-stream', csv: 'text/csv',
+    woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf',
+  })[ext] || 'application/octet-stream';
+}
+
+function cacheKey(p) {
+  const rel = p.replace(/^\.\//, '');
+  return new URL(rel.startsWith('assets/') ? rel : 'assets/' + rel, location.href).toString();
+}
+
+// ---- 下載單包 → 解壓進 cache ----
 async function fetchAndInstallPack(meta, name, onProgress) {
   const url = packUrl(meta, name);
-  const c = await cache();
+  const c = await activeCache();
   onProgress?.({ status: 'downloading', percent: 0 });
   const resp = await fetch(url, { cache: 'force-cache' });
   if (!resp.ok) throw new Error(`pack ${name}: HTTP ${resp.status}`);
@@ -101,57 +108,137 @@ async function fetchAndInstallPack(meta, name, onProgress) {
   onProgress?.({ status: 'extracting', percent: 0 });
   const entries = [];
   untarGz(buf, (path, data) => entries.push([path, data]));
-  // strip "assets/" 前綴 → key 成 "./xxx" 相對路徑（與 assetUrl('./...') 對齊）
   const batch = [];
   for (const [path, data] of entries) {
     const rel = path.replace(/^assets\//, '');
     const body = new Response(data.slice().buffer, {
       headers: { 'Content-Type': guessMime(rel), 'Cache-Control': 'immutable' },
     });
-    const key = cacheKey(rel);
-    batch.push(c.put(key, body));
+    batch.push(c.put(cacheKey(rel), body));
     if (batch.length >= 64) { await Promise.all(batch); batch.length = 0; }
   }
   await Promise.all(batch);
-  const installed = readInstalled();
-  installed[name] = meta.packages?.[name]?.sha256 || 'local';
-  writeInstalled(installed);
   onProgress?.({ status: 'done', percent: 100 });
 }
 
-export function guessMime(p) {
-  const ext = p.split('.').pop().toLowerCase();
-  return ({
-    mp4: 'video/mp4', webm: 'video/webm', ogg: 'audio/ogg', m4a: 'audio/mp4',
-    png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', json: 'application/json',
-    js: 'application/javascript', css: 'text/css', svg: 'image/svg+xml',
-    atlas: 'text/plain', skel: 'application/octet-stream', csv: 'text/csv',
-    woff2: 'font/woff2', ttf: 'font/ttf',
-  })[ext] || 'application/octet-stream';
+// ---- cacheGet：快取 miss → 回傳 null（由呼叫端處理 fallback） ----
+async function cacheGet(path) {
+  const c = await activeCache();
+  if (!c) return null;
+  return c.match(cacheKey(path));
 }
 
-// app.js 傳 'assets/xxx'（無 ./）；快取 key 統一為絕對 URL
-export function cacheKey(p) {
-  const rel = p.replace(/^\.\//, '');
-  return new URL(rel.startsWith('assets/') ? rel : 'assets/' + rel, location.href).toString();
+// ---- ensureAssets：唯一的啟動 gate ----
+// neededPacks: ['core'] 或 ['core', 'intro']
+// 回傳 { ok, version } 或 { ok:false, version, error }
+async function ensureAssets(neededPacks, onProgress) {
+  const meta = await fetchRemoteVersion();
+  await openCache(meta.version);
+  const c = await activeCache();
+  const installed = await readMeta(c);
+
+  const toDownload = neededPacks.filter(
+    (k) => meta.packages?.[k] && installed[k] !== meta.packages[k].sha256
+  );
+
+  if (!toDownload.length) {
+    // 所有需要的包都已安裝
+    _versionMeta = meta;   // cache reference
+    return { ok: true, version: meta.version };
+  }
+
+  // 併發下載（同一包不會重複下載）
+  const results = await Promise.allSettled(toDownload.map(async (name) => {
+    const dedupKey = `${meta.version}:${name}`;
+    if (_inflight.has(dedupKey)) return _inflight.get(dedupKey);
+
+    const sendProgress = onProgress
+      ? (p) => onProgress({ package: name, ...p })
+      : undefined;
+
+    const p = fetchAndInstallPack(meta, name, sendProgress)
+      .finally(() => _inflight.delete(dedupKey));
+    _inflight.set(dedupKey, p);
+    return p;
+  }));
+
+  const failures = results.filter((r) => r.status === 'rejected');
+  if (failures.length) {
+    return { ok: false, version: meta.version, error: String(failures[0].reason) };
+  }
+
+  // 寫入新的 __meta
+  const updated = { ...installed };
+  for (const k of toDownload) updated[k] = meta.packages[k].sha256;
+  await writeMeta(c, updated);
+
+  // 清理舊版快取
+  const names = await caches.keys();
+  const activeKey = CACHE_PREFIX + meta.version;
+  await Promise.all(
+    names.filter((n) => n.startsWith(CACHE_PREFIX) && n !== activeKey)
+      .map((n) => caches.delete(n))
+  );
+
+  return { ok: true, version: meta.version };
 }
 
-async function cacheGet(p) {
-  const c = await cache();
-  return c.match(cacheKey(p));
+// ---- downloadAssets：設定面板的「完整安裝」模式（legacy） ----
+async function downloadAllAssets({ version }, onProgress) {
+  const meta = version && _versionMeta?.version === version
+    ? _versionMeta
+    : await fetchRemoteVersion();
+  await openCache(meta.version);
+  const c = await activeCache();
+  const installed = await readMeta(c);
+
+  const toDownload = Object.keys(meta.packages || {}).filter(
+    (k) => installed[k] !== meta.packages[k]?.sha256
+  );
+  if (!toDownload.length) return { ok: true, version: meta.version };
+
+  const results = [];
+  for (let i = 0; i < toDownload.length; i++) {
+    const name = toDownload[i];
+    const sendProgress = onProgress
+      ? (p) => onProgress({ package: name, index: i, total: toDownload.length, ...p })
+      : undefined;
+    try {
+      await fetchAndInstallPack(meta, name, sendProgress);
+      results.push({ name, ok: true });
+    } catch (e) {
+      results.push({ name, ok: false, error: e.message });
+    }
+  }
+
+  // 更新 __meta
+  const updated = { ...installed };
+  for (const r of results) {
+    if (r.ok && meta.packages[r.name]) updated[r.name] = meta.packages[r.name].sha256;
+  }
+  await writeMeta(c, updated);
+
+  if (results.some((r) => r.ok)) {
+    const names = await caches.keys();
+    const activeKey = CACHE_PREFIX + meta.version;
+    await Promise.all(
+      names.filter((n) => n.startsWith(CACHE_PREFIX) && n !== activeKey)
+        .map((n) => caches.delete(n))
+    );
+  }
+
+  return { ok: results.every((r) => r.ok), version: meta.version, results };
 }
 
 // ---- window.ba shim ----
 const ba = {
   async listLobbies() {
-    // 核心包內的 lobby_index.json（core 安裝後在快取；否則 fallback 到站上核心檔）
     const hit = await cacheGet('data/lobby_index.json');
-    if (hit) {
-      const idx = await hit.json();
-      return Object.keys(idx);
-    }
-    const r = await fetch('assets/data/lobby_index.json');
-    if (r.ok) return Object.keys(await r.json());
+    if (hit) { try { return Object.keys(await hit.json()); } catch {} }
+    try {
+      const r = await fetch('assets/data/lobby_index.json');
+      if (r.ok) return Object.keys(await r.json());
+    } catch {}
     return [];
   },
 
@@ -167,153 +254,100 @@ const ba = {
   finishAnimVideo: async () => null,
   abortAnimVideo: () => {},
   exportBgm: async () => null,
-
   screenSize: async () => ({ width: window.innerWidth, height: window.innerHeight }),
 
+  _progressHandlers: [],
   onDownloadProgress(cb) {
-    const h = (e) => cb(e.detail);
-    window.addEventListener('ba-download-progress', h);
+    this._progressHandlers.push(cb);
   },
 
+  // ---- 新 API：唯一的啟動 gate ----
+  async ensureAssets(neededPacks, onProgress) {
+    const combined = onProgress
+      ? (p) => onProgress(p)
+      : undefined;
+    return ensureAssets(neededPacks, combined);
+  },
+
+  // ---- legacy：設定面板用（完整安裝） ----
   async checkAssets() {
-    let remote = null;
-    try { remote = await fetchRemoteVersion(); } catch {}
-    const installed = readInstalled();
-    const localVersion = lsGet(LS_VERSION, null);
-    const streaming = lsGet(LS_STREAMING, '1') === '1';
-    // sha 一致之外，還要驗證快取裡真的有哨兵檔——版本切換中斷會留下
-    // 「sha 已記但快取空/損毀」的狀態，不驗證的話永遠不會自癒。
-    let coreOk = !!(remote?.packages && installed['core'] === remote.packages['core']?.sha256);
-    if (coreOk) {
-      try {
-        coreOk = !!(await cacheGet('data/lobby_index.json'));
-      } catch { coreOk = false; }
-      if (!coreOk) {
-        // 快取損毀：清除安裝記錄，強制重裝
-        delete installed['core'];
-        delete installed['intro'];
-        writeInstalled(installed);
-      }
-    }
-
-    let needsDownloadPacks = [];
-    if (remote?.packages) {
-      for (const [k, v] of Object.entries(remote.packages)) {
-        if (installed[k] !== v.sha256) needsDownloadPacks.push(k);
-      }
-      if (streaming) {
-        const coreNeeds = needsDownloadPacks.filter((k) => k === 'core' || k === 'intro');
-        needsDownloadPacks = coreNeeds.length ? coreNeeds : (coreOk ? [] : ['core']);
-      }
-    }
-
+    const meta = await fetchRemoteVersion();
+    const c = await caches.open(CACHE_PREFIX + meta.version);
+    const installed = await readMeta(c);
+    const coreOk = installed['core'] === meta.packages?.['core']?.sha256;
+    const needsDownloadPacks = Object.keys(meta.packages || {}).filter(
+      (k) => installed[k] !== meta.packages[k]?.sha256
+    );
     return {
-      localVersion,
-      hasAssets: coreOk,
-      remoteVersion: remote?.version || null,
-      schema: remote?.schema || 1,
-      needsDownload: !coreOk || (needsDownloadPacks.length > 0),
+      localVersion: meta.version,
+      hasAssets: !!coreOk,
+      remoteVersion: meta.version,
+      schema: meta.schema || 1,
+      needsDownload: !coreOk || needsDownloadPacks.length > 0,
       needsDownloadPacks,
-      packages: remote?.packages || null,
-      lobbies: remote?.lobbies || null,
-      streaming,
+      packages: meta.packages,
+      lobbies: meta.lobbies,
+      streaming: true,
       installed,
     };
   },
 
-  async downloadAssets({ version, packages, onlyPacks } = {}) {
-    const meta = version && _versionMeta?.version === version ? _versionMeta : await fetchRemoteVersion();
-    const installed = readInstalled();
-    let names;
-    if (onlyPacks?.length) {
-      names = onlyPacks.filter((k) => meta.packages[k] && installed[k] !== meta.packages[k].sha256);
-      if (!names.length) names = onlyPacks.filter((k) => meta.packages[k]);
-    } else {
-      names = Object.keys(meta.packages).filter((k) => installed[k] !== meta.packages[k].sha256);
-      if (!names.length && !Object.keys(installed).length) names = Object.keys(meta.packages);
-    }
-    if (!names.length) {
-      if (!lsGet(LS_VERSION, null)) await switchVersionCache(meta.version);
-      return [];
-    }
-    await switchVersionCache(meta.version);
-    const results = [];
-    for (let i = 0; i < names.length; i++) {
-      const name = names[i];
-      const sendProgress = (p) => window.dispatchEvent(new CustomEvent('ba-download-progress', { detail: { package: name, index: i, total: names.length, ...p } }));
-      try {
-        await fetchAndInstallPack(meta, name, sendProgress);
-        results.push({ name, ok: true });
-      } catch (e) {
-        sendProgress({ status: 'error', error: e.message });
-        results.push({ name, ok: false, error: e.message });
-      }
-    }
-    if (results.some((r) => r.ok)) {
-      lsSet(LS_VERSION, meta.version);
-      // 新包安裝成功 → 通知 SW 指向新快取，並清掉其他舊快取（釋放空間）
-      try {
-        navigator.serviceWorker?.controller?.postMessage({ type: 'ba-cache', cache: CACHE_PREFIX + meta.version });
-      } catch {}
-      try {
-        const names = await caches.keys();
-        await Promise.all(names
-          .filter((n) => n.startsWith(CACHE_PREFIX) && n !== CACHE_PREFIX + meta.version)
-          .map((n) => caches.delete(n)));
-      } catch {}
-    }
-    return results;
+  async downloadAssets({ version, packages, onlyPacks }, onProgress) {
+    const meta = version && _versionMeta?.version === version
+      ? _versionMeta : await fetchRemoteVersion();
+    const needed = onlyPacks
+      ? onlyPacks.filter((k) => meta.packages?.[k])
+      : Object.keys(meta.packages || {});
+    return downloadAllAssets({ version: meta.version }, onProgress);
   },
 
-  async getStreamingMode() { return lsGet(LS_STREAMING, '1') === '1'; },
-  async setStreamingMode(v) { lsSet(LS_STREAMING, v ? '1' : '0'); return !!v; },
-
   async ensureLobby({ lobby, version, packages, lobbies }) {
-    const meta = version && _versionMeta?.version === version ? _versionMeta : await fetchRemoteVersion();
-    const installed = readInstalled();
+    const meta = version && _versionMeta?.version === version
+      ? _versionMeta : await fetchRemoteVersion();
+    await openCache(meta.version);
+    const c = await activeCache();
+    const installed = await readMeta(c);
+
     let packs = [];
     if (lobbies?.[lobby]?.packs) packs = [...lobbies[lobby].packs];
     else {
       const k = 'lobby/' + lobby;
       if (packages?.[k]) packs = [k];
     }
-    if (meta.packages?.['core'] && installed['core'] !== meta.packages['core'].sha256) packs.unshift('core');
+    if (meta.packages?.['core'] && installed['core'] !== meta.packages['core']?.sha256) {
+      packs.unshift('core');
+    }
     packs = [...new Set(packs)];
     const missing = packs.filter((k) => installed[k] !== meta.packages[k]?.sha256);
     if (!missing.length) return { ok: true, cached: true };
+
     const results = [];
     for (let i = 0; i < missing.length; i++) {
       const name = missing[i];
-      const sendProgress = (p) => window.dispatchEvent(new CustomEvent('ba-download-progress', { detail: { package: name, index: i, total: missing.length, ...p } }));
       try {
-        await fetchAndInstallPack(meta, name, sendProgress);
+        await fetchAndInstallPack(meta, name);
         results.push({ name, ok: true });
       } catch (e) {
-        sendProgress({ status: 'error', error: e.message });
         results.push({ name, ok: false, error: e.message });
       }
     }
     const failed = results.filter((r) => !r.ok);
     return failed.length ? { ok: false, results } : { ok: true, results };
   },
+
+  async getStreamingMode() { return true; },
+  async setStreamingMode() { return true; },
 };
 
-// Electron（preload 已注入 window.ba 或 file: 協議）下整個 shim 不生效
+// ---- WEB_MODE activation ----
 const WEB_MODE = typeof window !== 'undefined' && !window.ba && !location.protocol.startsWith('file');
 
 if (WEB_MODE) {
   window.ba = ba;
-  // Service Worker：攔截 assets/ fetch → Cache Storage
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('./sw.js', { scope: './' }).catch((e) => {
-      console.warn('[ba-web] SW register failed (fallback to direct fetch):', e.message);
+      console.warn('[ba-web] SW register failed:', e.message);
     });
-    navigator.serviceWorker.addEventListener('message', () => {});
   }
-  // 通知 SW 目前的快取名（換版時）
-  const _swCacheNotify = () => {
-    navigator.serviceWorker.controller?.postMessage({ type: 'ba-cache', cache: CACHE_PREFIX + lsGet(LS_VERSION, '0') });
-  };
-  setTimeout(_swCacheNotify, 1500);
   console.log('[ba-web] shim active');
 }

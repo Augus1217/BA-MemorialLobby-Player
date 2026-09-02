@@ -24,31 +24,37 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Download game assets from Worker
+      - name: Download boot assets from Worker
         run: |
-          if [ ! -d assets/bgm ]; then
-            echo "=== Downloading game assets from Worker ==="
-            WORKER_BASE="https://ba-assets.imlindora.workers.dev"
-            VER=$(curl -sf "$WORKER_BASE/latest/assets_version.json" | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || echo "")
-            if [ -n "$VER" ]; then
-              for pkg in assets-player intro; do
-                # tar_pack 檔名格式：assets-<key>-v<ver>.tar.gz（assets- 前綴）
-                URL="$WORKER_BASE/v${VER}/assets-${pkg}-v${VER}.tar.gz"
-                if curl -sf "$URL" -o /tmp/pkg.tar.gz && tar xzf /tmp/pkg.tar.gz -C .; then
-                  echo "  ✓ $pkg (v${VER})"
-                else
-                  echo "::warning::Failed to download ${pkg} (v${VER}), build will use any local assets"
-                fi
-                rm -f /tmp/pkg.tar.gz
-              done
-            else
-              echo "::warning::Failed to resolve version, build will use any local assets"
-            fi
-          else
-            echo "Assets already present, skipping download"
+          echo "=== Downloading boot assets from Worker ==="
+          WORKER_BASE="https://ba-assets.imlindora.workers.dev"
+          VER=$(curl -sf "$WORKER_BASE/latest/assets_version.json" | python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || echo "")
+          if [ -z "$VER" ]; then
+            echo "::warning::Failed to resolve version, build will use any local assets"
+            exit 0
           fi
+          echo "  version: $VER"
+          mkdir -p assets/loading assets/intro assets/ui
+          # core pack：只抽 loading/ + ui/ui_i18n.json（~20MB，比全抓 assets-player 423MB 快得多）
+          URL_CORE="$WORKER_BASE/v${VER}/assets-core-v${VER}.tar.gz"
+          if curl -sf "$URL_CORE" -o /tmp/core.tar.gz; then
+            tar xzf /tmp/core.tar.gz -C . --include='assets/loading/*' 'assets/ui/ui_i18n.json' 2>/dev/null
+            echo "  ✓ core (v${VER})"
+          else
+            echo "::warning::Failed to download core pack (v${VER})"
+          fi
+          rm -f /tmp/core.tar.gz
+          # intro pack：只抽 intro/（~5MB）
+          URL_INTRO="$WORKER_BASE/v${VER}/assets-intro-v${VER}.tar.gz"
+          if curl -sf "$URL_INTRO" -o /tmp/intro.tar.gz; then
+            tar xzf /tmp/intro.tar.gz -C . --include='assets/intro/*' 2>/dev/null
+            echo "  ✓ intro (v${VER})"
+          else
+            echo "::warning::Failed to download intro pack (v${VER})"
+          fi
+          rm -f /tmp/intro.tar.gz
           # 官方 ui 圖（氣泡/游標）不得進 Pages：delete 使其 url() 保持 runtime
-          # 解析（SW 由 assets-player/core pack 提供），避免 vite 打包成 hash 洩漏。
+          # 解析（SW 由 core pack 提供），避免 vite 打包成 hash 洩漏。
           rm -f assets/ui/Common_Balloon_Type2.png assets/ui/Lobby_balloon.png \
                 assets/ui/Lobby_balloon2.png assets/ui/PCIcon_MousePoint.png
           true

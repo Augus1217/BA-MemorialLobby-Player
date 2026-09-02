@@ -212,30 +212,20 @@ function applyCtlI18n() {
 // ---- 聊天/對話 UI 字體：不再寫死在 index.html @font-face（官方字體不 static
 // 散佈），改為 runtime 從 assets/fonts/（pack 安裝後由 SW 快取提供）動態
 // 註冊 FontFace。未載入前以系統字體 fallback，註冊成功後瀏覽器自動重繪。
-let _fontsTries = 0;
 async function loadGameFonts() {
   const defs = [
     { family: 'BA MPlus1p',    file: 'assets/fonts/BA-MPLUS1p-Medium.ttf',      fmt: 'truetype' },
     { family: 'BA NotoSansTC', file: 'assets/fonts/BA-NotoSansTC-Medium.otf',   fmt: 'opentype' },
     { family: 'BA NotoSans',   file: 'assets/fonts/BA-NotoSans-Regular.ttf',    fmt: 'truetype' },
   ];
-  const missing = [];
   for (const { family, file, fmt } of defs) {
     try {
       const face = new FontFace(family, `url('${assetUrl(file)}') format('${fmt}')`);
       await face.load();
       document.fonts.add(face);
-      console.log(`[lobby] 字體已註冊: ${family}`);
-    } catch (e) {
-      missing.push(family);
-      console.warn(`[lobby] 字體 ${family} 載入失敗（pack 未裝？），退回系統字體`, e);
+    } catch {
+      // core 已保證就位：仍失敗表示 pack 損壞，退回系統字體（不重試）
     }
-  }
-  // pack 通常稍後才裝好（autoStreamBootstrap 已等完）；若仍失敗，排隊重試
-  // 幾次，讓 SW 快取就緒後自動補上。
-  if (missing.length && _fontsTries < 4) {
-    _fontsTries++;
-    setTimeout(loadGameFonts, 3000 * _fontsTries);
   }
 }
 
@@ -4986,27 +4976,6 @@ async function ensureLobbyAssets(lobbyName) {
   }
 }
 
-// 串流模式啟動：自動下載必要包（core+intro），進度寫進 loading 文字。
-// 回傳 true=全部成功（可進 lobby）；false=有失敗（呼叫端應彈下載面板）。
-async function autoStreamBootstrap(assetInfo) {
-  const loadingText2 = document.getElementById('loadingText');
-  const packs = (assetInfo.needsDownloadPacks || []).filter(k => assetInfo.packages?.[k]);
-  if (!packs.length) return true;
-  const done = await new Promise((resolve) => {
-    window.ba.onDownloadProgress?.((p) => {
-      if (p.status === 'downloading' && loadingText2) {
-        loadingText2.textContent = t('dl.downloading', { pkg: p.package, i: p.index + 1, n: p.total });
-      }
-    });
-    window.ba.downloadAssets({
-      version: assetInfo.remoteVersion,
-      packages: assetInfo.packages,
-      onlyPacks: packs,
-    }).then(resolve).catch(() => resolve(null));
-  });
-  return Array.isArray(done) && done.every(r => r.ok);
-}
-
 async function showAssetDownload(assetInfo) {
   const downloadPanel = document.getElementById('downloadPanel');
   const status = document.getElementById('assetStatus');
@@ -5133,202 +5102,194 @@ async function showAssetDownload(assetInfo) {
   });
 }
 
-// 官方 boot 素材（title.webm / spinner.png / font.otf）只存在 private Assets
-// core pack，執行期由 web 的 SW cache 或桌面的 userData（app://）串流提供，
-// 不進 Player repo。首頁剛載入時（SW 尚未裝好 core、或桌面 core 還在下載）
-// 這些引用會 404 退化；等到 core 就緒後呼叫本函式重新觸發載入，讓標題影片／
-// 轉圈／官方字體在 boot 畫面補出。重設 src 前先 removeAttribute 以強制重送請求。
+// Boot 官方素材（title.webm / spinner.png / font.otf）在 vite build 時已被
+// 拷進 dist/assets/（靜態檔案），首屏通常正常載入。若首屏載入失敗（舊版部署
+// 或 edge case），在 core pack 就緒後由本函式補救。
 async function applyBootAssets() {
   const url = (p) => assetUrl(p);
   const v = document.getElementById('loadingVideo');
-  if (v) {
+  // 影片：若首屏已正常播放或快取有，不動；只在 error 時重試
+  if (v && v.error) {
     const src = v.querySelector('source');
     if (src) src.remove();
     v.removeAttribute('src');
     v.src = url('assets/loading/title.webm');
     try { v.load(); } catch {}
   }
-  const s = document.getElementById('loadingSpinner');
-  if (s) {
-    s.removeAttribute('src');
-    s.src = url('assets/loading/spinner.png');
-  }
-  // 官方 boot 字體：@font-face 首屏失敗不會自動重試，改以 FontFace 顯式註冊
+  // Spinner：通常首屏已載入，不動
+  // Boot 字體：@font-face 首屏若失敗，以 FontFace API 補註冊（只一次）
   try {
     if (!document.fonts.check('1em "BA Font"')) {
       const f = new FontFace('BA Font', `url("${url('assets/loading/font.otf')}")`);
       await f.load();
       document.fonts.add(f);
     }
-  } catch { /* 首屏無素材時靜默降級系統字體 */ }
+  } catch { /* 靜默降級系統字體 */ }
 }
 
-async function init() {
-  // ---- intro PV 音軌（pv-a.ogg）：一啟動就起播，不等更新檢查／下載 ----
-  // （web 首訪 intro 包未裝時 introMedia 為 null → 靜默跳過；showTapToStart 會補播）
-  startIntroAudioEarly();
+// ---- ensureReady：唯一的資產 gate（下載 core，不 block intro） ----
+async function ensureReady() {
+  const bootText = document.getElementById('bootLoadingText');
+  const showP = (p) => {
+    if (!bootText) return;
+    if (p.status === 'downloading') {
+      bootText.textContent = t('dl.downloading', { pkg: p.package, i: 1, n: 1 });
+    } else if (p.status === 'extracting') {
+      bootText.textContent = t('dl.extracting', { pkg: p.package });
+    } else if (p.status === 'done') {
+      bootText.textContent = t('dl.packDone', { pkg: p.package });
+    }
+  };
 
-  // ---- i18n: load UI dictionary first so the asset-check panel and every
-  // later message renders in the user's language. Falls back to zh-TW source
-  // strings when the dict is missing (dev without assets/data).
-  await loadI18n();
-  buildLangSegs();
-  applyI18n();
+  if (/(?:^|&)skipUpdate=1/.test(location.search + location.hash)) return;
 
-  // ---- Asset check: show download UI if assets missing ----
-  // loadingScreen 保持顯示（spinner），檢查／下載完成後才換成 TAP TO START。
-  if (window.ba?.checkAssets) {
+  // 新 API：ba-web.js ensureAssets（web 版）
+  if (window.ba?.ensureAssets) {
+    try { await window.ba.ensureAssets(['core'], showP); } catch (e) {
+      console.warn('[lobby] ensureAssets failed:', e.message);
+    }
+  }
+  // 舊 API fallback（Electron preload）
+  else if (window.ba?.checkAssets) {
     try {
-      // 加 10 秒逾時，避免網路問題卡住整個 init
-      const assetInfo = await Promise.race([
+      const info = await Promise.race([
         window.ba.checkAssets(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('checkAssets timeout')), WEB_MODE ? 30000 : 10000)),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('checkAssets timeout')), 10000)),
       ]);
-      _assetInfo = assetInfo;
-      // skipUpdate=1（headless 自動化）跳過下載，直接進入 lobby。
-      if (assetInfo.needsDownload && !/(?:^|&)skipUpdate=1/.test(location.search + location.hash)) {
-        // 串流模式（預設）：自動補齊必要包（core/intro），不出面板；全量安裝走設定面板。
-        if (assetInfo.streaming && assetInfo.needsDownloadPacks?.length) {
-          const ok = await autoStreamBootstrap(assetInfo);
-          if (ok) {
-            try { _assetInfo = await window.ba.checkAssets(); } catch {}
-          } else {
-            await showAssetDownload(assetInfo);
-            try { _assetInfo = await window.ba.checkAssets(); } catch {}
-          }
-        } else if (!assetInfo.streaming) {
-          // 完整安裝模式：維持舊面板流程
-          await showAssetDownload(assetInfo);
-          try { _assetInfo = await window.ba.checkAssets(); } catch {}
+      _assetInfo = info;
+      if (info.needsDownload && info.needsDownloadPacks?.length) {
+        if (info.streaming) {
+          await window.ba.downloadAssets({ version: info.remoteVersion, packages: info.packages, onlyPacks: ['core'] });
+        } else {
+          await showAssetDownload(info);
         }
+        try { _assetInfo = await window.ba.checkAssets(); } catch {}
       }
     } catch (e) {
-      console.warn('[lobby] Asset check failed/skipped:', e.message);
+      console.warn('[lobby] checkAssets failed/skipped:', e.message);
     }
   }
+  // 確保 _assetInfo 有值（ensureLobbyAssets 會用到）
+  if (!_assetInfo && window.ba?.checkAssets) {
+    try { _assetInfo = await window.ba.checkAssets(); } catch {}
+  }
+}
 
-  // core 裝好（已安裝或剛自動補齊）後，重新觸發 boot 官方素材載入
-  // （首屏 SW/檔案尚無素材時的 404 會在這裡補回）
-  applyBootAssets();
+// ---- loadBootData：core 就位後，併發載入所有 boot 資料 ----
+async function loadBootData() {
+  const settle = (p) => p.catch(() => null);
+  const json = async (path) => {
+    const r = await fetchRetry(path);
+    return r.json();
+  };
+  const txt = async (path) => {
+    const r = await fetchRetry(path);
+    return r.text();
+  };
 
-  await app.init({ resizeTo: window, antialias: true, backgroundColor: 0x05060d, autoDensity: true });
-  const canvas = app.canvas;
-  document.getElementById('app').appendChild(canvas);
+  const [camera, idx, transforms, icons, chat, schedule, voiceIdx,
+         timelines, clipMix, clipGraph, titleVoices, flash,
+         bgmCsv, studentsCsv, subtitles, dialogTypes, postConfig] = await Promise.all([
+    settle(json('assets/data/lobby_camera_config.json')),
+    settle(json('assets/data/lobby_index.json').catch(() => json('assets/lobby_index.json'))),
+    settle(json('assets/data/lobby_transforms.json')),
+    settle(json('assets/students/icon_index.json')),
+    settle(json('assets/data/lobby_chat_anchors.json')),
+    settle(json('assets/data/lobby_voice_schedule.json')),
+    settle(json('assets/data/voice_index.json')),
+    settle(json('assets/data/lobby_timelines.json')),
+    settle(json('assets/data/clip_intro_mix.json')),
+    settle(json('assets/data/clip_graph.json')),
+    settle(json('assets/data/title_voices.json')),
+    settle(json('assets/data/flash_curves.json')),
+    settle(txt('assets/data/lobby_bgm_mapping.csv')),
+    settle(txt('assets/data/students_data.csv')),
+    settle(json('assets/data/lobby_subtitle.json')),
+    settle(json('assets/data/lobby_dialog_types.json')),
+    settle(json('assets/data/lobby_post_config.json')),
+  ]);
 
-  // ---- 聊天字體：runtime 註冊（官方字體由 pack/SW 提供，不 static 散佈）----
-  loadGameFonts();
+  if (camera?.MaxScale != null) CAMERA.maxScale = camera.MaxScale;
+  if (camera?.Weight != null) CAMERA.weight = camera.Weight;
+  if (idx) { LOBBY_INDEX = idx; ORDER = Object.keys(idx); }
+  LOBBY_TRANSFORMS = transforms;
+  STUDENT_ICONS = icons || {};
+  CHAT_ANCHORS = chat || {};
+  SCHEDULE = schedule;
+  VOICE_INDEX = voiceIdx || {};
+  TIMELINES = timelines;
+  CLIP_CONFIGS = clipMix || {};
+  CLIP_GRAPH = clipGraph || {};
+  TITLE_VOICES = titleVoices;
+  FLASH_TABLE = flash ? normalizeFlashTable(flash) : null;
+  SUBTITLES = subtitles || {};
+  DIALOG_TYPES = dialogTypes || {};
+  if (postConfig) Object.assign(POST_CONFIG, postConfig);
 
-  // ---- BA Click FX（蔚藍檔案點擊特效；設定可關閉，切換後下次啟動生效）----
-  try {
-    if (settingsPref('ba_clickfx', true)) {
-      initClickFx();
-      console.log('[lobby] BAClickFX initialized');
-    } else {
-      console.log('[lobby] BAClickFX disabled by settings');
-    }
-  } catch (e) {
-    console.warn('[lobby] BAClickFX init failed:', e.message);
-  }
-
-  try {
-    const cr = await fetchRetry('assets/data/lobby_camera_config.json');
-    const c = await cr.json();
-    if (typeof c.MaxScale === 'number') CAMERA.maxScale = c.MaxScale;
-    if (typeof c.Weight === 'number') CAMERA.weight = c.Weight;
-  } catch (e) {
-    console.warn('[lobby] 鏡頭設定載入失敗，使用預設', e);
-  }
-
-  // 純下載模式：lobby_index.json 在 data 包裡（assets/data/）。
-  // 開發模式：在 assets/ 根目錄。先試 data/ 再 fallback 根目錄。
-  let idx;
-  try {
-    idx = await fetchRetry('assets/data/lobby_index.json').then(r => r.json());
-  } catch (e) {
-    idx = await fetchRetry('assets/lobby_index.json').then(r => r.json());
-  }
-  LOBBY_INDEX = idx;
-  ORDER = Object.keys(idx);
-  try {
-    LOBBY_TRANSFORMS = await fetchRetry('assets/data/lobby_transforms.json').then(r => r.json());
-  } catch (e) {
-    console.warn('[lobby] lobby_transforms 載入失敗，背景改用內容置中推測', e);
-  }
-  try {
-    STUDENT_ICONS = await fetchRetry('assets/students/icon_index.json').then(r => r.json());
-  } catch (e) {
-    console.warn('[lobby] 學生頭像索引載入失敗，側欄不顯示縮圖', e);
-  }
-  try {
-    CHAT_ANCHORS = await fetchRetry('assets/data/lobby_chat_anchors.json').then(r => r.json());
-  } catch (e) {
-    console.warn('[lobby] 對話錨點資料載入失敗，使用預設位置', e);
-  }
-  try {
-    const sr = await fetchRetry('assets/data/lobby_voice_schedule.json');
-    SCHEDULE = await sr.json();
-  } catch (e) {
-    console.warn('[lobby] 語音排程載入失敗，語音將無法播放', e);
-  }
-  try {
-    VOICE_INDEX = await fetchRetry('assets/data/voice_index.json').then(r => r.json());
-  } catch (e) {
-    console.warn('[lobby] 語音索引載入失敗', e);
-  }
-  try {
-    TIMELINES = await fetchRetry('assets/data/lobby_timelines.json').then(r => r.json());
-  } catch {
-    TIMELINES = null;   // 缺檔 → 走 resolveStartClip fallback
-  }
-  // SpineClip IntroMix：從 data/clip_intro_mix.json 一次載入所有動畫的 mix 資料
-  try {
-    CLIP_CONFIGS = await fetchRetry('assets/data/clip_intro_mix.json').then(r => r.json());
-  } catch (e) {
-    console.warn('[lobby] SpineClip IntroMix 載入失敗', e);
-    CLIP_CONFIGS = {};
-  }
-  // per-lobby SpineClip 互動圖（Track/Loop/NextClip/Sync 直接來自遊戲 bundle）
-  try {
-    CLIP_GRAPH = await fetchRetry('assets/data/clip_graph.json').then(r => r.json());
-  } catch (e) {
-    console.warn('[lobby] SpineClip 互動圖載入失敗', e);
-    CLIP_GRAPH = {};
-  }
-  // Title 開場喊聲索引
-  try {
-    TITLE_VOICES = await fetchRetry('assets/data/title_voices.json').then(r => r.json());
-  } catch (e) {
-    console.warn('[lobby] title_voices 載入失敗', e);
-    TITLE_VOICES = null;
-  }
-  try {
-    FLASH_TABLE = normalizeFlashTable(await fetchRetry('assets/data/flash_curves.json').then(r => r.json()));
-  } catch (e) {
-    console.warn('[lobby] 白色閃爍曲線資料載入失敗，使用內建模板', e);
-  }
-  // BA 後製色調（per-lobby volume 資料）；POST=1 / POST=0（query 或 hash）可強制開關
-  loadPostConfig();
-  try {
-    let postVal = new URL(location.href).searchParams.get('POST');
-    if (postVal === null) { const m = /(?:^|[?#])POST=([01])/.exec(location.hash); postVal = m ? m[1] : null; }
-    if (postVal !== null) { baPostOn = postVal === '1'; try { localStorage.setItem('ba_post', baPostOn ? '1' : '0'); } catch {} }
-  } catch (e) {}
-  applyPostGrade(currentLobby);
-  await loadSubtitles();
-  try {
-    const br = await fetchRetry('assets/data/lobby_bgm_mapping.csv');
-    const txt = await br.text();
-    for (const line of txt.trim().split('\n').slice(1)) {
+  // BGM mapping（CSV → object）
+  if (bgmCsv) {
+    for (const line of bgmCsv.trim().split('\n').slice(1)) {
       const cols = line.split(',');
       if (cols.length < 5) continue;
       BGM_MAP[cols[1].trim() + '_home'] = cols[4].trim();
     }
-  } catch (e) {
-    console.warn('[lobby] BGM 對照載入失敗', e);
   }
-  await loadStudents();
+  // Students CSV → map（與 loadStudents 相同邏輯，但併入 batch）
+  if (studentsCsv) {
+    const rows = parseCSV(studentsCsv);
+    if (rows.length) {
+      const header = rows[0].map(h => h.trim());
+      const map = {};
+      for (let i = 1; i < rows.length; i++) {
+        const rec = {};
+        for (let j = 0; j < header.length; j++) rec[header[j]] = (rows[i][j] ?? '').trim();
+        const key = (rec.file_id || '').toLowerCase();
+        if (key && !map[key]) map[key] = rec;
+      }
+      STUDENTS = map;
+    }
+  }
+  // POST query override
+  try {
+    let postVal = new URL(location.href).searchParams.get('POST');
+    if (postVal === null) { const m = /(?:^|[?#])POST=([01])/.exec(location.hash); postVal = m ? m[1] : null; }
+    if (postVal !== null) { baPostOn = postVal === '1'; try { localStorage.setItem('ba_post', baPostOn ? '1' : '0'); } catch {} }
+  } catch {}
+}
 
-  // ---- Tap To Start：資料就緒後把 spinner 換成 TAP TO START，點擊才進 lobby ----
+// ---- init：四個純粹的 stage ----
+async function init() {
+  // Stage 0：intro 音軌 fire-and-forget（首訪 intro 未裝 → 靜默）
+  startIntroAudioEarly();
+
+  // Stage 1：i18n（Pages 靜態檔案，瞬間完成）
+  await loadI18n();
+  buildLangSegs();
+  applyI18n();
+
+  // Stage 2：ensureReady — 下載 core（唯一的 gate）
+  await ensureReady();
+
+  // Stage 3：補救 boot 素材（若首屏失敗）
+  applyBootAssets();
+
+  // Stage 4：Pixi 初始化
+  await app.init({ resizeTo: window, antialias: true, backgroundColor: 0x05060d, autoDensity: true });
+  const canvas = app.canvas;
+  document.getElementById('app').appendChild(canvas);
+
+  // Stage 5：字型 + ClickFx（core 已就位，一次到位）
+  await loadGameFonts();
+  try {
+    if (settingsPref('ba_clickfx', true)) { initClickFx(); }
+  } catch (e) {
+    console.warn('[lobby] BAClickFX init failed:', e.message);
+  }
+
+  // Stage 6：boot data（一次 batch，各自 degrade）
+  await loadBootData();
+
+  // Stage 7：Tap To Start
   await showTapToStart();
 
   // camera smoothing
