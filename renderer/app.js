@@ -256,6 +256,7 @@ const log = (s) => console.log('[lobby]', s);
   let spine = null;          // character skeleton
    let scene = null;          // room overlay skeleton (when available)
    let bg = null;             // lobby background skeleton (Akari_bg / Yuzu_bg)
+   let extras = [];           // 額外骨架（timeline 上非本體的 skeleton，如 CH0184_00 / Shigure_00）
    let sceneIndependent = false;   // scene 骨架 ≠ 角色骨架（獨立背景，需另行定位）
   let sceneBoundsMaxY = 0;   // scene 內容的世界座標最大 Y（供底部對齊）
   let sceneBoundsCenterY = 0; // scene 內容的世界座標中心 Y（供置中對齊）
@@ -427,7 +428,7 @@ function applyCamera(w) {
   const k = clamp(w, 0, 1);
   const vw = app.renderer.width, vh = app.renderer.height;
 
-  if (bg || scene) {
+  if (bg || scene || extras.length) {
     const setTransform = (obj, tx, ty, sc) => {
       const target = (sc !== undefined ? sc : sceneScale) * cam.scale;
       obj.scale.set(
@@ -456,8 +457,11 @@ function applyCamera(w) {
         setTransform(bg, spine.x, spine.y, cs);
       }
       if (scene) setTransform(scene, spine.x, spine.y, cs);
+      // 額外骨架（CH0184_00 等）與本體同世界座標系（共享相機線），沿用本體同一變換。
+      for (const ex of extras) setTransform(ex, spine.x, spine.y, cs);
     } else {
       const s = sceneScale * cam.scale;
+      const csx = charScale * cam.scale;
       if (bg) {
         // 背景填滿視窗：內容中心對齊視窗中心
         setTransform(bg, sceneXTarget, vh * 0.5 - bgCenterY * s);
@@ -475,6 +479,7 @@ function applyCamera(w) {
           setTransform(scene, sceneXTarget, sceneYTarget);
         }
       }
+      for (const ex of extras) setTransform(ex, spine.x, spine.y, csx);
     }
   }
   if (spine) {
@@ -1234,6 +1239,82 @@ function animNames() {
 }
 function has(name) { return spine && animNames().includes(name); }
 function hasAny(prefix) { return animNames().some(n => n.startsWith(prefix)); }
+
+// 本體（主）骨架的規範名：lobby_index 的 skel 檔名主幹（小寫）。timeline 的 per-clip
+// skeleton 欄位與此比對來區分「本體」vs「額外骨架」。
+function mainSkeletonName() {
+  const e = LOBBY_INDEX[currentLobby];
+  const s = e && (e.skel || '');
+  const clean = (s.startsWith('./') ? s.slice(2) : s).replace(/\.(skel|json)$/i, '');
+  const base = clean.includes('/') ? clean.slice(clean.lastIndexOf('/') + 1) : clean;
+  return base.toLowerCase() || String(currentLobby).toLowerCase();
+}
+function skelNorm(name) { return (name || '').toLowerCase(); }
+// 找已載入的物件（spine/bg/scene/extras）中 skelName 相符者。
+function findLoadedSkeleton(skelName) {
+  const target = skelNorm(skelName);
+  for (const obj of [spine, bg, scene, ...extras]) {
+    if (obj && skelNorm(obj.skelName) === target) return obj;
+  }
+  return null;
+}
+// 依 timeline 的 per-clip skeleton 播放額外骨架（非本體）的 clips。skeleton 檔案從
+// assets/spine/{lobby}/{skel}/{skel}.skel 載入；若該 skeleton 已作為 bg/scene/…載入
+// 則沿用（資料驅動、不特判、不重複載入）。額外骨架按 clips 的 start 排 delay 鏈。
+async function playExtraSkeleton(skelName, clips) {
+  // skelName 保留原始大小寫（資料/檔案名的實際大小寫，如 CH0184_00）
+  const skRaw = String(skelName).replace(/\.(skel|json)$/i, '');
+  let obj = findLoadedSkeleton(skRaw);
+  if (!obj) {
+    const base = `assets/spine/${currentLobby}/${skRaw}/`;
+    const skelUrl = assetUrl(`${base}${skRaw}.skel`);
+    try {
+      await Assets.load(skelUrl);
+      // atlas 檔名與 skel 同名；png 由 atlas 文字列出（其上層載入會帶入）
+      const atlasUrl = assetUrl(`${base}${skRaw}.atlas`);
+      await Assets.load(atlasUrl);
+      obj = Spine.from({ skeleton: skelUrl, atlas: atlasUrl });
+      fixAdditiveSlots(obj);
+      obj.skelName = skelNorm(skRaw);
+      extras.push(obj);
+      app.stage.addChild(obj);
+    } catch (e) {
+      console.warn(`[timeline] 額外骨架載入失敗 ${skRaw}:`, e?.message);
+      return;
+    }
+  }
+  // 依 start 排 delay 鏈（與本體相同的絕對 start 差邏輯），額外骨架一般是播一次即停
+  // （如 CH0184_00 的 Start_Idle_01），不額外補 idle loop。
+  const available = new Set(obj.state.data.skeletonData.animations.map(a => a.name));
+  const playable = clips.filter(c => available.has(c.anim));
+  if (!playable.length) return;
+  let schedEnd = 0;
+  let first = true;
+  let queuedIdle = false;
+  for (const clip of playable) {
+    const isIdle = /^idle/i.test(clip.anim);
+    if (first) {
+      obj.state.setAnimation(0, clip.anim, isIdle || false, Math.max(0, clip.start));
+      if (clip.start > 0) { const e = obj.state.getCurrent(0); if (e) e.delay = clip.start; }
+      first = false;
+    } else {
+      const gap = Math.max(0, clip.start - schedEnd);
+      obj.state.addAnimation(0, clip.anim, isIdle || false, gap);
+    }
+    schedEnd = clip.start + (isIdle ? 1e9 : clip.duration);
+    if (isIdle) { queuedIdle = true; break; }
+  }
+  if (!queuedIdle && available.size) {
+    const idleName = resolveIdleClipFor(obj);
+    if (available.has(idleName)) obj.state.addAnimation(0, idleName, true, 0);
+  }
+}
+function resolveIdleClipFor(obj) {
+  if (!obj || !obj.state) return 'Idle_01';
+  const names = obj.state.data.skeletonData.animations.map(a => a.name);
+  for (const n of ['S2_01', 'Idle_01']) if (names.includes(n)) return n;
+  return names.find(n => /^idle/i.test(n)) || (names.find(n => !/^(start|dummy)/i.test(n)) || names[0]);
+}
 // Pick the looping idle animation from the actual skeleton. Some lobbies name
 // it Idle_01 / S2_01, others (e.g. Fuuka: "bub") use an unrelated name — never
 // assume the name exists (a missing clip would throw in setAnimation). Placeholder
@@ -1822,19 +1903,23 @@ function playStart() {
   // 10.67s Start_Idle_02 → 24s Idle_01）自動正確，不再一個一個改。
   const tl = TIMELINES?.[currentLobby] ?? TIMELINES?.[currentLobby.toLowerCase()];
   if (tl?.tracks?.length) {
-    // timeline 的多條 spine track：本體 = 含 t≈0 clip 的那條（開場特寫骨架是另一條，
-    // 通常 start>0 或由 scene 層處理）。選定 track 後過濾掉本體骨架沒有的動畫名。
-    const byTrack = new Map();
+    // timeline 的多條 spine track：每條屬於某個 skeleton（extract_timelines.py 的 per-clip
+    // skeleton 欄位）。本體骨架的 clips 播在 spine（track-agnostic 依 start 排 delay 鏈），
+    // 非本體的額外 skeleton（CH0184_00 / Shigure_00 / Akari_Scene...）各自載入獨立 spine
+    // 物件、按其骨架的 clips 播放——不再「只挑 t≈0 的 track、丟掉其他 track」。
+    const mainSkel = mainSkeletonName();
+    const e0 = LOBBY_INDEX[currentLobby];
+    const s0 = e0 && (String(e0.skel).startsWith('./') ? String(e0.skel).slice(2) : String(e0.skel));
+    const mainSkelOrig = s0 ? s0.replace(/\.(skel|json)$/i, '').split('/').pop() : '';
+    const bySkel = new Map();
     for (const t of tl.tracks) {
-      if (!byTrack.has(t.spineTrack)) byTrack.set(t.spineTrack, []);
-      byTrack.get(t.spineTrack).push(t);
+      // 保留 skeleton 原始大小寫（檔案/資料夾名的實際大小寫），比對用正規化小寫。
+      const skRaw = t.skeleton || mainSkelOrig;
+      const sk = skelNorm(skRaw);
+      if (!bySkel.has(sk)) bySkel.set(sk, []);
+      bySkel.get(sk).push({ ...t, skelRaw: skRaw });
     }
-    let best = null;
-    for (const [, clips] of byTrack) {
-      const startsAtZero = clips.some(c => c.start <= 0.05);
-      if (startsAtZero && (!best || clips.length > best.length)) best = clips;
-    }
-    const bodyClips = (best || [])
+    const bodyClips = (bySkel.get(mainSkel) || [])
       .filter(t => has(t.anim))
       .sort((a, b) => a.start - b.start);
     if (bodyClips.length) {
@@ -1858,8 +1943,23 @@ function playStart() {
         if (isIdle) { queuedIdle = true; break; }
       }
       if (!queuedIdle) spine.state.addAnimation(0, idleClip, true, 0);
+      // 額外 skeleton：每個非本體 skeleton 載入獨立物件並依其 clips 播放。該 skeleton
+      // 若已作為 bg/scene 載入（Yuzu_bg/Akari_Scene...）即由既有機制（startBgSequence）
+      // 驅動，這裡不重複碰——只有真正缺席的（CH0184_00 / Shigure_00 / Shigure_01）才新建。
+      // 此為資料驅動——不需逐一特判。
+      const handledByExisting = new Set();
+      for (const obj of [bg, scene]) if (obj && obj.skelName) handledByExisting.add(skelNorm(obj.skelName));
+      for (const [sk, clipsA] of bySkel) {
+        if (sk === mainSkel) continue;
+        const extraClips = clipsA
+          .slice()
+          .sort((a, b) => a.start - b.start);
+        if (!extraClips.length) continue;
+        if (handledByExisting.has(sk)) continue;   // 已有 bg/scene 物件映同骨架 → 跳過
+        playExtraSkeleton(clipsA[0].skelRaw || sk, extraClips);
+      }
       startBgSequence();
-      log(`[timeline] ${currentLobby}: ${bodyClips.length} clips, total ${tl.duration}s`);
+      log(`[timeline] ${currentLobby}: ${bodyClips.length} body clips, ${bySkel.size - 1} extra skeleton(s), total ${tl.duration}s`);
       return;
     }
   }
@@ -4363,6 +4463,7 @@ async function loadScene(entry) {
       await Assets.load(atlas);
       const obj = Spine.from({ skeleton: skel, atlas });
       fixAdditiveSlots(obj);
+      obj.skelName = (res.skel.startsWith('./') ? res.skel.slice(2) : res.skel).replace(/\.(skel|json)$/i, '').toLowerCase();
       // 不在此自動播放——由 startBgSequence 依 BA 時間軸統一驅動（避免搶在
       // intro 之前就跑 idle 迴圈，導致 startBgSequence 的冪等判斷誤判而跳過開場）。
       return obj;
@@ -4430,11 +4531,26 @@ function unloadLobbyAssets(lobbyName) {
     push(entry.bg.atlas, bgBase);
     for (const p of entry.bg.png || []) push(p, bgBase);
   }
+  // 額外 skeleton（timeline 非本體骨架，如 CH0184_00 / Shigure_00）位於 spine/<lobby>/<skel>/
+  const spineCacheKeys = [];
+  const mainSkel = entry.skel ? entry.skel.replace(/^\.\//, '').replace(/\.(skel|json)$/i, '').split('/').pop().toLowerCase() : '';
+  const tl = TIMELINES?.[lobbyName] ?? TIMELINES?.[String(lobbyName).toLowerCase()];
+  if (tl?.tracks) {
+    const extraSkel = [...new Set(tl.tracks.map(t => (t.skeleton || '').toLowerCase()).filter(s => s && s !== mainSkel))];
+    for (const sk of extraSkel) {
+      const base = `assets/spine/${lobbyName}/${sk}/`;
+      const skUrl = assetUrl(`${base}${sk}.skel`);
+      const atUrl = assetUrl(`${base}${sk}.atlas`);
+      push(sk, `${base}`);
+      try { Assets.unload(skUrl); } catch {}
+      try { Assets.unload(atUrl); } catch {}
+      spineCacheKeys.push(`${skUrl}-${atUrl}-1`);
+    }
+  }
   for (const u of urls) { try { Assets.unload(u); } catch {} }
   // 清除 Spine.from 的全域 skeletonData cache：Assets.unload 會銷毀 atlas texture，
   // 但 Spine.from 的 Cache（key = `${skeleton}-${atlas}-${scale}`）仍保留舊 skeletonData，
   // 下次載入同一角色會復用已銷毀 texture 的 attachment，導致 render 每幀拋錯。
-  const spineCacheKeys = [];
   const charSkel = assetUrl(`assets/spine/${lobbyName}/${entry.skel}`);
   const charAtlas = assetUrl(`assets/spine/${lobbyName}/${entry.atlas}`);
   if (entry.skel && entry.atlas) spineCacheKeys.push(`${charSkel}-${charAtlas}-1`);
@@ -4476,6 +4592,11 @@ async function loadLobby(name) {
     bg.destroy();
     bg = null;
   }
+  for (const ex of extras) {
+    for (const t of collectTextures(ex)) oldTextures.add(t);
+    ex.destroy();
+  }
+  extras = [];
   unloadLobbyAssets(oldLobby);
   destroyTextures(oldTextures);
   clearTimers();
