@@ -35,22 +35,23 @@ jobs:
           fi
           echo "  version: $VER"
           mkdir -p assets/loading assets/intro assets/ui
-          # core pack：只抽 loading/ + ui/ui_i18n.json（~20MB，比全抓 assets-player 423MB 快得多）
+          # core pack：只抽 loading/ 成員（~20MB，比全抓 assets-player 423MB 快得多）
+          # 注意：用 member-name 抽取而非 --include（GNU/BSD tar 相容），失敗時 fallback 本機既有 assets
           URL_CORE="$WORKER_BASE/v${VER}/assets-core-v${VER}.tar.gz"
-          if curl -sf "$URL_CORE" -o /tmp/core.tar.gz; then
-            tar xzf /tmp/core.tar.gz -C . --include='assets/loading/*' 'assets/ui/ui_i18n.json' 2>/dev/null
-            echo "  ✓ core (v${VER})"
+          if curl -sf "$URL_CORE" -o /tmp/core.tar.gz && \
+             tar xzf /tmp/core.tar.gz -C . assets/loading; then
+            echo "  ✓ core/loading (v${VER})"
           else
-            echo "::warning::Failed to download core pack (v${VER})"
+            echo "::warning::Failed to extract core/loading (v${VER}), falling back to local assets"
           fi
           rm -f /tmp/core.tar.gz
-          # intro pack：只抽 intro/（~5MB）
+          # intro pack：只抽 intro/ 成員（~5MB）
           URL_INTRO="$WORKER_BASE/v${VER}/assets-intro-v${VER}.tar.gz"
-          if curl -sf "$URL_INTRO" -o /tmp/intro.tar.gz; then
-            tar xzf /tmp/intro.tar.gz -C . --include='assets/intro/*' 2>/dev/null
+          if curl -sf "$URL_INTRO" -o /tmp/intro.tar.gz && \
+             tar xzf /tmp/intro.tar.gz -C . assets/intro; then
             echo "  ✓ intro (v${VER})"
           else
-            echo "::warning::Failed to download intro pack (v${VER})"
+            echo "::warning::Failed to extract intro (v${VER}), falling back to local assets"
           fi
           rm -f /tmp/intro.tar.gz
           # 官方 ui 圖（氣泡/游標）不得進 Pages：delete 使其 url() 保持 runtime
