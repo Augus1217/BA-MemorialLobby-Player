@@ -112,7 +112,18 @@
   "set.space.kindCore": "核心",
   "set.space.kindIntro": "開場",
   "set.space.kindLobby": "大廳",
-  "set.space.kindVoice": "語音"
+  "set.space.kindVoice": "語音",
+  "hud.info": "角色介紹",
+  "info.close": "關閉",
+  "info.introTitle": "簡介",
+  "info.linesTitle": "紀念大廳台詞",
+  "info.birthday": "生日",
+  "info.age": "年齡",
+  "info.height": "身高",
+  "info.schoolYear": "學年",
+  "info.hobby": "興趣",
+  "info.cv": "CV",
+  "info.noLines": "（此大廳沒有可顯示的台詞）"
  },
  "zh-CN": {
   "boot.checking": "检查更新中……",
@@ -227,7 +238,18 @@
   "set.space.kindCore": "核心",
   "set.space.kindIntro": "开场",
   "set.space.kindLobby": "大厅",
-  "set.space.kindVoice": "语音"
+  "set.space.kindVoice": "语音",
+  "hud.info": "角色介绍",
+  "info.close": "关闭",
+  "info.introTitle": "简介",
+  "info.linesTitle": "纪念大厅台词",
+  "info.birthday": "生日",
+  "info.age": "年龄",
+  "info.height": "身高",
+  "info.schoolYear": "学年",
+  "info.hobby": "兴趣",
+  "info.cv": "CV",
+  "info.noLines": "（此大厅没有可显示的台词）"
  },
  "ja": {
   "boot.checking": "確認中です……",
@@ -342,7 +364,18 @@
   "set.space.kindCore": "コア",
   "set.space.kindIntro": "オープニング",
   "set.space.kindLobby": "ホール",
-  "set.space.kindVoice": "ボイス"
+  "set.space.kindVoice": "ボイス",
+  "hud.info": "キャラ紹介",
+  "info.close": "閉じる",
+  "info.introTitle": "プロフィール",
+  "info.linesTitle": "メモリアルロビー台詞",
+  "info.birthday": "誕生日",
+  "info.age": "年齢",
+  "info.height": "身長",
+  "info.schoolYear": "学年",
+  "info.hobby": "趣味",
+  "info.cv": "CV",
+  "info.noLines": "（表示できる台詞がありません）"
  },
  "en": {
   "boot.checking": "Checking for updates...",
@@ -457,7 +490,18 @@
   "set.space.kindCore": "Core",
   "set.space.kindIntro": "Intro",
   "set.space.kindLobby": "Lobby",
-  "set.space.kindVoice": "Voice"
+  "set.space.kindVoice": "Voice",
+  "hud.info": "Character info",
+  "info.close": "Close",
+  "info.introTitle": "Profile",
+  "info.linesTitle": "Memorial Lobby Lines",
+  "info.birthday": "Birthday",
+  "info.age": "Age",
+  "info.height": "Height",
+  "info.schoolYear": "School Year",
+  "info.hobby": "Hobby",
+  "info.cv": "CV",
+  "info.noLines": "(No lines available for this lobby)"
  },
  "ko": {
   "boot.checking": "업데이트 확인 중...",
@@ -572,6 +616,17 @@
   "set.space.kindCore": "코어",
   "set.space.kindIntro": "오프닝",
   "set.space.kindLobby": "로비",
-  "set.space.kindVoice": "보이스"
+  "set.space.kindVoice": "보이스",
+  "hud.info": "캐릭터 정보",
+  "info.close": "닫기",
+  "info.introTitle": "프로필",
+  "info.linesTitle": "메모리얼 로비 대사",
+  "info.birthday": "생일",
+  "info.age": "나이",
+  "info.height": "신장",
+  "info.schoolYear": "학년",
+  "info.hobby": "취미",
+  "info.cv": "CV",
+  "info.noLines": "(표시할 대사가 없습니다)"
  }
 }

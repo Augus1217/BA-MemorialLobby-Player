@@ -69,6 +69,7 @@
     }
     #hudTop { top: 0; padding: 22px 26px; justify-content: center; }
     #hudTop #btnSkip { position: absolute; right: 26px; }
+    #hudTop #btnInfo { position: absolute; right: 76px; }
     #hud.idle #hudTop { opacity: 0; transform: translateY(-12px); }
     #hud.idle { pointer-events: none; }
     #hud.idle > * { pointer-events: none; }
@@ -421,12 +422,61 @@
 
     /* recording: keep the window as clean as the captured canvas */
     body.recording #hud, body.recording #fx, body.recording #btnStudents,
-    body.recording #sidePanel, body.recording #exportPanel, body.recording #settingsPanel, body.recording #chatDialog { display: none !important; }
+    body.recording #sidePanel, body.recording #exportPanel, body.recording #settingsPanel, body.recording #chatDialog, body.recording #infoPanel { display: none !important; }
 
     /* focus / cinema mode — only spine character + dialogue bubble visible */
     body.focusMode #hud, body.focusMode #fx, body.focusMode #btnStudents,
     body.focusMode #sidePanel, body.focusMode #exportPanel,
     body.focusMode #skipConfirm, body.focusMode #settingsPanel { display: none !important; }
+
+    /* ---- 角色介紹面板（ⓘ）---- */
+    #infoPanel {
+      position: fixed; right: 0; top: 0; bottom: 0; width: min(420px, 92vw); z-index: 30;
+      background: rgba(8,10,22,.94); border-left: 1px solid rgba(255,255,255,.12);
+      backdrop-filter: blur(12px); display: flex; flex-direction: column;
+      transform: translateX(102%); transition: transform .32s ease;
+      color: #e8ecff;
+    }
+    #infoPanel.open { transform: translateX(0); }
+    #infoPanel .info-head {
+      display: flex; gap: 12px; align-items: center; padding: 14px 16px;
+      border-bottom: 1px solid rgba(255,255,255,.1); flex: none;
+    }
+    #infoIcon {
+      width: 52px; height: 52px; border-radius: 10px; object-fit: cover;
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14);
+      flex: none;
+    }
+    #infoName { font-size: 18px; font-weight: 700; letter-spacing: .02em; }
+    #infoSub { font-size: 11px; opacity: .55; letter-spacing: .18em; margin-top: 2px; }
+    #infoPanel .info-head .btn { margin-left: auto; }
+    #infoBody { overflow-y: auto; padding: 14px 16px 24px; flex: 1; }
+    .info-status {
+      font-size: 13px; line-height: 1.6; padding: 10px 12px; margin-bottom: 12px;
+      background: rgba(255,255,255,.05); border-left: 3px solid rgba(169,182,255,.55);
+      border-radius: 6px; color: #dfe5ff; white-space: pre-line;
+    }
+    .info-status:empty { display: none; }
+    .info-meta {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin-bottom: 14px;
+    }
+    .info-meta:empty { display: none; }
+    .info-meta .row { font-size: 12.5px; line-height: 1.5; }
+    .info-meta .k { opacity: .5; margin-right: 6px; font-size: 11.5px; }
+    .info-sec {
+      font-size: 11px; letter-spacing: .22em; opacity: .5; margin: 16px 0 8px;
+      text-transform: uppercase;
+    }
+    .info-intro { font-size: 13.5px; line-height: 1.85; white-space: pre-line; color: #eef1ff; }
+    .info-intro:empty { display: none; }
+    .info-lines { display: flex; flex-direction: column; gap: 8px; }
+    .info-lines .line {
+      font-size: 13px; line-height: 1.7; padding: 9px 12px;
+      background: rgba(255,255,255,.045); border-radius: 8px;
+      border: 1px solid rgba(255,255,255,.06); color: #e6eaff;
+    }
+    .info-lines .line .no { opacity: .4; font-size: 11px; margin-right: 8px; }
+    .info-empty { font-size: 12.5px; opacity: .45; padding: 8px 0; }
 
     /* Loading screen: intro + spinner + 確認中です…… */
     #loadingScreen {
@@ -559,7 +609,27 @@
         <div id="charName"></div>
         <div id="subName">MEMORIAL LOBBY</div>
       </div>
+      <button id="btnInfo" class="btn" data-i18n-title="hud.info" title="角色介紹"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.6"/><path d="M12 11v5.2"/><circle cx="12" cy="7.8" r=".9" fill="currentColor" stroke="none"/></svg></button>
       <button id="btnSkip" class="btn" data-i18n-title="hud.skip" title="跳過開始動畫"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 6l6.5 6-6.5 6z"/><path d="M13.5 6l6.5 6-6.5 6z"/></svg></button>
+    </div>
+  </div>
+
+  <div id="infoPanel">
+    <div class="info-head">
+      <img id="infoIcon" alt="" />
+      <div>
+        <div id="infoName"></div>
+        <div id="infoSub">MEMORIAL LOBBY</div>
+      </div>
+      <button id="infoClose" class="btn" data-i18n-title="info.close" title="關閉">×</button>
+    </div>
+    <div id="infoBody">
+      <div id="infoStatus" class="info-status"></div>
+      <div id="infoMeta" class="info-meta"></div>
+      <div class="info-sec" data-i18n="info.introTitle">簡介</div>
+      <div id="infoIntro" class="info-intro"></div>
+      <div class="info-sec" data-i18n="info.linesTitle">紀念大廳台詞</div>
+      <div id="infoLines" class="info-lines"></div>
     </div>
   </div>
 

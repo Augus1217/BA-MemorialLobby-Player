@@ -54,6 +54,17 @@ const chatDialog = document.getElementById('chatDialog');
 const chatBubble = document.getElementById('chatBubble');
 const chatName = document.getElementById('chatName');
 const chatText = document.getElementById('chatText');
+// ---- 角色介紹面板（ⓘ）----
+const btnInfo = document.getElementById('btnInfo');
+const infoPanel = document.getElementById('infoPanel');
+const infoClose = document.getElementById('infoClose');
+const infoIcon = document.getElementById('infoIcon');
+const infoName = document.getElementById('infoName');
+const infoSub = document.getElementById('infoSub');
+const infoStatus = document.getElementById('infoStatus');
+const infoMeta = document.getElementById('infoMeta');
+const infoIntro = document.getElementById('infoIntro');
+const infoLines = document.getElementById('infoLines');
 // Screen point the balloon is placed from for the CURRENT dialog. Round-3:
 // the balloon lives in the lobby container's NGUI space, NOT on the head bone.
 // Game data (LobbyCH*.prefab, all 262 prefabs extracted from the uilobbyelement
@@ -878,6 +889,7 @@ let voiceCalls = 0;
 // 逐字稿查詢（lobby_subtitle.json：voiceId -> { jp, tw, en } 或字串）。
 // GL dump 未含 memorial lobby 逐字稿，此檔現為空，放入資料即可自動顯示。
 let SUBTITLES = null;
+let CHAR_PROFILES = null;   // char_profiles.json（角色檔案/簡介，LocalizeCharProfile）
 // lobby_timelines.json：BA PlayableDirector 的 spine 播放軌道（每 lobby 多段開場排程）
 let TIMELINES = null;
 // DialogType per voice (assets/data/lobby_dialog_types.json, from the GL
@@ -3166,6 +3178,7 @@ function setUiLanguage(mode) {
   applyI18n();
   if (currentLobby) renderStudentName(currentLobby);
   if (sidePanel.classList.contains('open')) renderSidebar();
+  if (infoPanel?.classList.contains('open')) renderInfoPanel();
   syncSettingsLangSegs();
   applyCtlI18n();
   log(t('log.lang', { label: langLabel(langMode), ui: i18nTag(langMode) }));
@@ -4061,6 +4074,37 @@ function studentForLobby(lobbyKey) {
   return null;
 }
 
+// ---- 角色介紹（char_profiles.json，官方 LocalizeCharProfile）----
+// lobby → 語音排程的 characterId（最權威，如 CH0184）→ byAlias 別名索引 → profile。
+function profileForLobby(lobbyKey) {
+  if (!CHAR_PROFILES?.profiles || !CHAR_PROFILES.byAlias) return null;
+  const byAlias = CHAR_PROFILES.byAlias, profiles = CHAR_PROFILES.profiles;
+  const hit = (alias) => {
+    const id = alias && byAlias[alias.toLowerCase()];
+    return id != null ? profiles[String(id)] || null : null;
+  };
+  // 1) 語音排程的 characterId（官方 DevName 形，如 CH0184 / AruNewyear）
+  const ch = SCHEDULE?.lobbies?.[lobbyKey]?.characterId
+          ?? SCHEDULE?.[lobbyKey]?.characterId;
+  let p = hit(ch);
+  if (p) return p;
+  // 2) lobby 名剝後綴（同 studentForLobby 的候選鏈）
+  let b = String(lobbyKey).toLowerCase();
+  let prev;
+  while (b !== prev) {
+    prev = b;
+    for (const suf of ['_home_gl', '_home', '_gl', '_teen', '_multi']) {
+      if (b.endsWith(suf)) { b = b.slice(0, -suf.length); break; }
+    }
+    if (b.length > 5 && b.startsWith('lobby')) b = b.slice(5);
+  }
+  for (const c of [b, b.replace(/_[a-z0-9]+$/, ''), b.replace(/[0-9]+$/, '')]) {
+    p = hit(c);
+    if (p) return p;
+  }
+  return null;
+}
+
 function langField(mode) {
   return (LANG_MODES.find(l => l[0] === mode) || LANG_MODES[0])[2];
 }
@@ -4072,6 +4116,125 @@ function renderStudentName(lobbyKey) {
   const rec = studentForLobby(lobbyKey);
   const label = rec ? rec[langField(langMode)] : null;
   charNameEl.textContent = label || prettyName(lobbyKey);
+}
+
+// ---- 角色介紹面板（ⓘ btnInfo / #infoPanel）----
+// 顯示目前播放角色的官方檔案（LocalizeCharProfile）：頭貼、名稱、打招呼、
+// 檔案欄位（生日/年齡/身高/學年/興趣/CV）、簡介、紀念大廳台詞（字幕表）。
+// 台詞來源：voice_index（該 lobby 的語音檔清單）逐檔查 lobby_subtitle；
+// 無字幕 = SFX，設計上就不列。
+function lobbyLinesFor(lobbyKey) {
+  const sch = SCHEDULE?.lobbies?.[lobbyKey] ?? SCHEDULE?.[lobbyKey];
+  // voice_index 的 key 是 characterId（如 CH0184）；voiceFolder（JP_CH0184）僅用於 URL
+  const files = (sch?.characterId && VOICE_INDEX?.[sch.characterId])
+             || (sch?.voiceFolder && VOICE_INDEX?.[sch.voiceFolder.replace(/^(JP|KR)_/, '')])
+             || null;
+  if (!Array.isArray(files)) return [];
+  const keyOf = (id) => {
+    const m = id.match(/_memoriallobby_(\d+)(?:_(\d+))?$/);
+    if (!m) return [1e9, 0];
+    return [parseInt(m[1], 10), parseInt(m[2] || '0', 10)];
+  };
+  const out = [];
+  for (const f of files) {
+    const id = String(f).replace(/\.ogg$/i, '');
+    const sub = subtitlePick(id);
+    if (!sub?.text) continue;                     // SFX / 空殼條目不列
+    out.push({ id, no: keyOf(id), text: sub.text });
+  }
+  out.sort((a, b) => a.no[0] - b.no[0] || a.no[1] - b.no[1]);
+  return out;
+}
+
+function infoProfileLang(profile) {
+  // profile 欄位的語言偏好：跟隨介面語言，缺該語言時 fallback（cn→tw、kr→jp）
+  const pref = [];
+  if (langMode) pref.push(langMode);
+  if (langMode === 'cn') pref.push('tw');
+  if (langMode === 'kr') pref.push('jp');
+  pref.push('jp', 'tw', 'en', 'kr');
+  for (const k of pref) {
+    if (profile?.[k]) return profile[k];
+  }
+  return null;
+}
+
+function renderInfoPanel() {
+  if (!infoPanel) return;
+  const name = currentLobby;
+  if (!name) return;
+  const rec = studentForLobby(name);
+  const displayName = (rec && rec[langField(langMode)]) || prettyName(name);
+  infoName.textContent = displayName;
+  infoSub.textContent = 'MEMORIAL LOBBY';
+  // 頭貼（與側欄同源：icon_index.json → assets/students/）
+  const core = (SCHEDULE?.lobbies?.[name]?.characterId
+             ?? SCHEDULE?.[name]?.characterId)?.toLowerCase();
+  let g = name.toLowerCase(), prev;
+  while (g !== prev) {
+    prev = g;
+    for (const suf of ['_home_gl', '_home', '_gl', '_teen', '_multi']) {
+      if (g.endsWith(suf)) { g = g.slice(0, -suf.length); break; }
+    }
+    if (g.length > 5 && g.startsWith('lobby')) g = g.slice(5);
+  }
+  const ico = STUDENT_ICONS[costumeIconKey(name)] || STUDENT_ICONS[core] || STUDENT_ICONS[g] || STUDENT_ICONS[g.replace(/_[a-z0-9]+$/, '')] || STUDENT_ICONS[g.replace(/[0-9]+$/, '')];
+  if (ico) { infoIcon.src = assetUrl(`assets/students/${ico}`); infoIcon.style.display = ''; }
+  else infoIcon.style.display = 'none';
+
+  const p = profileForLobby(name);
+  // 打招呼
+  const status = infoProfileLang(p?.statusMessage);
+  infoStatus.textContent = status ? `「${status.replace(/^「|」$/g, '')}」` : '';
+  // 檔案欄位（生日/年齡/身高/學年/興趣/CV）
+  infoMeta.innerHTML = '';
+  const addRow = (label, value) => {
+    if (!value) return;
+    const div = document.createElement('div');
+    div.className = 'row';
+    const k = document.createElement('span');
+    k.className = 'k';
+    k.textContent = t(label);
+    div.appendChild(k);
+    div.appendChild(document.createTextNode(value));
+    infoMeta.appendChild(div);
+  };
+  if (p) {
+    addRow('info.birthday', infoProfileLang(p.birthday));
+    addRow('info.age', infoProfileLang(p.age));
+    addRow('info.height', infoProfileLang(p.height));
+    addRow('info.schoolYear', infoProfileLang(p.schoolYear));
+    addRow('info.hobby', infoProfileLang(p.hobby));
+    addRow('info.cv', p.characterVoice?.jp || null);
+  }
+  // 簡介
+  infoIntro.textContent = infoProfileLang(p?.introduction) || '';
+  // 紀念大廳台詞
+  infoLines.innerHTML = '';
+  const lines = lobbyLinesFor(name);
+  if (!lines.length) {
+    const empty = document.createElement('div');
+    empty.className = 'info-empty';
+    empty.textContent = t('info.noLines');
+    infoLines.appendChild(empty);
+  } else {
+    lines.forEach((ln, i) => {
+      const div = document.createElement('div');
+      div.className = 'line';
+      const no = document.createElement('span');
+      no.className = 'no';
+      no.textContent = String(i + 1).padStart(2, '0');
+      div.appendChild(no);
+      div.appendChild(document.createTextNode(ln.text));
+      infoLines.appendChild(div);
+    });
+  }
+}
+
+function toggleInfoPanel(force) {
+  const on = force !== undefined ? force : !infoPanel.classList.contains('open');
+  if (on) renderInfoPanel();
+  infoPanel.classList.toggle('open', on);
 }
 
 // ---- collapsible student sidebar ----
@@ -4713,6 +4876,7 @@ async function loadLobby(name) {
   requestAnimationFrame(waitFit);
   setBgm(bgmForLobby(name));
   renderStudentName(name);
+  if (infoPanel?.classList.contains('open')) renderInfoPanel();
   subNameEl.textContent = 'MEMORIAL LOBBY';
   scheduleAutonomy();
   loadingEl.classList.remove('show');
@@ -5310,7 +5474,7 @@ async function loadBootData() {
 
   const [camera, idx, transforms, icons, chat, schedule, voiceIdx,
          timelines, clipMix, clipGraph, titleVoices, flash,
-         bgmCsv, studentsCsv, subtitles, dialogTypes, postConfig] = await Promise.all([
+         bgmCsv, studentsCsv, subtitles, dialogTypes, postConfig, charProfiles] = await Promise.all([
     settle(json('assets/data/lobby_camera_config.json')),
     settle(json('assets/data/lobby_index.json').catch(() => json('assets/lobby_index.json'))),
     settle(json('assets/data/lobby_transforms.json')),
@@ -5328,6 +5492,7 @@ async function loadBootData() {
     settle(json('assets/data/lobby_subtitle.json')),
     settle(json('assets/data/lobby_dialog_types.json')),
     settle(json('assets/data/lobby_post_config.json')),
+    settle(json('assets/data/char_profiles.json')),
   ]);
 
   if (camera?.MaxScale != null) CAMERA.maxScale = camera.MaxScale;
@@ -5345,6 +5510,7 @@ async function loadBootData() {
   FLASH_TABLE = flash ? normalizeFlashTable(flash) : null;
   SUBTITLES = subtitles || {};
   DIALOG_TYPES = dialogTypes || {};
+  CHAR_PROFILES = charProfiles || null;
   if (postConfig) Object.assign(POST_CONFIG, postConfig);
 
   // BGM mapping（CSV → object）
@@ -5448,6 +5614,9 @@ async function init() {
   const openSkipConfirm = () => skipConfirmEl && skipConfirmEl.classList.add('show');
   const closeSkipConfirm = () => skipConfirmEl && skipConfirmEl.classList.remove('show');
   btnSkip.addEventListener('click', openSkipConfirm);
+  // ---- 角色介紹面板（ⓘ）----
+  btnInfo?.addEventListener('click', () => toggleInfoPanel());
+  infoClose?.addEventListener('click', () => toggleInfoPanel(false));
   document.getElementById('skipYes')?.addEventListener('click', () => { closeSkipConfirm(); memoryLobbySkip(); });
   document.getElementById('skipNo')?.addEventListener('click', closeSkipConfirm);
   skipConfirmEl?.addEventListener('click', (e) => { if (e.target === skipConfirmEl) closeSkipConfirm(); });
