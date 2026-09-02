@@ -260,6 +260,11 @@ const ba = {
   onDownloadProgress(cb) {
     this._progressHandlers.push(cb);
   },
+  _emitProgress(p) {
+    for (const cb of this._progressHandlers) {
+      try { cb(p); } catch { /* 呼叫端不必因單一 handler 異常而中斷 */ }
+    }
+  },
 
   // ---- 新 API：唯一的啟動 gate ----
   async ensureAssets(neededPacks, onProgress) {
@@ -324,10 +329,12 @@ const ba = {
     const results = [];
     for (let i = 0; i < missing.length; i++) {
       const name = missing[i];
+      const sendProgress = (p) => this._emitProgress({ package: name, index: i, total: missing.length, ...p });
       try {
-        await fetchAndInstallPack(meta, name);
+        await fetchAndInstallPack(meta, name, sendProgress);
         results.push({ name, ok: true });
       } catch (e) {
+        sendProgress({ status: 'error', error: e.message });
         results.push({ name, ok: false, error: e.message });
       }
     }
