@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('ba', {
   exportBgm: (payload) => ipcRenderer.invoke('bgm-export', payload),
   screenSize: () => ipcRenderer.invoke('screen-size'),
   // Asset download (增量 + 串流)
-  checkAssets: () => ipcRenderer.invoke('check-assets'),
+  checkAssets: (payload) => ipcRenderer.invoke('check-assets', payload),
   downloadAssets: (payload) => ipcRenderer.invoke('download-assets', payload),
   onDownloadProgress: (cb) => ipcRenderer.on('download-progress', (_, data) => cb(data)),
   getStreamingMode: () => ipcRenderer.invoke('get-streaming-mode'),

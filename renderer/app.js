@@ -3250,7 +3250,7 @@ let _settingsAssetInfo = null;
 
 async function refreshSettingsAssets() {
   try {
-    _settingsAssetInfo = await window.ba.checkAssets();
+    _settingsAssetInfo = await window.ba.checkAssets({ voice: voiceLang });
   } catch {
     _settingsAssetInfo = null;
   }
@@ -3298,7 +3298,7 @@ function startSettingsDownload() {
   const version = info.remoteVersion || '1.0.0';
   const pkgs = {};
   for (const k of info.needsDownloadPacks || []) pkgs[k] = info.packages[k];
-  window.ba.downloadAssets({ version, packages: pkgs }).then(async () => {
+  window.ba.downloadAssets({ version, packages: pkgs, voice: voiceLang }).then(async () => {
     setAssetsProgress.style.display = 'none';
     await refreshSettingsAssets();
   }).catch((e) => {
@@ -5249,6 +5249,7 @@ async function ensureLobbyAssets(lobbyName) {
       version: _assetInfo.remoteVersion,
       packages: _assetInfo.packages,
       lobbies: _assetInfo.lobbies,
+      voice: voiceLang,
     });
     if (res && !res.cached && res.results) {
       const failed = res.results.filter(r => !r.ok);
@@ -5361,7 +5362,7 @@ async function showAssetDownload(assetInfo) {
       });
 
       const version = assetInfo.remoteVersion || '1.0.0';
-      const results = await window.ba.downloadAssets({ version, packages: assetInfo.packages });
+      const results = await window.ba.downloadAssets({ version, packages: assetInfo.packages, voice: voiceLang });
 
       // 有包失敗（如 release 缺檔 404）：顯示錯誤並保留面板讓使用者重試，
       // 不關閉面板、不 resolve（避免半套資源被當成安裝完成）。

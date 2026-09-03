@@ -408,7 +408,7 @@ async function extractTarGzToAssets(tarPath) {
   await tar.x({ file: tarPath, cwd: getAssetsDir(), strip: 1 });
 }
 
-ipcMain.handle('check-assets', async () => {
+ipcMain.handle('check-assets', async (event, { voice } = {}) => {
   const localVersion = readLocalVersion();
   const installed = readInstalled();
   const assetsDir = getAssetsDir();
@@ -444,6 +444,10 @@ ipcMain.handle('check-assets', async () => {
     } else {
       if (!hasAssets || (remoteVersion && localVersion !== remoteVersion.version)) {
         needsDownloadPacks = Object.keys(remoteVersion.packages);
+        // 只下玩家選擇的語音語言（jp/kr）的語音包，不下另一種
+        const wantKr = voice === 'kr';
+        needsDownloadPacks = needsDownloadPacks.filter(k => !k.startsWith('voice/')
+          || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')));
       }
     }
   }
@@ -469,7 +473,7 @@ ipcMain.handle('set-streaming-mode', async (event, v) => {
   return isStreamingMode();
 });
 
-ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks }) => {
+ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, voice }) => {
   const assetsDir = getAssetsDir();
   const installed = readInstalled();
   const remotePackages = packages || {};
@@ -483,6 +487,10 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks }
     // 舊版 schema 1 無 per-pack sha 回退為全量
     if (pkgNames.length === 0 && !Object.keys(installed).length) pkgNames = Object.keys(remotePackages);
   }
+  // 只下玩家選擇的語音語言（jp/kr）的語音包，不下另一種
+  const wantKr = voice === 'kr';
+  pkgNames = pkgNames.filter(k => !k.startsWith('voice/')
+    || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')));
   if (pkgNames.length === 0) {
     try { fs.writeFileSync(getAssetsVersionPath(), version); } catch {}
     return [];
@@ -531,7 +539,7 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks }
 });
 
 // 串流模式：確保某個 lobby 的資源已就緒（core + 該 lobby 需要的包）
-ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies }) => {
+ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies, voice }) => {
   const assetsDir = getAssetsDir();
   const installed = readInstalled();
   // lobby 需要哪些包（由 assets_version.json 的 lobbies 表提供）
@@ -542,6 +550,11 @@ ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies
     const k = 'lobby/' + lobby;
     if (packages?.[k]) packs = [k];
   }
+  // 只下玩家選擇的語音語言（jp/kr）的語音包，不下另一種；
+  // 非語音包（lobby/spine/scene/bgm/core）全部保留。
+  const wantKr = voice === 'kr';
+  packs = packs.filter((k) => !k.startsWith('voice/')
+    || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')));
   // core 必須先有
   if (packages?.['core'] && installed['core'] !== packages['core'].sha256) packs.unshift('core');
   packs = [...new Set(packs)];

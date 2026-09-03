@@ -184,7 +184,7 @@ async function ensureAssets(neededPacks, onProgress) {
 }
 
 // ---- downloadAssets：設定面板的「完整安裝」模式（legacy） ----
-async function downloadAllAssets({ version }, onProgress) {
+async function downloadAllAssets({ version, voice }, onProgress) {
   const meta = version && _versionMeta?.version === version
     ? _versionMeta
     : await fetchRemoteVersion();
@@ -192,8 +192,11 @@ async function downloadAllAssets({ version }, onProgress) {
   const c = await activeCache();
   const installed = await readMeta(c);
 
+  const wantKr = voice === 'kr';
   const toDownload = Object.keys(meta.packages || {}).filter(
     (k) => installed[k] !== meta.packages[k]?.sha256
+      && (!k.startsWith('voice/')
+        || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')))
   );
   if (!toDownload.length) return { ok: true, version: meta.version };
 
@@ -275,13 +278,16 @@ const ba = {
   },
 
   // ---- legacy：設定面板用（完整安裝） ----
-  async checkAssets() {
+  async checkAssets({ voice } = {}) {
     const meta = await fetchRemoteVersion();
     const c = await caches.open(CACHE_PREFIX + meta.version);
     const installed = await readMeta(c);
     const coreOk = installed['core'] === meta.packages?.['core']?.sha256;
+    const wantKr = voice === 'kr';
     const needsDownloadPacks = Object.keys(meta.packages || {}).filter(
       (k) => installed[k] !== meta.packages[k]?.sha256
+        && (!k.startsWith('voice/')
+          || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')))
     );
     return {
       localVersion: meta.version,
@@ -297,16 +303,16 @@ const ba = {
     };
   },
 
-  async downloadAssets({ version, packages, onlyPacks }, onProgress) {
+  async downloadAssets({ version, packages, onlyPacks, voice }, onProgress) {
     const meta = version && _versionMeta?.version === version
       ? _versionMeta : await fetchRemoteVersion();
     const needed = onlyPacks
       ? onlyPacks.filter((k) => meta.packages?.[k])
       : Object.keys(meta.packages || {});
-    return downloadAllAssets({ version: meta.version }, onProgress);
+    return downloadAllAssets({ version: meta.version, voice }, onProgress);
   },
 
-  async ensureLobby({ lobby, version, packages, lobbies }) {
+  async ensureLobby({ lobby, version, packages, lobbies, voice }) {
     const meta = version && _versionMeta?.version === version
       ? _versionMeta : await fetchRemoteVersion();
     await openCache(meta.version);
@@ -319,6 +325,11 @@ const ba = {
       const k = 'lobby/' + lobby;
       if (packages?.[k]) packs = [k];
     }
+    // 只下玩家選擇的語音語言（jp/kr）的語音包，不下另一種；
+    // 非語音包（lobby/spine/scene/bgm/core）全部保留。
+    const wantKr = voice === 'kr';
+    packs = packs.filter((k) => !k.startsWith('voice/')
+      || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')));
     if (meta.packages?.['core'] && installed['core'] !== meta.packages['core']?.sha256) {
       packs.unshift('core');
     }
