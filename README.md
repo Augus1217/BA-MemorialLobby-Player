@@ -3,7 +3,7 @@
 《蔚藍檔案》(Blue Archive) 記憶大廳（Memorial Lobby）**模擬器** — Electron + PixiJS + Spine。
 重現遊戲內的大廳體驗：全螢幕沉浸場景，角色在房間裡待機、對你的動作有反應、開口說話（即時嘴型）、並顯示與語音逐句對應的多語言字幕氣泡。
 
-> 線上版（GitHub Pages）：<https://augus1217.github.io/BA-MemorialLobby-Player/>
+> 線上版（GitHub Pages）：<https://augus1217.github.io/BA-MemorialLobby-Player/>  
 > 資源建置管線請見姊妹倉庫 [BA-MemorialLobby-Assets](https://github.com/Augus1217/BA-MemorialLobby-Assets)。
 
 ## 功能
