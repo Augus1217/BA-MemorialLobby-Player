@@ -19,14 +19,19 @@ async function activeCache() {
 
 async function openCache(ver) {
   _cache = await caches.open(CACHE_PREFIX + ver);
-  // 通知 SW 指向新快取（同時兼容舊版 'ba-cache' 類型）
+  return _cache;
+}
+
+// 通知 SW 指向新快取（同時兼容舊版 'ba-cache' 類型）。
+// 必須在「安裝完成後」才呼叫：若在下載前就切換，SW 會指到空的快取，
+// 安裝窗口期間所有 /assets/ 請求 miss → network → 404（頭貼/BGM 短暫全 404）。
+async function notifySwActive(ver) {
   try {
     navigator.serviceWorker?.controller?.postMessage({
       type: 'ba-active-cache',
       cache: CACHE_PREFIX + ver,
     });
   } catch {}
-  return _cache;
 }
 
 // ---- __meta：寫在 cache 內，替代 localStorage LS_INSTALLED/LS_VERSION ----
@@ -144,6 +149,7 @@ async function ensureAssets(neededPacks, onProgress) {
   if (!toDownload.length) {
     // 所有需要的包都已安裝
     _versionMeta = meta;   // cache reference
+    await notifySwActive(meta.version);
     return { ok: true, version: meta.version };
   }
 
@@ -171,6 +177,10 @@ async function ensureAssets(neededPacks, onProgress) {
   const updated = { ...installed };
   for (const k of toDownload) updated[k] = meta.packages[k].sha256;
   await writeMeta(c, updated);
+
+  // 安裝完成才讓 SW 切換到新快取；下載窗口期間 SW 繼續用舊快取服務，
+  // 避免空快取造成的 404 風暴。失敗時不切換（舊快取仍可用）。
+  await notifySwActive(meta.version);
 
   // 清理舊版快取
   const names = await caches.keys();
@@ -222,6 +232,7 @@ async function downloadAllAssets({ version, voice }, onProgress) {
   await writeMeta(c, updated);
 
   if (results.some((r) => r.ok)) {
+    await notifySwActive(meta.version);
     const names = await caches.keys();
     const activeKey = CACHE_PREFIX + meta.version;
     await Promise.all(
@@ -350,6 +361,7 @@ const ba = {
       }
     }
     const failed = results.filter((r) => !r.ok);
+    if (!failed.length) await notifySwActive(meta.version);
     return failed.length ? { ok: false, results } : { ok: true, results };
   },
 

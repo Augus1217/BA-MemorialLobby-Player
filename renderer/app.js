@@ -1289,7 +1289,14 @@ async function playExtraSkeleton(skelName, clips) {
       fixAdditiveSlots(obj);
       obj.skelName = skelNorm(skRaw);
       extras.push(obj);
-      app.stage.addChild(obj);
+      // 圖層：額外骨架（CH0184_00 等）與本體同世界座標系，但繪製在本體「後方」
+      // （官方中它是墊在角色下的附屬層； addChild 會蓋住本體）。插在本體正下方
+      // = bg 之上、本體之下；本體未載入時退回置頂。
+      if (spine && app.stage.children.includes(spine)) {
+        app.stage.addChildAt(obj, app.stage.getChildIndex(spine));
+      } else {
+        app.stage.addChild(obj);
+      }
     } catch (e) {
       console.warn(`[timeline] 額外骨架載入失敗 ${skRaw}:`, e?.message);
       return;
