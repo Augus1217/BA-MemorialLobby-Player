@@ -5155,16 +5155,38 @@ function onPointerUp(e) {
 
 // 提前起播的 intro 音軌（pv-a.ogg）；showTapToStart 重用同一元素
 let _introAudio = null;
-function startIntroAudioEarly() {
-  // fire-and-forget：任何失敗都靜默（web 首訪 intro 包未裝 → introMedia 為 null）
+function tryStartIntroAudio() {
+  if (_introAudio) return Promise.resolve(true);
   try {
-    Promise.resolve(window.ba?.introMedia?.()).then((media) => {
-      if (!media?.audio || _introAudio) return;
+    return Promise.resolve(window.ba?.introMedia?.()).then((media) => {
+      if (!media?.audio || _introAudio) return false;
       const a = new Audio(media.audio);
-      a.play().catch(() => {});
+      a.loop = true;
       _introAudio = a;
-    }).catch(() => {});
-  } catch {}
+      // Web 自動播放政策：無手勢時 play() 會被拒（rejected）——呼叫端在
+      // 手勢後重試；此處只靜默吞錯。
+      return a.play().then(() => true, () => { _introAudio = null; return false; });
+    }).catch(() => false);
+  } catch { return Promise.resolve(false); }
+}
+function startIntroAudioEarly() {
+  // fire-and-forget：任何失敗都靜默（web 首訪 intro 包未裝 → introMedia 為 null；
+  // 無手勢自動播放被擋 → 等 unlockIntroAudioOnGesture 重試）
+  tryStartIntroAudio();
+}
+// Web：第一個用戶手勢（點擊/按鍵）解鎖音訊——開機更新檢查期間點一下就有音樂，
+// 不用等到 TAP TO START。Electron 預設允許自動播放，此監聽無害。
+function unlockIntroAudioOnGesture() {
+  const onGesture = () => {
+    tryStartIntroAudio().then((ok) => {
+      if (ok) {
+        window.removeEventListener('pointerdown', onGesture);
+        window.removeEventListener('keydown', onGesture);
+      }
+    });
+  };
+  window.addEventListener('pointerdown', onGesture);
+  window.addEventListener('keydown', onGesture);
 }
 
 function showTapToStart() {
@@ -5177,22 +5199,16 @@ function showTapToStart() {
     if (/autostart=1/.test(location.search + location.hash)) { fadeOutLoadingScreen(); resolve(); return; }
     let finished = false;
     let guard = null;
-    // 音軌已由 startIntroAudioEarly() 提前起播；此處只在尚未起播時補播
-    try {
-      if (!_introAudio) {
-        const media = window.ba && window.ba.introMedia ? await window.ba.introMedia() : null;
-        if (media && media.audio) {
-          _introAudio = new Audio(media.audio);
-          _introAudio.play().catch(() => {});
-        }
-      }
-    } catch {}
+    // 音軌已由 startIntroAudioEarly()/手勢解鎖提前起播；此處只在尚未起播時補播
+    // （TAP 本身就是手勢，這裡播一定成功）
+    try { await tryStartIntroAudio(); } catch {}
     const finish = () => {
       if (finished) return;
       finished = true;
       clearTimeout(guard);
       document.removeEventListener('keydown', onKey);
-      if (_introAudio) { _introAudio.pause(); _introAudio = null; }
+      // TAP 後不掐 intro 音軌：讓它續播進大廳，由標題 BGM 接手時停掉
+      // （playTitleBgm 會 pause _introAudio；靜音設定時亦然）——Web 版否則永遠聽不到。
       fadeOutLoadingScreen();
       resolve();
     };
@@ -5436,9 +5452,9 @@ async function ensureReady() {
 
   if (/(?:^|&)skipUpdate=1/.test(location.search + location.hash)) return;
 
-  // 新 API：ba-web.js ensureAssets（web 版）
+  // 新 API：ba-web.js ensureAssets（web 版；intro 4MB 順便裝，否則首訪無開場音樂）
   if (window.ba?.ensureAssets) {
-    try { await window.ba.ensureAssets(['core'], showP); } catch (e) {
+    try { await window.ba.ensureAssets(['core', 'intro'], showP); } catch (e) {
       console.warn('[lobby] ensureAssets failed:', e.message);
     }
   }
@@ -5556,6 +5572,8 @@ async function loadBootData() {
 async function init() {
   // Stage 0：intro 音軌 fire-and-forget（首訪 intro 未裝 → 靜默）
   startIntroAudioEarly();
+  // Web 自動播放需手勢解鎖：loading 期間點一下即有音樂
+  unlockIntroAudioOnGesture();
 
   // Stage 1：i18n（Pages 靜態檔案，瞬間完成）
   await loadI18n();
