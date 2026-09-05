@@ -109,7 +109,31 @@ async function fetchAndInstallPack(meta, name, onProgress) {
   onProgress?.({ status: 'downloading', percent: 0 });
   const resp = await fetch(url, { cache: 'force-cache' });
   if (!resp.ok) throw new Error(`pack ${name}: HTTP ${resp.status}`);
-  const buf = await resp.arrayBuffer();
+  // 串流讀取回報進度（大包如 400MB 的 assets-player 否則 0% 卡數分鐘）
+  const total = Number(resp.headers.get('content-length')) || 0;
+  let buf;
+  if (resp.body?.getReader) {
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      if (total) {
+        onProgress?.({ status: 'downloading', percent: Math.min(99, Math.floor((received / total) * 100)) });
+      } else {
+        onProgress?.({ status: 'downloading', received });
+      }
+    }
+    buf = new Uint8Array(received);
+    let off = 0;
+    for (const ch of chunks) { buf.set(ch, off); off += ch.length; }
+    buf = buf.buffer;
+  } else {
+    buf = await resp.arrayBuffer();
+  }
   onProgress?.({ status: 'extracting', percent: 0 });
   const entries = [];
   untarGz(buf, (path, data) => entries.push([path, data]));

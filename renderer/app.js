@@ -5838,7 +5838,9 @@ function renderStorageLine(quota) {
       if (!p) return;
       if (p.status === 'downloading') {
         setAssetsProgress.style.display = 'block';
-        setProgressText.textContent = `${p.package} (${(p.index ?? 0) + 1}/${p.total ?? '?'}) — ${p.percent ?? 0}%`;
+        const pct = p.percent != null ? `${p.percent}%`
+          : p.received != null ? `${(p.received / 1048576).toFixed(0)}MB` : '…';
+        setProgressText.textContent = `${p.package} (${(p.index ?? 0) + 1}/${p.total ?? '?'}) — ${pct}`;
         if (p.percent != null) setProgressFill.style.width = p.percent + '%';
       } else if (p.status === 'done') {
         setProgressFill.style.width = '100%';
