@@ -138,8 +138,10 @@ async function fetchAndInstallPack(meta, name, onProgress) {
   const entries = [];
   untarGz(buf, (path, data) => entries.push([path, data]));
   const batch = [];
+  const rels = [];
   for (const [path, data] of entries) {
     const rel = path.replace(/^assets\//, '');
+    rels.push(rel);
     const body = new Response(data.slice().buffer, {
       headers: { 'Content-Type': guessMime(rel), 'Cache-Control': 'immutable' },
     });
@@ -148,6 +150,8 @@ async function fetchAndInstallPack(meta, name, onProgress) {
   }
   await Promise.all(batch);
   onProgress?.({ status: 'done', percent: 100 });
+  // 回傳包內檔案清單：呼叫端併入 __meta.__files，供管理空間按包刪除用
+  return rels;
 }
 
 // ---- cacheGet：快取 miss → 回傳 null（由呼叫端處理 fallback） ----
@@ -197,9 +201,15 @@ async function ensureAssets(neededPacks, onProgress) {
     return { ok: false, version: meta.version, error: String(failures[0].reason) };
   }
 
-  // 寫入新的 __meta
+  // 寫入新的 __meta（併入各包檔案清單，舊包的沿用）
   const updated = { ...installed };
-  for (const k of toDownload) updated[k] = meta.packages[k].sha256;
+  const fileMap = { ...(installed.__files || {}) };
+  results.forEach((r, i) => {
+    const k = toDownload[i];
+    updated[k] = meta.packages[k].sha256;
+    if (r.status === 'fulfilled' && Array.isArray(r.value)) fileMap[k] = r.value;
+  });
+  updated.__files = fileMap;
   await writeMeta(c, updated);
 
   // 安裝完成才讓 SW 切換到新快取；下載窗口期間 SW 繼續用舊快取服務，
@@ -235,6 +245,7 @@ async function downloadAllAssets({ version, voice }, onProgress) {
   if (!toDownload.length) return { ok: true, version: meta.version };
 
   const results = [];
+  const fileMap = { ...(installed.__files || {}) };
   for (let i = 0; i < toDownload.length; i++) {
     const name = toDownload[i];
     const sendProgress = (p) => {
@@ -243,7 +254,7 @@ async function downloadAllAssets({ version, voice }, onProgress) {
       try { ba._emitProgress(full); } catch {}
     };
     try {
-      await fetchAndInstallPack(meta, name, sendProgress);
+      fileMap[name] = await fetchAndInstallPack(meta, name, sendProgress);
       results.push({ name, ok: true });
     } catch (e) {
       results.push({ name, ok: false, error: e.message });
@@ -255,6 +266,7 @@ async function downloadAllAssets({ version, voice }, onProgress) {
   for (const r of results) {
     if (r.ok && meta.packages[r.name]) updated[r.name] = meta.packages[r.name].sha256;
   }
+  updated.__files = fileMap;
   await writeMeta(c, updated);
 
   if (results.some((r) => r.ok)) {
@@ -375,10 +387,11 @@ const ba = {
     );
     if (!toDownload.length) return { ok: true, version: meta.version };
     const results = [];
+    const fileMap = { ...(installed.__files || {}) };
     for (let i = 0; i < toDownload.length; i++) {
       const name = toDownload[i];
       try {
-        await fetchAndInstallPack(meta, name,
+        fileMap[name] = await fetchAndInstallPack(meta, name,
           (p) => sendProgress({ package: name, index: i, total: toDownload.length, ...p }));
         results.push({ name, ok: true });
       } catch (e) {
@@ -389,6 +402,7 @@ const ba = {
     for (const r of results) {
       if (r.ok && meta.packages[r.name]) updated[r.name] = meta.packages[r.name].sha256;
     }
+    updated.__files = fileMap;
     await writeMeta(c, updated);
     if (results.some((r) => r.ok)) {
       await notifySwActive(meta.version);
@@ -428,17 +442,25 @@ const ba = {
     if (!missing.length) return { ok: true, cached: true };
 
     const results = [];
+    const fileMap = { ...(installed.__files || {}) };
     for (let i = 0; i < missing.length; i++) {
       const name = missing[i];
       const sendProgress = (p) => this._emitProgress({ package: name, index: i, total: missing.length, ...p });
       try {
-        await fetchAndInstallPack(meta, name, sendProgress);
+        fileMap[name] = await fetchAndInstallPack(meta, name, sendProgress);
         results.push({ name, ok: true });
       } catch (e) {
         sendProgress({ status: 'error', error: e.message });
         results.push({ name, ok: false, error: e.message });
       }
     }
+    // 大廳包也要記入 meta（過去沒寫：每次進大廳都重下）
+    const updated = { ...installed };
+    for (const r of results) {
+      if (r.ok && meta.packages?.[r.name]) updated[r.name] = meta.packages[r.name].sha256;
+    }
+    updated.__files = fileMap;
+    await writeMeta(c, updated);
     const failed = results.filter((r) => !r.ok);
     if (!failed.length) await notifySwActive(meta.version);
     return failed.length ? { ok: false, results } : { ok: true, results };
@@ -472,8 +494,8 @@ const ba = {
     } catch {}
     return { usage: 0, quota: 0 };
   },
-  // ---- 管理空間（web 唯讀：Cache Storage 無按包分組，刪包只能整庫清，
-  // 交給瀏覽器清除；此處只列已裝包＋manifest 標稱大小）
+  // ---- 管理空間（web）：已裝包＋manifest 標稱大小；core 不可刪；
+  // 無檔案清單的舊包（此功能上線前裝的）暫鎖，下次更新重裝後即有清單
   async assetsManageList() {
     let meta = null;
     try { meta = _versionMeta?.version ? _versionMeta : await fetchRemoteVersion(); }
@@ -482,12 +504,13 @@ const ba = {
     let installed = {};
     try { installed = await readMeta(c); } catch {}
     const pkgs = meta?.packages || {};
-    const packs = Object.keys(installed).filter((k) => pkgs[k]).sort().map((k) => ({
+    const files = installed.__files || {};
+    const packs = Object.keys(installed).filter((k) => !k.startsWith('__') && pkgs[k]).sort().map((k) => ({
       key: k,
       kind: k === 'core' ? 'core' : k === 'intro' ? 'intro' : k.split('/')[0],
       name: k.includes('/') ? k.split('/')[1] : k,
       size: pkgs[k]?.size || 0,
-      deletable: false,
+      deletable: k !== 'core' && !!files[k],
       present: true,
     }));
     return {
@@ -496,6 +519,32 @@ const ba = {
       totalSize: packs.reduce((a, p) => a + p.size, 0),
       streaming: await this.getStreamingMode(),
     };
+  },
+  // ---- 按包刪除：只刪無其他已裝包共用的檔案（共用如 bgm 保留）
+  async assetsManageDelete(keys) {
+    const list = Array.isArray(keys) ? keys : [keys];
+    const c = await activeCache();
+    const meta = await readMeta(c);
+    const files = meta.__files || {};
+    const removed = [], errors = [];
+    for (const key of list) {
+      if (key === 'core') { errors.push({ key, error: 'core 不可刪除' }); continue; }
+      if (!(key in meta) && !files[key]) { errors.push({ key, error: '未知的資源包' }); continue; }
+      const staying = new Set();
+      for (const [p, rels] of Object.entries(files)) {
+        if (p === key || list.includes(p) || !(p in meta)) continue;
+        for (const r of rels || []) staying.add(r);
+      }
+      for (const r of files[key] || []) {
+        if (staying.has(r)) continue;
+        try { await c.delete(cacheKey(r)); } catch {}
+      }
+      delete meta[key];
+      delete files[key];
+      removed.push(key);
+    }
+    await writeMeta(c, meta);
+    return { removed, errors };
   },
 };
 

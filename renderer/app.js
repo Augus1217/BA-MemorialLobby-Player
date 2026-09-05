@@ -3419,6 +3419,7 @@ function renderSpaceList() {
       try {
         await window.ba.assetsManageDelete([key]);
         await refreshSpaceManager();
+        await refreshSettingsAssets();
       } finally {
         btn.disabled = false;
       }
