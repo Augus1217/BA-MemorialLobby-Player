@@ -3287,6 +3287,14 @@ function renderSettingsAssets() {
     let bytes = 0;
     for (const k of info.needsDownloadPacks) bytes += packs[k]?.size || 0;
     html += `<br><span class="warn">⤓</span> ${t('set.pending', { n: info.needsDownloadPacks.length, size: fmtBytes(bytes) })}`;
+    // 主按鈕標籤跟模式走：串流＝檢查更新（只補核心），完整＝下載全部（寫明大小）
+    let isStream = true;
+    try { isStream = !setModeSegs.querySelector('button[data-m="full"].on'); } catch {}
+    try {
+      setDownloadBtn.textContent = isStream
+        ? t('set.checkUpdate')
+        : t('set.downloadAll', { size: fmtBytes(bytes) });
+    } catch {}
     setDownloadBtn.style.display = 'block';
   } else {
     setDownloadBtn.style.display = 'none';
@@ -5362,26 +5370,14 @@ async function showAssetDownload(assetInfo) {
   const pctText = document.getElementById('assetProgressText');
   const detail = document.getElementById('assetDetail');
   const btn = document.getElementById('assetBtn');
-  const streamingRow = document.getElementById('streamingRow');
-  const streamingCk = document.getElementById('streamingCk');
+  const choiceRow = document.getElementById('bootChoiceRow');
+  const btnFull = document.getElementById('assetBtnFull');
+  const btnQuick = document.getElementById('assetBtnQuick');
 
   downloadPanel.style.display = 'block';
   progress.style.display = 'none';
   btn.style.display = 'none';
-  if (streamingRow) streamingRow.style.display = 'flex';
-
-  // 串流模式勾選框（僅打包模式有效，dev 模式提示）
-  let isStreaming = false;
-  try { isStreaming = await window.ba?.getStreamingMode?.(); } catch {}
-  if (streamingCk) {
-    streamingCk.checked = !!isStreaming;
-    streamingCk.onchange = async () => {
-      try { await window.ba?.setStreamingMode?.(streamingCk.checked); } catch {}
-      // 切換後重算顯示
-      isStreaming = streamingCk.checked;
-      updateDetail();
-    };
-  }
+  if (choiceRow) choiceRow.style.display = 'none';
 
   const isIncremental = assetInfo.schema === 2 && assetInfo.needsDownloadPacks;
   const packsToShow = isIncremental
@@ -5390,17 +5386,17 @@ async function showAssetDownload(assetInfo) {
   const namesToShow = isIncremental ? assetInfo.needsDownloadPacks : (assetInfo.packages ? Object.keys(assetInfo.packages) : []);
 
   const totalBytes = packsToShow.reduce((s, p) => s + (p.size || 0), 0);
-  const totalGB = (totalBytes / 1073741824).toFixed(1);
+  // 先進大廳：只抓 core＋intro（與串流定義一致）
+  const quickNames = namesToShow.filter((k) => k === 'core' || k === 'intro');
+  const quickBytes = quickNames.reduce((s, k) => s + (assetInfo.packages?.[k]?.size || 0), 0);
 
   const updateDetail = () => {
     if (isIncremental) {
       if (namesToShow.length === 0) {
         status.textContent = t('dl.upToDate');
         detail.textContent = t('dl.allLatest', { n: Object.keys(assetInfo.packages).length });
-        if (streamingCk?.checked) detail.textContent += t('dl.streamUpd');
       } else {
-        const modeNote = isStreaming ? t('dl.streamCore') : '';
-        detail.textContent = t('dl.pending', { n: namesToShow.length, gb: totalGB, note: modeNote })
+        detail.textContent = t('dl.pending', { n: namesToShow.length, gb: (totalBytes / 1073741824).toFixed(1), note: '' })
           + namesToShow.slice(0, 8).join('、') + (namesToShow.length > 8 ? '…' : '');
       }
     } else {
@@ -5414,7 +5410,6 @@ async function showAssetDownload(assetInfo) {
   } else if (!assetInfo.hasAssets) {
     status.textContent = t('dl.firstRun');
     updateDetail();
-    if (streamingCk) detail.textContent += t('dl.firstRunHint');
   } else {
     status.textContent = t('dl.upToDate');
     btn.style.display = 'none';
@@ -5423,19 +5418,20 @@ async function showAssetDownload(assetInfo) {
     return;
   }
 
-  btn.textContent = assetInfo.hasAssets ? t('dl.update') : t('dl.start');
-  btn.style.display = 'inline-block';
+  // 二選一：按鈕上寫明後果（大小），不再有 checkbox＋開始鈕兩段式
+  if (btnFull) btnFull.textContent = t('dl.fullInstall', { size: fmtBytes(totalBytes) });
+  if (btnQuick) btnQuick.textContent = t('dl.quickStart', { size: fmtBytes(quickBytes) });
+  if (choiceRow) choiceRow.style.display = 'flex';
+  btn.style.display = 'none';
 
   return new Promise((resolve) => {
-    btn.onclick = async () => {
+    const runDownload = async (streaming) => {
+      if (choiceRow) choiceRow.style.display = 'none';
       btn.style.display = 'none';
-      if (streamingRow) streamingRow.style.display = 'none';
       progress.style.display = 'block';
       fill.style.width = '0%';
       pctText.textContent = '0%';
-      if (streamingCk) {
-        try { await window.ba?.setStreamingMode?.(streamingCk.checked); } catch {}
-      }
+      try { await window.ba?.setStreamingMode?.(streaming); } catch {}
 
       window.ba.onDownloadProgress?.((p) => {
         if (p.status === 'downloading') {
@@ -5454,7 +5450,11 @@ async function showAssetDownload(assetInfo) {
       });
 
       const version = assetInfo.remoteVersion || '1.0.0';
-      const results = await window.ba.downloadAssets({ version, packages: assetInfo.packages, voice: voiceLang });
+      // 先進大廳：只抓 core＋intro；完整安裝：全抓
+      const pkgs = streaming
+        ? Object.fromEntries(quickNames.map((k) => [k, assetInfo.packages[k]]).filter(([, v]) => v))
+        : assetInfo.packages;
+      const results = await window.ba.downloadAssets({ version, packages: pkgs, voice: voiceLang });
 
       // 有包失敗（如 release 缺檔 404）：顯示錯誤並保留面板讓使用者重試，
       // 不關閉面板、不 resolve（避免半套資源被當成安裝完成）。
@@ -5465,6 +5465,7 @@ async function showAssetDownload(assetInfo) {
         btn.textContent = t('dl.retry');
         btn.style.display = 'inline-block';
         progress.style.display = 'none';
+        btn.onclick = () => runDownload(streaming);
         return;
       }
 
@@ -5477,6 +5478,9 @@ async function showAssetDownload(assetInfo) {
       downloadPanel.style.display = 'none';
       resolve();
     };
+    if (btnFull) btnFull.onclick = () => runDownload(false);
+    if (btnQuick) btnQuick.onclick = () => runDownload(true);
+    btn.onclick = () => runDownload(false);
   });
 }
 

@@ -892,7 +892,10 @@
         <div id="assetProgressText">0%</div>
       </div>
       <div id="assetDetail"></div>
-      <label class="ck" id="streamingRow" style="margin:12px 0; justify-content:center; display:none;"><input type="checkbox" id="streamingCk"> <span data-i18n="dl.streamingOpt">串流模式（隨播隨下，初始只下載核心約 30MB）</span></label>
+      <div id="bootChoiceRow" style="display:none; gap:10px; justify-content:center; margin:12px 0; flex-wrap:wrap;">
+        <button id="assetBtnFull" class="btnTxt primary" data-i18n="dl.fullInstall">完整安裝</button>
+        <button id="assetBtnQuick" class="btnTxt" data-i18n="dl.quickStart">先進大廳</button>
+      </div>
       <button id="assetBtn" class="btnTxt primary" style="display:none" data-i18n="dl.start">開始下載</button>
     </div>
   </div>
