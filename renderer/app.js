@@ -3441,7 +3441,17 @@ function switchSettingsTab(about) {
   document.getElementById('setTabAbout').style.display = about ? '' : 'none';
   document.getElementById('setTabBtnMain')?.classList.toggle('on', !about);
   document.getElementById('setTabBtnAbout')?.classList.toggle('on', !!about);
-  if (about) syncAboutSection();
+  if (about) { syncAboutSection(); fitSteamWidget(); }
+}
+// ---- Steam widget 自動縮放（原生 646px，窄視窗等比縮）----
+function fitSteamWidget() {
+  const wrap = document.getElementById('steamWidgetWrap');
+  const frame = document.getElementById('steamWidget');
+  if (!wrap || !frame) return;
+  const w = wrap.clientWidth || 646;
+  const s = Math.min(1, w / 646);
+  frame.style.transform = `scale(${s})`;
+  wrap.style.height = `${Math.round(190 * s)}px`;
 }
 function syncAboutSection() {
   const row = document.getElementById('setDesktopDlRow');
@@ -5718,6 +5728,9 @@ async function init() {
   settingsBackdrop?.addEventListener('click', () => toggleSettingsPanel(false));
   document.getElementById('setTabBtnMain')?.addEventListener('click', () => switchSettingsTab(false));
   document.getElementById('setTabBtnAbout')?.addEventListener('click', () => switchSettingsTab(true));
+  window.addEventListener('resize', () => {
+    if (document.getElementById('setTabAbout')?.style.display !== 'none') fitSteamWidget();
+  });
   // 直向小螢幕旋轉提示（點一下當次不再顯示）
   syncRotateHint();
   window.addEventListener('resize', syncRotateHint);
