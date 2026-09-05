@@ -282,6 +282,7 @@ const log = (s) => console.log('[lobby]', s);
    let scene = null;          // room overlay skeleton (when available)
    let bg = null;             // lobby background skeleton (Akari_bg / Yuzu_bg)
    let extras = [];           // 額外骨架（timeline 上非本體的 skeleton，如 CH0184_00 / Shigure_00）
+   let extraVisibility = [];  // Control 軌可見窗 {obj, showAt, hideAt}（CH0184_00 類互補層）
    let sceneIndependent = false;   // scene 骨架 ≠ 角色骨架（獨立背景，需另行定位）
   let sceneBoundsMaxY = 0;   // scene 內容的世界座標最大 Y（供底部對齊）
   let sceneBoundsCenterY = 0; // scene 內容的世界座標中心 Y（供置中對齊）
@@ -1288,10 +1289,37 @@ function findLoadedSkeleton(skelName) {
   }
   return null;
 }
+// Control 軌可見窗配對：單一 control 窗＋單一 extra clip 組＋起點對齊時，
+// 該 extra 是與本體互補遮擋的前置動作層（CH0184_00 [4→10.667] 對 control
+// [4→10.4]），只在窗內顯示並蓋住本體。多窗/多組（如 Shigure）維持現狀。
+function matchControlWindow(tl, nExtraGroups, clips) {
+  const ctl = tl?.control;
+  if (!Array.isArray(ctl) || ctl.length !== 1 || nExtraGroups !== 1) return null;
+  if (!clips?.length) return null;
+  const first = [...clips].sort((a, b) => a.start - b.start)[0];
+  if (Math.abs(first.start - ctl[0].start) > 0.02) return null;
+  return { showAt: ctl[0].start, hideAt: ctl[0].end };
+}
+// Control 可見窗 tick：intro 時鐘驅動（export 用虛擬時鐘），窗外隱藏
+function tickExtraVisibility() {
+  if (!extraVisibility.length) return;
+  let t = -1;
+  try {
+    if (typeof animActive !== 'undefined' && animActive) t = introVirtualTime;
+    else if (typeof introClockStart !== 'undefined' && introClockStart >= 0) {
+      t = (performance.now() - introClockStart) / 1000;
+    }
+  } catch {}
+  if (t < 0) return;
+  for (const e of extraVisibility) {
+    if (!e.obj || e.obj.destroyed) continue;
+    e.obj.visible = t >= e.showAt && t < e.hideAt;
+  }
+}
 // 依 timeline 的 per-clip skeleton 播放額外骨架（非本體）的 clips。skeleton 檔案從
 // assets/spine/{lobby}/{skel}/{skel}.skel 載入；若該 skeleton 已作為 bg/scene/…載入
 // 則沿用（資料驅動、不特判、不重複載入）。額外骨架按 clips 的 start 排 delay 鏈。
-async function playExtraSkeleton(skelName, clips) {
+async function playExtraSkeleton(skelName, clips, vis) {
   // skelName 保留原始大小寫（資料/檔案名的實際大小寫，如 CH0184_00）
   const skRaw = String(skelName).replace(/\.(skel|json)$/i, '');
   let obj = findLoadedSkeleton(skRaw);
@@ -1307,18 +1335,26 @@ async function playExtraSkeleton(skelName, clips) {
       fixAdditiveSlots(obj);
       obj.skelName = skelNorm(skRaw);
       extras.push(obj);
-      // 圖層：額外骨架（CH0184_00 等）與本體同世界座標系，但繪製在本體「後方」
-      // （官方中它是墊在角色下的附屬層； addChild 會蓋住本體）。插在本體正下方
-      // = bg 之上、本體之下；本體未載入時退回置頂。
+      // 圖層：Control 可見窗的互補層（CH0184_00）在本體「上方」（動作時蓋住本體，
+      // 窗外隱藏）；一般額外骨架（Shigure 小配件）在本體下方。本體未載入時退回置頂。
       if (spine && app.stage.children.includes(spine)) {
-        app.stage.addChildAt(obj, app.stage.getChildIndex(spine));
+        const si = app.stage.getChildIndex(spine);
+        app.stage.addChildAt(obj, vis ? Math.min(si + 1, app.stage.children.length) : si);
       } else {
         app.stage.addChild(obj);
+      }
+      // 可見窗初始態（t=0）：窗外即隱藏，避免 setup 全身遮住本體開場
+      if (vis) {
+        obj.visible = 0 >= vis.showAt && 0 < vis.hideAt;
+        extraVisibility.push({ obj, showAt: vis.showAt, hideAt: vis.hideAt });
       }
     } catch (e) {
       console.warn(`[timeline] 額外骨架載入失敗 ${skRaw}:`, e?.message);
       return;
     }
+  } else if (vis) {
+    // 已載入過（不應發生：每 lobby 一次）——仍登記可見窗
+    extraVisibility.push({ obj, showAt: vis.showAt, hideAt: vis.hideAt });
   }
   // 依 start 排 delay 鏈（與本體相同的絕對 start 差邏輯），額外骨架一般是播一次即停
   // （如 CH0184_00 的 Start_Idle_01），不額外補 idle loop。
@@ -1993,6 +2029,7 @@ function playStart() {
       // 此為資料驅動——不需逐一特判。
       const handledByExisting = new Set();
       for (const obj of [bg, scene]) if (obj && obj.skelName) handledByExisting.add(skelNorm(obj.skelName));
+      const extraGroupKeys = [...bySkel.keys()].filter((k) => k !== mainSkel && (bySkel.get(k) || []).length);
       for (const [sk, clipsA] of bySkel) {
         if (sk === mainSkel) continue;
         const extraClips = clipsA
@@ -2000,7 +2037,8 @@ function playStart() {
           .sort((a, b) => a.start - b.start);
         if (!extraClips.length) continue;
         if (handledByExisting.has(sk)) continue;   // 已有 bg/scene 物件映同骨架 → 跳過
-        playExtraSkeleton(clipsA[0].skelRaw || sk, extraClips);
+        playExtraSkeleton(clipsA[0].skelRaw || sk, extraClips,
+          matchControlWindow(tl, extraGroupKeys.length, extraClips));
       }
       startBgSequence();
       log(`[timeline] ${currentLobby}: ${bodyClips.length} body clips, ${bySkel.size - 1} extra skeleton(s), total ${tl.duration}s`);
@@ -2041,6 +2079,11 @@ function memoryLobbySkip() {
   introWindowEnd = 0;
   closeupArmAt = -1;
   removeSceneCloseup();
+  // Control 可見窗的互補層直接隱藏（跳過開場＝穩定態：只有本體 idle）
+  for (const e of extraVisibility) {
+    try { if (e.obj && !e.obj.destroyed) e.obj.visible = false; } catch {}
+  }
+  extraVisibility = [];
   setAnimationWithClipMix(0, idleClip || 'Idle_01', true);
   startBgSequence({ skip: true });
   log('skip to idle');
@@ -5005,6 +5048,7 @@ async function loadLobby(name) {
     ex.destroy();
   }
   extras = [];
+  extraVisibility = [];
   unloadLobbyAssets(oldLobby);
   destroyTextures(oldTextures);
   clearTimers();
@@ -5848,6 +5892,7 @@ async function init() {
     if (baPostOn) ensurePostWrap();
     if (spine && fitted) applyCamera(CAMERA.weight);
     tickWhiteFlash();
+    tickExtraVisibility();
   });
   // Re-fit on window resize (resizeTo resizes the canvas, but charScale/sceneScale
   // are only recomputed in fitScene — re-run it so the layout doesn't go stale
