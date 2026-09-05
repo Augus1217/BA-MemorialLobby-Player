@@ -915,6 +915,10 @@ function dialogTypeFor(voiceId) {
 }
 function subtitlePick(voiceId) {
   if (!SUBTITLES) return null;
+  // 序幕音效（memoriallobby_0_N，如睡衣優香咀嚼聲）：當 SFX 處理——有聲音、
+  // 不彈氣泡、不列入台詞表（同 Airi 舔冰淇淋的裸 _0）。表格裡若掛著文字
+  // 也是誤植（whisper/規則稿錯位），一律視同 miss。
+  if (/_memoriallobby_0_\d+$/i.test(voiceId)) return null;
   const id = voiceId.toLowerCase();
   // 先命中者若是「空殼」（dict 內 jp/tw/en/kr 全空字串，fuse 管線對未匹配
   // 事件的佔位條目，v2026.0827.1 起混入 2,527 筆）視同 miss，繼續往下找
@@ -1136,30 +1140,7 @@ function onAnimationEvent(_entry, ev) {
   if (voiceId === lastVoiceId && now - lastVoiceTime < 500) return;
   lastVoiceId = voiceId;
   lastVoiceTime = now;
-  // 序幕語音（memoriallobby_0_N）只播一次：遊戲內初訪後不再重播。
-  // 骨架事件每進一次大廳就開火（Start_Idle_01 內嵌），無此閘每輪都會跳出
-  // （如睡衣優香買炸雞）。裸 _0（SFX 如舔冰淇淋）不受影響。
-  if (/_memoriallobby_0_\d+$/i.test(voiceId)) {
-    if (prologueSeen(currentLobby)) return;
-    markPrologueSeen(currentLobby);
-  }
   playVoice(voiceId);
-}
-
-// ---- 序幕已播記憶（localStorage，壞掉就當沒看過→照播）----
-function prologueSeen(lobby) {
-  try {
-    const seen = JSON.parse(localStorage.getItem('ba_prologue_seen') || '{}');
-    return !!(lobby && seen[lobby]);
-  } catch { return false; }
-}
-function markPrologueSeen(lobby) {
-  if (!lobby) return;
-  try {
-    const seen = JSON.parse(localStorage.getItem('ba_prologue_seen') || '{}');
-    seen[lobby] = 1;
-    localStorage.setItem('ba_prologue_seen', JSON.stringify(seen));
-  } catch {}
 }
 
 let lastVoiceId = null;
@@ -4168,11 +4149,8 @@ function lobbyLinesFor(lobbyKey) {
   const out = [];
   for (const f of files) {
     const id = String(f).replace(/\.ogg$/i, '');
-    // 序幕語音（memoriallobby_0_N：初訪一次性，不列入常駐台詞表；如睡衣優香
-    // 開場買炸雞那兩句，重複進出不該一直出現）
-    if (/_memoriallobby_0_\d+$/i.test(id)) continue;
     const sub = subtitlePick(id);
-    if (!sub?.text) continue;                     // SFX / 空殼條目不列
+    if (!sub?.text) continue;                     // SFX（含序幕音效 0_N）/ 空殼條目不列
     out.push({ id, no: keyOf(id), text: sub.text });
   }
   out.sort((a, b) => a.no[0] - b.no[0] || a.no[1] - b.no[1]);
