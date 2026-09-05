@@ -1,5 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// download-progress handler 精確刪除用（app 會在單次下載結束後反註冊）
+const _progWraps = new Map();
+
 contextBridge.exposeInMainWorld('ba', {
   __electron: true,
   listLobbies: () => ipcRenderer.invoke('lobby-list'),
@@ -14,7 +17,15 @@ contextBridge.exposeInMainWorld('ba', {
   // Asset download (增量 + 串流)
   checkAssets: (payload) => ipcRenderer.invoke('check-assets', payload),
   downloadAssets: (payload) => ipcRenderer.invoke('download-assets', payload),
-  onDownloadProgress: (cb) => ipcRenderer.on('download-progress', (_, data) => cb(data)),
+  onDownloadProgress: (cb) => {
+    const w = (_, data) => { try { cb(data); } catch {} };
+    _progWraps.set(cb, w);
+    ipcRenderer.on('download-progress', w);
+  },
+  offDownloadProgress: (cb) => {
+    const w = _progWraps.get(cb);
+    if (w) { ipcRenderer.removeListener('download-progress', w); _progWraps.delete(cb); }
+  },
   getStreamingMode: () => ipcRenderer.invoke('get-streaming-mode'),
   setStreamingMode: (v) => ipcRenderer.invoke('set-streaming-mode', v),
   ensureLobby: (payload) => ipcRenderer.invoke('ensure-lobby', payload),

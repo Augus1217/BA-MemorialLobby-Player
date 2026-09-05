@@ -3294,6 +3294,23 @@ function renderSettingsAssets() {
   setAssetsStatus.innerHTML = html;
 }
 
+// 雙進度條狀態（本包％＋總量％，按 manifest 標稱大小加權）
+let _dlTotal = { done: 0, total: 0 };
+function packSizeOf(name) {
+  try { return _settingsAssetInfo?.packages?.[name]?.size || 0; }
+  catch { return 0; }
+}
+function updateTotalProgress(curName, curPct) {
+  const tfill = document.getElementById('setProgressFillTotal');
+  const ttxt = document.getElementById('setProgressTextTotal');
+  if (!tfill && !ttxt) return;
+  const total = _dlTotal.total || 0;
+  const pct = total > 0
+    ? Math.min(100, Math.floor(((_dlTotal.done + packSizeOf(curName) * (curPct / 100)) / total) * 100))
+    : 0;
+  if (tfill) tfill.style.width = pct + '%';
+  if (ttxt) ttxt.textContent = t('set.total', { pct });
+}
 function startSettingsDownload() {
   const info = _settingsAssetInfo;
   // packages 是 {包名: 資訊} 物件（不是陣列）——之前用 Array.isArray 擋掉一切。
@@ -3301,6 +3318,13 @@ function startSettingsDownload() {
   setDownloadBtn.style.display = 'none';
   setAssetsProgress.style.display = 'block';
   setProgressText.textContent = t('dl.start');
+  _dlTotal.done = 0;
+  _dlTotal.total = pendingBytes(_settingsAssetInfo);
+  setProgressFill.style.width = '0%';
+  const tfill = document.getElementById('setProgressFillTotal');
+  if (tfill) tfill.style.width = '0%';
+  const ttxt = document.getElementById('setProgressTextTotal');
+  if (ttxt) ttxt.textContent = '';
   // 進度由全域 handler 更新（開機時註冊一次；這裡只確保可見）
   // 下載全部缺的包（尊重目前模式：串流模式時 check-assets 已只回 core/intro）
   const version = info.remoteVersion || '1.0.0';
@@ -5304,9 +5328,12 @@ async function ensureLobbyAssets(lobbyName) {
     if (!shown) { loading.classList.add('show'); shown = true; }
     if (loadingText) loadingText.textContent = msg;
   };
-  window.ba.onDownloadProgress?.((p) => {
+  // 作用域內註冊、用完即刪（之前每次進大廳註冊一個不清，之後任何下載
+  // 都會彈出中央遮罩擋住畫面）
+  const onLobbyProgress = (p) => {
     showLoading(t('dl.lobbyDl', { pkg: p.package, i: p.index + 1, n: p.total, pct: p.percent || 0 }));
-  });
+  };
+  window.ba.onDownloadProgress?.(onLobbyProgress);
   try {
     const res = await window.ba.ensureLobby({
       lobby: lobbyName,
@@ -5322,6 +5349,7 @@ async function ensureLobbyAssets(lobbyName) {
   } catch (e) {
     console.warn('[lobby] ensureLobby 失敗:', e.message);
   } finally {
+    try { window.ba.offDownloadProgress?.(onLobbyProgress); } catch {}
     if (shown) { loading.classList.remove('show'); if (loadingText) loadingText.textContent = t('loading.loading'); }
   }
 }
@@ -5832,6 +5860,7 @@ function renderStorageLine(quota) {
   }
 }
   setDownloadBtn.addEventListener('click', startSettingsDownload);
+  // 雙進度條狀態：本包％＋總量％（總量按 manifest 標稱大小加權）
   // 全域下載進度（註冊一次；模式切換觸發的下載也經這裡顯示）
   try {
     window.ba?.onDownloadProgress?.((p) => {
@@ -5842,8 +5871,13 @@ function renderStorageLine(quota) {
           : p.received != null ? `${(p.received / 1048576).toFixed(0)}MB` : '…';
         setProgressText.textContent = `${p.package} (${(p.index ?? 0) + 1}/${p.total ?? '?'}) — ${pct}`;
         if (p.percent != null) setProgressFill.style.width = p.percent + '%';
+        updateTotalProgress(p.package, p.percent ?? 0);
       } else if (p.status === 'done') {
         setProgressFill.style.width = '100%';
+        if (p.package) {
+          _dlTotal.done += packSizeOf(p.package);
+          updateTotalProgress(p.package, 0);
+        }
       } else if (p.status === 'error') {
         setAssetsProgress.style.display = 'block';
         setProgressText.textContent = `⚠ ${p.error}`;

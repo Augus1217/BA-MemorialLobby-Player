@@ -300,6 +300,10 @@ const ba = {
   onDownloadProgress(cb) {
     this._progressHandlers.push(cb);
   },
+  offDownloadProgress(cb) {
+    const i = this._progressHandlers.indexOf(cb);
+    if (i >= 0) this._progressHandlers.splice(i, 1);
+  },
   _emitProgress(p) {
     for (const cb of this._progressHandlers) {
       try { cb(p); } catch { /* 呼叫端不必因單一 handler 異常而中斷 */ }
@@ -467,6 +471,31 @@ const ba = {
       }
     } catch {}
     return { usage: 0, quota: 0 };
+  },
+  // ---- 管理空間（web 唯讀：Cache Storage 無按包分組，刪包只能整庫清，
+  // 交給瀏覽器清除；此處只列已裝包＋manifest 標稱大小）
+  async assetsManageList() {
+    let meta = null;
+    try { meta = _versionMeta?.version ? _versionMeta : await fetchRemoteVersion(); }
+    catch { meta = _versionMeta || null; }
+    const c = await activeCache();
+    let installed = {};
+    try { installed = await readMeta(c); } catch {}
+    const pkgs = meta?.packages || {};
+    const packs = Object.keys(installed).filter((k) => pkgs[k]).sort().map((k) => ({
+      key: k,
+      kind: k === 'core' ? 'core' : k === 'intro' ? 'intro' : k.split('/')[0],
+      name: k.includes('/') ? k.split('/')[1] : k,
+      size: pkgs[k]?.size || 0,
+      deletable: false,
+      present: true,
+    }));
+    return {
+      version: meta?.version || '?',
+      packs,
+      totalSize: packs.reduce((a, p) => a + p.size, 0),
+      streaming: await this.getStreamingMode(),
+    };
   },
 };
 
