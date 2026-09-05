@@ -3171,6 +3171,7 @@ function closeExportPanel() { exportPanel.classList.remove('open'); }
 // ---- settings panel (language / download mode / assets) ----
 const settingsPanel = document.getElementById('settingsPanel');
 const setClose = document.getElementById('setClose');
+const aboutPanel = document.getElementById('aboutPanel');
 const setLangSegs = document.getElementById('setLangSegs');
 const setModeSegs = document.getElementById('setModeSegs');
 const setCursorCk = document.getElementById('setCursorCk');
@@ -3416,12 +3417,18 @@ function toggleSettingsPanel(force) {
     syncSettingsEffectCks();
     refreshSettingsAssets();
     refreshSpaceManager();
-    syncAboutSection();
   }
   settingsPanel.classList.toggle('open', open);
+  if (!open) toggleAboutPanel(false);   // 設定關了，關於跟著關
 }
 
-// ---- 關於：描述文字由 i18n 填；桌面版下載鏈結只在網頁版顯示 ----
+// ---- 關於：獨立視窗（疊在設定頁之上），桌面版鏈結只在網頁版顯示 ----
+function toggleAboutPanel(force) {
+  if (!aboutPanel) return;
+  const open = typeof force === 'boolean' ? force : !aboutPanel.classList.contains('open');
+  if (open) syncAboutSection();
+  aboutPanel.classList.toggle('open', open);
+}
 function syncAboutSection() {
   const row = document.getElementById('setDesktopDlRow');
   if (!row) return;
@@ -5694,6 +5701,8 @@ async function init() {
   // ---- settings panel ----
   btnCtlSettings.addEventListener('click', toggleSettingsPanel);
   setClose.addEventListener('click', toggleSettingsPanel);
+  document.getElementById('setAbout')?.addEventListener('click', () => toggleAboutPanel());
+  document.getElementById('aboutClose')?.addEventListener('click', () => toggleAboutPanel(false));
 
   btnStudents.addEventListener('click', () => toggleSidebar());
   sbClose.addEventListener('click', () => toggleSidebar(false));
@@ -5704,6 +5713,9 @@ async function init() {
   });
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && sidePanel.classList.contains('open')) toggleSidebar(false);
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && aboutPanel?.classList.contains('open')) toggleAboutPanel(false);
   });
 
   // ---- video export UI ----

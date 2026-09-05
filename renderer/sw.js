@@ -53,6 +53,23 @@ self.addEventListener('fetch', (e) => {
 
   e.respondWith((async () => {
     const active = await activeName();
+    // Player 自有、獨立於 assets release 更新的檔案（ui_i18n.json 由 Player
+    // repo 維護）：走 network-first，否則 SW 快取釘死舊版、新 key 永遠送不到
+    // （症狀：設定頁顯示 set.about 這類 raw key）。失敗才退回快取。
+    if (url.pathname.endsWith('/assets/ui/ui_i18n.json')) {
+      try {
+        const fresh = await fetch(e.request);
+        if (fresh.status === 200) {
+          if (active) await (await caches.open(active)).put(e.request, fresh.clone());
+          return fresh;
+        }
+      } catch {}
+      if (active) {
+        const hit = await (await caches.open(active)).match(e.request);
+        if (hit) return hit;
+      }
+      return fetch(e.request);
+    }
     if (active) {
       const c = await caches.open(active);
       const hit = await c.match(e.request);

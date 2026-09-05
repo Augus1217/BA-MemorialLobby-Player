@@ -215,7 +215,7 @@
     .sb-pin.is-pin { color: #ffd76b; opacity: 1; }
 
     /* export panel (video export) */
-    #exportPanel, #settingsPanel {
+    #exportPanel, #settingsPanel, #aboutPanel {
       position: fixed; z-index: 60; left: 50%; top: 50%; transform: translate(-50%, -50%);
       width: 360px; background:
         linear-gradient(165deg, rgba(28,42,88,.97) 0%, rgba(12,16,38,.98) 55%, rgba(8,10,26,.98) 100%);
@@ -226,7 +226,7 @@
         0 0 0 1px rgba(76,167,255,.08);
       display: none; color: #e8ecff;
     }
-    #exportPanel.open, #settingsPanel.open { display: block; animation: panelIn .22s ease-out; }
+    #exportPanel.open, #settingsPanel.open, #aboutPanel.open { display: block; animation: panelIn .22s ease-out; }
     @keyframes panelIn {
       from { opacity: 0; transform: translate(-50%, -48%) scale(.96); }
       to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
@@ -305,6 +305,8 @@
 
     /* settings panel */
     #settingsPanel { width: 400px; max-height: 82vh; overflow-y: auto; }
+    #aboutPanel { width: 400px; max-height: 82vh; overflow-y: auto; }
+    #aboutPanel::-webkit-scrollbar { width: 8px; }
     #settingsPanel::-webkit-scrollbar { width: 8px; }
     #settingsPanel::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 4px; }
     .set-section { border-top: 1px solid rgba(130,160,255,.14); padding-top: 12px; margin-top: 14px; }
@@ -783,26 +785,30 @@
       <div id="setSpaceList" style="display:none; margin-top:8px; max-height:260px; overflow-y:auto;"></div>
     </div>
 
-    <div class="set-section">
-      <div class="set-head" data-i18n="set.about">關於</div>
-      <div style="font-size:11px; color:#9aa4e0; line-height:1.8;" data-i18n="set.aboutDesc">BA Memorial Lobby 回憶大廳播放器。</div>
-      <div style="margin-top:8px; font-size:11px; color:#9aa4e0;">
-        <span data-i18n="set.officialDl">官方遊戲下載：</span>
-        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px;">
-          <a href="https://play.google.com/store/apps/details?id=com.nexon.bluearchive" target="_blank" rel="noopener"><img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" height="54"></a>
-          <a href="https://apps.apple.com/us/app/blue-archive/id1571873795?itscg=30200&itsct=apps_box_badge&mttnsubad=1571873795" target="_blank" rel="noopener" style="display:inline-block;"><img src="https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us?releaseDate=1636243200" alt="Download on the App Store" style="width:161px; height:54px; vertical-align:middle; object-fit:contain;"></a>
-        </div>
-        <div style="margin-top:8px; width:355px; height:105px; overflow:hidden;">
-          <iframe src="https://store.steampowered.com/widget/3557620/" frameborder="0" width="646" height="190" style="transform:scale(0.55); transform-origin:top left;"></iframe>
-        </div>
+    <div class="panel-btns">
+      <button id="setAbout" class="btnTxt" data-i18n="set.about">關於</button>
+      <button id="setClose" class="btnTxt primary" data-i18n="set.close">關閉</button>
+    </div>
+  </div>
+
+  <div id="aboutPanel" style="z-index:70;">
+    <div class="panel-title" data-i18n="set.about">關於</div>
+    <div style="font-size:11px; color:#9aa4e0; line-height:1.8;" data-i18n="set.aboutDesc">BA Memorial Lobby 回憶大廳播放器。</div>
+    <div style="margin-top:8px; font-size:11px; color:#9aa4e0;">
+      <span data-i18n="set.officialDl">官方遊戲下載：</span>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px;">
+        <a href="https://play.google.com/store/apps/details?id=com.nexon.bluearchive" target="_blank" rel="noopener"><img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" height="54"></a>
+        <a href="https://apps.apple.com/us/app/blue-archive/id1571873795?itscg=30200&itsct=apps_box_badge&mttnsubad=1571873795" target="_blank" rel="noopener" style="display:inline-block;"><img src="https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us?releaseDate=1636243200" alt="Download on the App Store" style="width:161px; height:54px; vertical-align:middle; object-fit:contain;"></a>
       </div>
-      <div id="setDesktopDlRow" style="display:none; margin-top:8px;">
-        <a id="setDesktopDl" href="https://github.com/Augus1217/BA-MemorialLobby-Player/releases" target="_blank" rel="noopener" style="font-size:12px; color:#8fb4ff;" data-i18n="set.desktopDl">下載桌面版</a>
+      <div style="margin-top:8px; width:355px; height:105px; overflow:hidden;">
+        <iframe src="https://store.steampowered.com/widget/3557620/" frameborder="0" width="646" height="190" style="transform:scale(0.55); transform-origin:top left;"></iframe>
       </div>
     </div>
-
+    <div id="setDesktopDlRow" style="display:none; margin-top:8px;">
+      <a id="setDesktopDl" href="https://github.com/Augus1217/BA-MemorialLobby-Player/releases" target="_blank" rel="noopener" style="font-size:12px; color:#8fb4ff;" data-i18n="set.desktopDl">下載桌面版</a>
+    </div>
     <div class="panel-btns">
-      <button id="setClose" class="btnTxt primary" data-i18n="set.close">關閉</button>
+      <button id="aboutClose" class="btnTxt primary" data-i18n="set.close">關閉</button>
     </div>
   </div>
 
