@@ -49,6 +49,57 @@ async function writeMeta(c, obj) {
   }));
 }
 
+// ---- 跨版遷移：新版空快取 → 從最新舊版快取搬 sha 未變的包 ----
+// 打包是確定性的（同內容同 sha），沒變的包免重下。只搬有 __files 清單的包
+// （太舊的安裝沒有清單，照舊重下；開過一次管理空間即 backfill 全有）。
+// 舊快取不刪（SW 可能還指著它；刪除由下載成功路徑的既有清理負責）。
+async function migrateFromPreviousCache(meta, newCache, onProgress) {
+  const stat = { migrated: 0, files: 0 };
+  if (!newCache || !meta?.packages) return stat;
+  let names = [];
+  try { names = await caches.keys(); } catch { return stat; }
+  const key = CACHE_PREFIX + meta.version;
+  const olds = names.filter((n) => n.startsWith(CACHE_PREFIX) && n !== key).sort();
+  if (!olds.length) return stat;
+  let oldCache = null, oldMeta = {};
+  try {
+    oldCache = await caches.open(olds[olds.length - 1]);
+    oldMeta = await readMeta(oldCache);
+  } catch { return stat; }
+  const oldFiles = oldMeta.__files || {};
+  if (!Object.keys(oldFiles).length) return stat;
+  const cur = await readMeta(newCache);
+  const fileMap = { ...(cur.__files || {}) };
+  const jobs = Object.keys(oldFiles).filter((k) =>
+    !k.startsWith('__') && meta.packages[k]
+    && oldMeta[k] === meta.packages[k].sha256
+    && cur[k] !== meta.packages[k].sha256
+    && Array.isArray(oldFiles[k]));
+  for (let i = 0; i < jobs.length; i++) {
+    const name = jobs[i];
+    let n = 0;
+    for (const rel of oldFiles[name]) {
+      try {
+        const r = await oldCache.match(cacheKey(rel));
+        if (r) { await newCache.put(cacheKey(rel), r); n++; }
+      } catch {}
+    }
+    if (n > 0 || !oldFiles[name].length) {
+      cur[name] = meta.packages[name].sha256;
+      fileMap[name] = oldFiles[name];
+      stat.migrated++;
+      stat.files += n;
+    }
+    try { onProgress?.({ status: 'downloading', package: name, index: i, total: jobs.length, percent: Math.round(((i + 1) / jobs.length) * 100), migrated: true }); } catch {}
+    if (stat.migrated % 25 === 0) {
+      try { cur.__files = fileMap; await writeMeta(newCache, cur); } catch {}
+    }
+  }
+  try { cur.__files = fileMap; await writeMeta(newCache, cur); } catch {}
+  try { onProgress?.({ status: 'done', percent: 100 }); } catch {}
+  return stat;
+}
+
 // ---- version manifest ----
 async function fetchRemoteVersion() {
   if (_versionMeta) return _versionMeta;
@@ -170,6 +221,8 @@ async function ensureAssets(neededPacks, onProgress) {
   const meta = await fetchRemoteVersion();
   await openCache(meta.version);
   const c = await activeCache();
+  // 跨版：先從舊快取搬 sha 未變的包（免重下），再算還缺什麼
+  await migrateFromPreviousCache(meta, c, onProgress);
   const installed = await readMeta(c);
 
   const toDownload = neededPacks.filter(
@@ -342,6 +395,7 @@ const ba = {
   async checkAssets({ voice } = {}) {
     const meta = await fetchRemoteVersion();
     const c = await caches.open(CACHE_PREFIX + meta.version);
+    await migrateFromPreviousCache(meta, c);
     const installed = await readMeta(c);
     const coreOk = installed['core'] === meta.packages?.['core']?.sha256;
     const wantKr = voice === 'kr';
@@ -386,6 +440,7 @@ const ba = {
     };
     // 下載 missing 的指定包（其餘邏輯同 downloadAllAssets 的收尾）
     const c = await activeCache();
+    await migrateFromPreviousCache(meta, c);
     const installed = await readMeta(c);
     const wantKr = voice === 'kr';
     const toDownload = wanted.filter(
@@ -436,6 +491,7 @@ const ba = {
       ? _versionMeta : await fetchRemoteVersion();
     await openCache(meta.version);
     const c = await activeCache();
+    await migrateFromPreviousCache(meta, c);
     const installed = await readMeta(c);
 
     let packs = [];
