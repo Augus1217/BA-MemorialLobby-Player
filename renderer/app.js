@@ -3363,11 +3363,23 @@ function updateTotalProgress(curName, curPct) {
   if (tfill) tfill.style.width = pct + '%';
   if (ttxt) ttxt.textContent = t('set.total', { pct });
 }
+// 設定頁下載執行狀態（暫停鈕用）
+let _dlRunning = false;
+let _dlPromise = null;
+async function onSettingsDownloadBtn() {
+  if (_dlRunning) {
+    try { await window.ba.cancelDownload?.(); } catch {}
+    return;   // 收尾由 _dlPromise 的 then 處理
+  }
+  startSettingsDownload();
+}
 function startSettingsDownload() {
   const info = _settingsAssetInfo;
   // packages 是 {包名: 資訊} 物件（不是陣列）——之前用 Array.isArray 擋掉一切。
   if (!info?.remoteVersion || !info.packages) return;
-  setDownloadBtn.style.display = 'none';
+  _dlRunning = true;
+  try { setDownloadBtn.textContent = t('set.pause'); } catch {}
+  setDownloadBtn.style.display = 'block';
   setAssetsProgress.style.display = 'block';
   setProgressText.textContent = t('dl.start');
   _dlTotal.done = 0;
@@ -3382,10 +3394,19 @@ function startSettingsDownload() {
   const version = info.remoteVersion || '1.0.0';
   const pkgs = {};
   for (const k of info.needsDownloadPacks || []) pkgs[k] = info.packages[k];
-  window.ba.downloadAssets({ version, packages: pkgs, voice: voiceLang }).then(async () => {
+  _dlPromise = window.ba.downloadAssets({ version, packages: pkgs, voice: voiceLang }).then(async (res) => {
+    _dlRunning = false;
+    _dlPromise = null;
+    const arr = Array.isArray(res) ? res : (res?.results || []);
+    const cancelled = !!(res && res.cancelled) || arr.some((r) => r?.error === 'cancelled');
     setAssetsProgress.style.display = 'none';
     await refreshSettingsAssets();
+    if (cancelled) {
+      try { setAssetsStatus.innerHTML += `<br><span class="warn">⏸ ${t('set.paused')}</span>`; } catch {}
+    }
   }).catch((e) => {
+    _dlRunning = false;
+    _dlPromise = null;
     setProgressText.textContent = `⚠ ${e?.message || e}`;
   });
 }
@@ -3416,8 +3437,16 @@ function spaceKindLabel(kind) {
 }
 
 async function refreshSpaceManager() {
+  // BGM 映射傳給 web 版做舊包 backfill（lobby/X 那首 bgm 要認領回來）
+  let bgmByLobby = null;
   try {
-    _spaceInfo = await window.ba.assetsManageList?.();
+    bgmByLobby = {};
+    for (const k of Object.keys(BGM_MAP || {})) bgmByLobby[k] = BGM_MAP[k];
+  } catch { bgmByLobby = null; }
+  try {
+    _spaceInfo = bgmByLobby
+      ? await window.ba.assetsManageList?.({ bgmByLobby })
+      : await window.ba.assetsManageList?.();
   } catch { _spaceInfo = null; }
   renderSpaceSummary();
   if (_spaceOpen) renderSpaceList();
@@ -5850,6 +5879,11 @@ async function init() {
   setModeSegs.addEventListener('click', async (e) => {
     const b = e.target.closest('button');
     if (!b || b.classList.contains('on')) return;
+    // 下載中切模式：先停掉舊的再切，避免兩路併發寫 meta
+    if (_dlRunning) {
+      try { await window.ba.cancelDownload?.(); } catch {}
+      try { await _dlPromise; } catch {}
+    }
     const streaming = b.dataset.m === 'streaming';
     try { await window.ba?.setStreamingMode?.(streaming); } catch {}
     await syncSettingsModeSegs();
@@ -5865,7 +5899,7 @@ async function init() {
       }
     }
   });
-  setDownloadBtn.addEventListener('click', startSettingsDownload);
+  setDownloadBtn.addEventListener('click', onSettingsDownloadBtn);
   // 雙進度條狀態：本包％＋總量％（總量按 manifest 標稱大小加權）
   // 全域下載進度（註冊一次；模式切換觸發的下載也經這裡顯示）
   try {

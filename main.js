@@ -364,31 +364,52 @@ function fetchJSON(url) {
   });
 }
 
-function downloadFile(url, dest, onProgress) {
+function downloadFile(url, dest, onProgress, ctl) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn) => (...a) => {
+      if (settled) return;
+      settled = true;
+      if (ctl) ctl.cancel = null;
+      fn(...a);
+    };
+    const ok = finish(resolve), fail = finish(reject);
     const doRequest = (u) => {
       const mod = u.startsWith('https') ? https : require('http');
       const req = mod.get(u, { headers: { 'User-Agent': 'BA-MemorialLobby/1.0' } }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
           return doRequest(res.headers.location);
         }
         if (res.statusCode !== 200) {
           res.resume();
-          return reject(new Error(`HTTP ${res.statusCode} for ${u}`));
+          return fail(new Error(`HTTP ${res.statusCode} for ${u}`));
         }
         const total = parseInt(res.headers['content-length'] || '0', 10);
         let downloaded = 0;
         const ws = fs.createWriteStream(dest);
+        if (ctl) {
+          ctl.cancel = () => {
+            try { req.destroy(); } catch {}
+            try { ws.destroy(); } catch {}
+            try { res.destroy(); } catch {}
+            fail(new Error('cancelled'));
+          };
+        }
         res.on('data', (chunk) => {
           downloaded += chunk.length;
           if (onProgress) onProgress(downloaded, total);
         });
+        res.on('error', fail);
         res.pipe(ws);
-        ws.on('finish', () => resolve({ size: downloaded }));
-        ws.on('error', reject);
+        ws.on('finish', () => ok({ size: downloaded }));
+        ws.on('error', fail);
       });
-      req.on('error', reject);
-      req.setTimeout(300000, () => { req.destroy(); reject(new Error('Download timeout')); });
+      req.on('error', fail);
+      req.setTimeout(300000, () => { req.destroy(); fail(new Error('Download timeout')); });
+      if (ctl && !ctl.cancel) {
+        ctl.cancel = () => { try { req.destroy(); } catch {} fail(new Error('cancelled')); };
+      }
     };
     doRequest(url);
   });
@@ -473,10 +494,21 @@ ipcMain.handle('set-streaming-mode', async (event, v) => {
   return isStreamingMode();
 });
 
+// 設定頁暫停鈕用（download-assets 迴圈內檢查；進行中的包經 ctl abort）
+const dlCancel = { cancelled: false, cancel: null };
+ipcMain.handle('cancel-download-assets', async () => {
+  dlCancel.cancelled = true;
+  try { dlCancel.cancel?.(); } catch {}
+  return true;
+});
+
 ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, voice }) => {
   const assetsDir = getAssetsDir();
   const installed = readInstalled();
   const remotePackages = packages || {};
+  // 設定頁暫停鈕用：包之間檢查旗標，進行中的包經 ctl abort
+  dlCancel.cancelled = false;
+  dlCancel.cancel = null;
   // 僅下載需要的包（增量）：sha 不同的才下；若呼叫端指定 onlyPacks 則限於該清單
   let pkgNames;
   if (onlyPacks && Array.isArray(onlyPacks)) {
@@ -500,6 +532,7 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, 
   const results = [];
   for (let i = 0; i < pkgNames.length; i++) {
     const name = pkgNames[i];
+    if (dlCancel.cancelled) { results.push({ name, ok: false, error: 'cancelled' }); break; }
     const pkg = remotePackages[name];
     if (!pkg) { results.push({ name, ok: false, error: 'not in remote' }); continue; }
     const tarName = `assets-${name.replace(/\//g, '_')}-v${version}.tar.gz`;
@@ -514,7 +547,7 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, 
       const url = `${ASSETS_PACKAGES_URL}/v${version}/${tarName}` || pkg.url;
       await downloadFile(url, tarPath, (dl, total) => {
         sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total });
-      });
+      }, dlCancel);
       sendProgress({ status: 'extracting', percent: 0 });
       // v2：arcname "assets/..." strip:1 到 assets/ 根；兼容舊包
       try { await extractTarGzToAssets(tarPath); }
@@ -524,6 +557,7 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, 
       sendProgress({ status: 'done', percent: 100 });
       results.push({ name, ok: true });
     } catch (e) {
+      if (dlCancel.cancelled) { results.push({ name, ok: false, error: 'cancelled' }); break; }
       console.error(`[assets] ${name} 失敗:`, e.message);
       sendProgress({ status: 'error', error: e.message });
       results.push({ name, ok: false, error: e.message });

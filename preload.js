@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('ba', {
   // Asset download (增量 + 串流)
   checkAssets: (payload) => ipcRenderer.invoke('check-assets', payload),
   downloadAssets: (payload) => ipcRenderer.invoke('download-assets', payload),
+  cancelDownload: () => ipcRenderer.invoke('cancel-download-assets'),
   onDownloadProgress: (cb) => {
     const w = (_, data) => { try { cb(data); } catch {} };
     _progWraps.set(cb, w);

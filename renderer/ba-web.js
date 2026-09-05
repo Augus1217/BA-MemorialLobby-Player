@@ -11,6 +11,8 @@ const CACHE_PREFIX = 'ba-assets-v';
 let _cache = null;
 let _versionMeta = null;
 const _inflight = new Map();          // "version:name" → Promise (去重)
+// 下載取消狀態（設定頁暫停鈕用；開機/串流下載不走此旗）
+const _dlCtl = { cancelled: false, current: null };
 
 // ---- cache helpers (no localStorage) ----
 async function activeCache() {
@@ -103,11 +105,11 @@ function cacheKey(p) {
 }
 
 // ---- 下載單包 → 解壓進 cache ----
-async function fetchAndInstallPack(meta, name, onProgress) {
+async function fetchAndInstallPack(meta, name, onProgress, signal) {
   const url = packUrl(meta, name);
   const c = await activeCache();
   onProgress?.({ status: 'downloading', percent: 0 });
-  const resp = await fetch(url, { cache: 'force-cache' });
+  const resp = await fetch(url, { cache: 'force-cache', ...(signal ? { signal } : {}) });
   if (!resp.ok) throw new Error(`pack ${name}: HTTP ${resp.status}`);
   // 串流讀取回報進度（大包如 400MB 的 assets-player 否則 0% 卡數分鐘）
   const total = Number(resp.headers.get('content-length')) || 0;
@@ -244,20 +246,26 @@ async function downloadAllAssets({ version, voice }, onProgress) {
   );
   if (!toDownload.length) return { ok: true, version: meta.version };
 
+  _dlCtl.cancelled = false;
   const results = [];
   const fileMap = { ...(installed.__files || {}) };
   for (let i = 0; i < toDownload.length; i++) {
     const name = toDownload[i];
+    if (_dlCtl.cancelled) break;
     const sendProgress = (p) => {
       const full = { package: name, index: i, total: toDownload.length, ...p };
       try { onProgress?.(full); } catch {}
       try { ba._emitProgress(full); } catch {}
     };
+    _dlCtl.current = new AbortController();
     try {
-      fileMap[name] = await fetchAndInstallPack(meta, name, sendProgress);
+      fileMap[name] = await fetchAndInstallPack(meta, name, sendProgress, _dlCtl.current.signal);
       results.push({ name, ok: true });
     } catch (e) {
+      if (_dlCtl.cancelled) break;   // 暫停：不記錯誤，直接收尾
       results.push({ name, ok: false, error: e.message });
+    } finally {
+      _dlCtl.current = null;
     }
   }
 
@@ -279,7 +287,7 @@ async function downloadAllAssets({ version, voice }, onProgress) {
     );
   }
 
-  return { ok: results.every((r) => r.ok), version: meta.version, results };
+  return { ok: results.every((r) => r.ok) && !_dlCtl.cancelled, cancelled: _dlCtl.cancelled, version: meta.version, results };
 }
 
 // ---- window.ba shim ----
@@ -386,16 +394,23 @@ const ba = {
           || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')))
     );
     if (!toDownload.length) return { ok: true, version: meta.version };
+    _dlCtl.cancelled = false;
     const results = [];
     const fileMap = { ...(installed.__files || {}) };
     for (let i = 0; i < toDownload.length; i++) {
       const name = toDownload[i];
+      if (_dlCtl.cancelled) break;
       try {
+        _dlCtl.current = new AbortController();
         fileMap[name] = await fetchAndInstallPack(meta, name,
-          (p) => sendProgress({ package: name, index: i, total: toDownload.length, ...p }));
+          (p) => sendProgress({ package: name, index: i, total: toDownload.length, ...p }),
+          _dlCtl.current.signal);
         results.push({ name, ok: true });
       } catch (e) {
+        if (_dlCtl.cancelled) break;   // 暫停：不記錯誤，直接收尾
         results.push({ name, ok: false, error: e.message });
+      } finally {
+        _dlCtl.current = null;
       }
     }
     const updated = { ...installed };
@@ -413,7 +428,7 @@ const ba = {
           .map((n) => caches.delete(n))
       );
     }
-    return { ok: results.every((r) => r.ok), version: meta.version, results };
+    return { ok: results.every((r) => r.ok) && !_dlCtl.cancelled, cancelled: _dlCtl.cancelled, version: meta.version, results };
   },
 
   async ensureLobby({ lobby, version, packages, lobbies, voice }) {
@@ -494,9 +509,17 @@ const ba = {
     } catch {}
     return { usage: 0, quota: 0 };
   },
+  // ---- 取消設定頁下載（暫停鈕用；進行中的包 abort，包之間檢查旗標）
+  cancelDownload() {
+    _dlCtl.cancelled = true;
+    try { _dlCtl.current?.abort(); } catch {}
+    return true;
+  },
   // ---- 管理空間（web）：已裝包＋manifest 標稱大小；core 不可刪；
-  // 無檔案清單的舊包（此功能上線前裝的）暫鎖，下次更新重裝後即有清單
-  async assetsManageList() {
+  // 無檔案清單的舊包（此功能上線前裝的）按確定性包結構 backfill：
+  // lobby/X＝spine/X/＋scene/X/＋映射表那首bgm，voice/F＝voice/F/，
+  // core/intro/assets-player＝各自固定目錄。共用檔靠 refcount 保護。
+  async assetsManageList({ bgmByLobby } = {}) {
     let meta = null;
     try { meta = _versionMeta?.version ? _versionMeta : await fetchRemoteVersion(); }
     catch { meta = _versionMeta || null; }
@@ -504,8 +527,47 @@ const ba = {
     let installed = {};
     try { installed = await readMeta(c); } catch {}
     const pkgs = meta?.packages || {};
-    const files = installed.__files || {};
-    const packs = Object.keys(installed).filter((k) => !k.startsWith('__') && pkgs[k]).sort().map((k) => ({
+    let files = installed.__files || {};
+    const packKeys = Object.keys(installed).filter((k) => !k.startsWith('__') && pkgs[k]);
+    const unmapped = packKeys.filter((k) => k !== 'core' && !files[k]);
+    if (c && unmapped.length) {
+      try {
+        const keyReqs = await c.keys();
+        const rels = [];
+        for (const r of keyReqs) {
+          try {
+            const u = new URL(r.url, location.href);
+            const p = u.pathname.replace(/^\//, '');
+            if (p.startsWith('assets/')) rels.push(p.slice(7));
+          } catch {}
+        }
+        const inCache = new Set(rels);
+        const PLAYER_DIRS = ['bgm/', 'students/', 'loading/', 'ui/', 'fonts/', 'clickfx/'];
+        const rebuilt = {};
+        for (const k of unmapped) {
+          let list = null;
+          if (k === 'intro') {
+            list = rels.filter((r) => r.startsWith('intro/'));
+          } else if (k === 'assets-player') {
+            list = rels.filter((r) => PLAYER_DIRS.some((d) => r.startsWith(d)));
+          } else if (k.startsWith('lobby/')) {
+            const dir = k.slice(6);
+            list = rels.filter((r) => r.startsWith('spine/' + dir + '/') || r.startsWith('scene/' + dir + '/'));
+            const bgm = bgmByLobby?.[dir];
+            if (bgm && inCache.has('bgm/' + bgm)) list = [...list, 'bgm/' + bgm];
+          } else if (k.startsWith('voice/')) {
+            list = rels.filter((r) => r.startsWith(k + '/'));
+          }
+          if (list) rebuilt[k] = list;
+        }
+        if (Object.keys(rebuilt).length) {
+          files = { ...files, ...rebuilt };
+          installed.__files = files;
+          await writeMeta(c, installed);
+        }
+      } catch {}
+    }
+    const packs = packKeys.sort().map((k) => ({
       key: k,
       kind: k === 'core' ? 'core' : k === 'intro' ? 'intro' : k.split('/')[0],
       name: k.includes('/') ? k.split('/')[1] : k,
