@@ -3171,7 +3171,7 @@ function closeExportPanel() { exportPanel.classList.remove('open'); }
 // ---- settings panel (language / download mode / assets) ----
 const settingsPanel = document.getElementById('settingsPanel');
 const setClose = document.getElementById('setClose');
-const aboutPanel = document.getElementById('aboutPanel');
+const settingsBackdrop = document.getElementById('settingsBackdrop');
 const setLangSegs = document.getElementById('setLangSegs');
 const setModeSegs = document.getElementById('setModeSegs');
 const setCursorCk = document.getElementById('setCursorCk');
@@ -3419,15 +3419,17 @@ function toggleSettingsPanel(force) {
     refreshSpaceManager();
   }
   settingsPanel.classList.toggle('open', open);
-  if (!open) toggleAboutPanel(false);   // 設定關了，關於跟著關
+  settingsBackdrop?.classList.toggle('open', open);
+  if (open) switchSettingsTab(false);   // 開啟預設回設定頁
 }
 
-// ---- 關於：獨立視窗（疊在設定頁之上），桌面版鏈結只在網頁版顯示 ----
-function toggleAboutPanel(force) {
-  if (!aboutPanel) return;
-  const open = typeof force === 'boolean' ? force : !aboutPanel.classList.contains('open');
-  if (open) syncAboutSection();
-  aboutPanel.classList.toggle('open', open);
+// ---- 設定／關於分頁（共用視窗）----
+function switchSettingsTab(about) {
+  document.getElementById('setTabMain').style.display = about ? 'none' : '';
+  document.getElementById('setTabAbout').style.display = about ? '' : 'none';
+  document.getElementById('setTabBtnMain')?.classList.toggle('on', !about);
+  document.getElementById('setTabBtnAbout')?.classList.toggle('on', !!about);
+  if (about) syncAboutSection();
 }
 function syncAboutSection() {
   const row = document.getElementById('setDesktopDlRow');
@@ -5701,8 +5703,9 @@ async function init() {
   // ---- settings panel ----
   btnCtlSettings.addEventListener('click', toggleSettingsPanel);
   setClose.addEventListener('click', toggleSettingsPanel);
-  document.getElementById('setAbout')?.addEventListener('click', () => toggleAboutPanel());
-  document.getElementById('aboutClose')?.addEventListener('click', () => toggleAboutPanel(false));
+  settingsBackdrop?.addEventListener('click', () => toggleSettingsPanel(false));
+  document.getElementById('setTabBtnMain')?.addEventListener('click', () => switchSettingsTab(false));
+  document.getElementById('setTabBtnAbout')?.addEventListener('click', () => switchSettingsTab(true));
 
   btnStudents.addEventListener('click', () => toggleSidebar());
   sbClose.addEventListener('click', () => toggleSidebar(false));
@@ -5715,7 +5718,7 @@ async function init() {
     if (e.key === 'Escape' && sidePanel.classList.contains('open')) toggleSidebar(false);
   });
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && aboutPanel?.classList.contains('open')) toggleAboutPanel(false);
+    if (e.key === 'Escape' && settingsPanel.classList.contains('open')) toggleSettingsPanel(false);
   });
 
   // ---- video export UI ----
