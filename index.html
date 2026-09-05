@@ -305,6 +305,18 @@
 
     /* 管理空間列表 */
     #setSpaceList { border: 1px solid rgba(255,255,255,.1); border-radius: 8px; padding: 4px; }
+    .spaceToolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+    .spaceToolbar input[type="search"], .spaceToolbar select {
+      background: rgba(255,255,255,.06); color: #e8ecff;
+      border: 1px solid rgba(255,255,255,.14); border-radius: 6px;
+      padding: 7px 10px; font-size: 12px; outline: none;
+    }
+    .spaceToolbar input[type="search"] { flex: 1; min-width: 140px; }
+    .spaceToolbar input[type="search"]::placeholder { color: rgba(210,220,255,.45); }
+    .spaceToolbar select option { background: #141a38; }
+    .spaceToolbar .btnTxt { padding: 7px 14px; font-size: 12px; }
+    #setSpaceMsg { font-size: 12px; color: #8fd49c; margin: 4px 0; min-height: 0; }
+    #setSpaceMsg.warn { color: #e8c268; }
     .spaceRow {
       display: flex; align-items: center; gap: 8px; padding: 5px 8px;
       border-radius: 6px; font-size: 12px;
@@ -313,6 +325,8 @@
     .spaceMain { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
     .spaceName { color: #e8ecff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .spaceKind { font-size: 10px; color: #7f8ac0; flex-shrink: 0; }
+    .spaceMeta { font-size: 10px; color: #7f8ac0; flex-shrink: 0; }
+    .spaceBroken { font-size: 10px; color: #e8c268; flex-shrink: 0; }
     .spaceSize { color: #9aa4e0; font-variant-numeric: tabular-nums; flex-shrink: 0; }
     .spaceDel {
       width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(255,120,120,.35);
@@ -779,6 +793,7 @@
   <div id="settingsPanel">
     <div class="set-tabs">
       <button id="setTabBtnMain" class="on" data-i18n="set.title">設定</button>
+      <button id="setTabBtnSpace" data-i18n="set.space.title">管理空間</button>
       <button id="setTabBtnAbout" data-i18n="set.about">關於</button>
     </div>
 
@@ -832,13 +847,29 @@
       </div>
     </div>
 
-    <div class="set-section">
-      <div class="set-head" data-i18n="set.space.title">管理空間</div>
-      <div id="setSpaceSummary" style="font-size:13px; color:#c6d2f5; margin-bottom:8px;"></div>
-      <button id="setSpaceToggle" class="btnTxt" style="display:none" data-i18n="set.space.open">檢視已下載資源</button>
-      <div id="setSpaceList" style="display:none; margin-top:8px; max-height:260px; overflow-y:auto;"></div>
-    </div>
     </div><!-- /setTabMain -->
+
+    <div id="setTabSpace" style="display:none;">
+      <div id="setSpaceSummary" style="font-size:13px; color:#c6d2f5; margin-bottom:4px;"></div>
+      <div id="setSpaceMsg"></div>
+      <div class="spaceToolbar">
+        <input type="search" id="setSpaceSearch" data-i18n-ph="set.space.search" placeholder="搜尋資源包…">
+        <select id="setSpaceSort">
+          <option value="size" data-i18n="set.space.sortSize">大小↓</option>
+          <option value="name" data-i18n="set.space.sortName">名稱</option>
+        </select>
+        <button id="setSpaceVerify" class="btnTxt" data-i18n="set.space.verify">檢查完整性</button>
+      </div>
+      <div class="spaceToolbar">
+        <button id="setSpaceDelLobbies" class="btnTxt" data-i18n="set.space.delLobbies">刪全部大廳包</button>
+        <button id="setSpaceDelOtherVoice" class="btnTxt" data-i18n="set.space.delOtherVoice">刪另一語言語音</button>
+      </div>
+      <div class="spaceToolbar" id="setSpaceOrphanRow" style="display:none">
+        <span id="setSpaceOrphans" style="font-size:12px; color:#c6d2f5;"></span>
+        <button id="setSpaceCleanOrphans" class="btnTxt" data-i18n="set.space.cleanOrphans">清除</button>
+      </div>
+      <div id="setSpaceList" style="margin-top:8px; max-height:46vh; overflow-y:auto;"></div>
+    </div>
 
     <div id="setTabAbout" style="display:none;">
       <div style="font-size:13px; color:#dbe4ff; line-height:2;" data-i18n="set.aboutDesc">BA Memorial Lobby 回憶大廳播放器。</div>

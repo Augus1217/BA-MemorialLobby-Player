@@ -167,6 +167,20 @@ const LOCAL_I18N = {
   'set.space.kindIntro': { 'zh-TW': '開場', 'zh-CN': '开场', 'ja': 'オープニング', 'en': 'Intro', 'ko': '오프닝' },
   'set.space.kindLobby': { 'zh-TW': '大廳', 'zh-CN': '大厅', 'ja': 'ホール', 'en': 'Lobby', 'ko': '로비' },
   'set.space.kindVoice': { 'zh-TW': '語音', 'zh-CN': '语音', 'ja': 'ボイス', 'en': 'Voice', 'ko': '보이스' },
+  'set.space.search':     { 'zh-TW': '搜尋資源包…', 'zh-CN': '搜索资源包…', 'ja': 'パックを検索…', 'en': 'Search packs…', 'ko': '팩 검색…' },
+  'set.space.sortName':   { 'zh-TW': '名稱', 'zh-CN': '名称', 'ja': '名前', 'en': 'Name', 'ko': '이름' },
+  'set.space.sortSize':   { 'zh-TW': '大小↓', 'zh-CN': '大小↓', 'ja': 'サイズ↓', 'en': 'Size↓', 'ko': '크기↓' },
+  'set.space.verify':     { 'zh-TW': '檢查完整性', 'zh-CN': '检查完整性', 'ja': '整合性チェック', 'en': 'Verify integrity', 'ko': '무결성 검사' },
+  'set.space.verifyOk':   { 'zh-TW': '全部完整 ✓', 'zh-CN': '全部完整 ✓', 'ja': 'すべて正常 ✓', 'en': 'All intact ✓', 'ko': '모두 정상 ✓' },
+  'set.space.brokenFound':{ 'zh-TW': '{n} 個包缺檔，已加入待下載', 'zh-CN': '{n} 个包缺文件，已加入待下载', 'ja': '{n} 個のパックに欠損、再DL対象に追加', 'en': '{n} pack(s) incomplete, queued for download', 'ko': '{n}개 팩 손상, 다운로드 대기열에 추가' },
+  'set.space.files':      { 'zh-TW': '{n} 檔', 'zh-CN': '{n} 个文件', 'ja': '{n} ファイル', 'en': '{n} files', 'ko': '{n}개 파일' },
+  'set.space.usedBy':     { 'zh-TW': '{n} 個大廳使用', 'zh-CN': '{n} 个大厅使用', 'ja': '{n} ホールが使用', 'en': 'Used by {n} lobbies', 'ko': '{n}개 로비에서 사용' },
+  'set.space.broken':     { 'zh-TW': '缺檔', 'zh-CN': '缺文件', 'ja': '欠損', 'en': 'broken', 'ko': '손상됨' },
+  'set.space.delLobbies': { 'zh-TW': '刪全部大廳包', 'zh-CN': '删全部大厅包', 'ja': 'ホール全削除', 'en': 'Delete all lobby packs', 'ko': '로비 팩 전체 삭제' },
+  'set.space.delOtherVoice': { 'zh-TW': '刪另一語言語音', 'zh-CN': '删另一语言语音', 'ja': '他言語ボイス削除', 'en': 'Delete other-language voices', 'ko': '다른 언어 보이스 삭제' },
+  'set.space.confirmAll': { 'zh-TW': '確定刪除 {n} 個包（約 {size}）？', 'zh-CN': '确定删除 {n} 个包（约 {size}）？', 'ja': '{n} 個のパック（約 {size}）を削除しますか？', 'en': 'Delete {n} packs (≈ {size})?', 'ko': '팩 {n}개(약 {size})를 삭제할까요?' },
+  'set.space.orphans':    { 'zh-TW': '無主檔 {n} 個', 'zh-CN': '无主文件 {n} 个', 'ja': '孤立ファイル {n} 個', 'en': '{n} orphaned file(s)', 'ko': '고아 파일 {n}개' },
+  'set.space.cleanOrphans': { 'zh-TW': '清除', 'zh-CN': '清除', 'ja': '削除', 'en': 'Clean', 'ko': '정리' },
 };
 
 function t(key, params) {
@@ -3444,12 +3458,14 @@ function syncSettingsEffectCks() {
   if (setJpOnlyCk) setJpOnlyCk.checked = settingsPref('ba_jpOnly', true);
 }
 
-// ---- 管理空間（已下載資源包檢視 + 刪除）----
+// ---- 管理空間（已下載資源包檢視 + 刪除 + 完整性 + 孤兒清理）----
 const setSpaceSummary = document.getElementById('setSpaceSummary');
-const setSpaceToggle = document.getElementById('setSpaceToggle');
 const setSpaceList = document.getElementById('setSpaceList');
+const setSpaceMsg = document.getElementById('setSpaceMsg');
 let _spaceInfo = null;
-let _spaceOpen = false;
+let _spaceQuery = '';
+let _spaceSort = 'size';
+let _spaceBroken = {};
 
 function spaceKindLabel(kind) {
   const map = { core: t('set.space.kindCore'), intro: t('set.space.kindIntro'), lobby: t('set.space.kindLobby'), voice: t('set.space.kindVoice') };
@@ -3469,41 +3485,80 @@ async function refreshSpaceManager() {
       : await window.ba.assetsManageList?.();
   } catch { _spaceInfo = null; }
   renderSpaceSummary();
-  if (_spaceOpen) renderSpaceList();
+  renderSpaceList();
+}
+
+// pack → 使用它的大廳（manifest lobbies 表反查；語音包顯示用）
+function spaceUsedBy() {
+  const map = {};
+  try {
+    const lobs = _settingsAssetInfo?.lobbies || {};
+    for (const [lob, v] of Object.entries(lobs)) {
+      for (const pk of v?.packs || []) {
+        (map[pk] = map[pk] || new Set()).add(lob);
+      }
+    }
+  } catch {}
+  return map;
+}
+
+function setSpaceMessage(text, warn) {
+  if (!setSpaceMsg) return;
+  setSpaceMsg.textContent = text || '';
+  setSpaceMsg.classList.toggle('warn', !!warn && !!text);
 }
 
 function renderSpaceSummary() {
-  if (!setSpaceSummary || !setSpaceToggle) return;
+  if (!setSpaceSummary) return;
   if (!_spaceInfo || !_spaceInfo.packs?.length) {
     setSpaceSummary.textContent = t('set.space.empty');
-    setSpaceToggle.style.display = 'none';
-    setSpaceList.style.display = 'none';
+    if (setSpaceList) setSpaceList.innerHTML = '';
+    const or = document.getElementById('setSpaceOrphanRow');
+    if (or) or.style.display = 'none';
     return;
   }
   const n = _spaceInfo.packs.length;
   setSpaceSummary.textContent = `${t('set.space.summary', { n, size: fmtBytes(_spaceInfo.totalSize) })} · v${_spaceInfo.version || '?'}`;
-  setSpaceToggle.style.display = 'inline-block';
+  const orphans = _spaceInfo.orphans || 0;
+  const or = document.getElementById('setSpaceOrphanRow');
+  const ot = document.getElementById('setSpaceOrphans');
+  if (or) or.style.display = orphans > 0 ? '' : 'none';
+  if (ot) ot.textContent = t('set.space.orphans', { n: orphans });
 }
 
 function renderSpaceList() {
   if (!setSpaceList || !_spaceInfo) return;
-  const packs = _spaceInfo.packs || [];
+  const usedBy = spaceUsedBy();
+  const q = (_spaceQuery || '').toLowerCase();
+  let packs = (_spaceInfo.packs || []).filter((p) =>
+    !q || p.key.toLowerCase().includes(q) || p.name.toLowerCase().includes(q));
+  packs = [...packs].sort((a, b) => _spaceSort === 'name'
+    ? a.key.localeCompare(b.key)
+    : (b.size - a.size) || a.key.localeCompare(b.key));
   let html = '';
   for (const p of packs) {
     const delBtn = p.deletable
       ? `<button class="spaceDel" data-key="${p.key}" data-i18n-title="set.space.delete" title="刪除">✕</button>`
       : `<span class="spaceLock" data-i18n-title="set.space.locked" title="必要資源">🔒</span>`;
+    const broken = _spaceBroken[p.key]
+      ? `<span class="spaceBroken">⚠ ${t('set.space.broken')}</span>` : '';
+    const meta = [
+      typeof p.files === 'number' ? t('set.space.files', { n: p.files }) : null,
+      (usedBy[p.key]?.size > 1) ? t('set.space.usedBy', { n: usedBy[p.key].size }) : null,
+    ].filter(Boolean).join(' · ');
     html += `<div class="spaceRow">
       <div class="spaceMain">
         <span class="spaceName">${escapeHtml(p.name)}</span>
         <span class="spaceKind">${spaceKindLabel(p.kind)}</span>
+        ${broken}
+        ${meta ? `<span class="spaceMeta">${escapeHtml(meta)}</span>` : ''}
         ${p.present ? '' : `<span class="warn" style="font-size:10px;">⚠</span>`}
       </div>
       <span class="spaceSize">${fmtBytes(p.size)}</span>
       ${delBtn}
     </div>`;
   }
-  setSpaceList.innerHTML = html;
+  setSpaceList.innerHTML = html || `<div style="font-size:12px;color:#7f8ac0;padding:8px;">${t('set.space.empty')}</div>`;
   for (const btn of setSpaceList.querySelectorAll('.spaceDel')) {
     btn.addEventListener('click', async () => {
       const key = btn.dataset.key;
@@ -3511,6 +3566,8 @@ function renderSpaceList() {
       btn.disabled = true;
       try {
         await window.ba.assetsManageDelete([key]);
+        _spaceBroken = {};
+        setSpaceMessage('');
         await refreshSpaceManager();
         await refreshSettingsAssets();
       } finally {
@@ -3520,12 +3577,18 @@ function renderSpaceList() {
   }
 }
 
-setSpaceToggle?.addEventListener('click', () => {
-  _spaceOpen = !_spaceOpen;
-  setSpaceList.style.display = _spaceOpen ? 'block' : 'none';
-  if (_spaceOpen) renderSpaceList();
-  setSpaceToggle.textContent = _spaceOpen ? t('set.space.close') : t('set.space.open');
-});
+async function spaceDeleteKeys(keys) {
+  keys = (keys || []).filter((k) => (_spaceInfo?.packs || []).some((p) => p.key === k && p.deletable));
+  if (!keys.length) return;
+  let bytes = 0;
+  for (const k of keys) bytes += (_spaceInfo.packs.find((p) => p.key === k)?.size || 0);
+  if (!confirm(t('set.space.confirmAll', { n: keys.length, size: fmtBytes(bytes) }))) return;
+  await window.ba.assetsManageDelete(keys);
+  _spaceBroken = {};
+  setSpaceMessage('');
+  await refreshSpaceManager();
+  await refreshSettingsAssets();
+}
 
 function toggleSettingsPanel(force) {
   // force 可能是 addEventListener 傳入的 Event 物件（truthy）——只接受真正的 boolean。
@@ -3542,7 +3605,7 @@ function toggleSettingsPanel(force) {
   }
   settingsPanel.classList.toggle('open', open);
   settingsBackdrop?.classList.toggle('open', open);
-  if (open) switchSettingsTab(false);   // 開啟預設回設定頁
+  if (open) switchSettingsTab('main');   // 開啟預設回設定頁
 }
 
 // ---- 直向小螢幕：提示橫向使用 ----
@@ -3557,13 +3620,14 @@ function syncRotateHint() {
   } catch {}
   el.classList.toggle('open', !!(portrait && narrow && !_rotateDismissed));
 }
-// ---- 設定／關於分頁（共用視窗）----
-function switchSettingsTab(about) {
-  document.getElementById('setTabMain').style.display = about ? 'none' : '';
-  document.getElementById('setTabAbout').style.display = about ? '' : 'none';
-  document.getElementById('setTabBtnMain')?.classList.toggle('on', !about);
-  document.getElementById('setTabBtnAbout')?.classList.toggle('on', !!about);
-  if (about) { syncAboutSection(); fitSteamWidget(); }
+// ---- 設定／關於／管理空間分頁（共用視窗）----
+function switchSettingsTab(tab) {
+  for (const k of ['Main', 'Space', 'About']) {
+    document.getElementById('setTab' + k).style.display = tab === k.toLowerCase() ? '' : 'none';
+    document.getElementById('setTabBtn' + k)?.classList.toggle('on', tab === k.toLowerCase());
+  }
+  if (tab === 'about') { syncAboutSection(); fitSteamWidget(); }
+  if (tab === 'space') refreshSpaceManager();
 }
 // ---- Steam widget 自動縮放（原生 646px，窄視窗等比縮）----
 function fitSteamWidget() {
@@ -5848,8 +5912,50 @@ async function init() {
   btnCtlSettings.addEventListener('click', toggleSettingsPanel);
   setClose.addEventListener('click', toggleSettingsPanel);
   settingsBackdrop?.addEventListener('click', () => toggleSettingsPanel(false));
-  document.getElementById('setTabBtnMain')?.addEventListener('click', () => switchSettingsTab(false));
-  document.getElementById('setTabBtnAbout')?.addEventListener('click', () => switchSettingsTab(true));
+  document.getElementById('setTabBtnMain')?.addEventListener('click', () => switchSettingsTab('main'));
+  document.getElementById('setTabBtnSpace')?.addEventListener('click', () => switchSettingsTab('space'));
+  document.getElementById('setTabBtnAbout')?.addEventListener('click', () => switchSettingsTab('about'));
+  // 管理空間工具列（靜態元素，只綁一次）
+  document.getElementById('setSpaceSearch')?.addEventListener('input', (e) => {
+    _spaceQuery = e.target.value || '';
+    renderSpaceList();
+  });
+  document.getElementById('setSpaceSort')?.addEventListener('change', (e) => {
+    _spaceSort = e.target.value || 'size';
+    renderSpaceList();
+  });
+  document.getElementById('setSpaceVerify')?.addEventListener('click', onSpaceVerify);
+  document.getElementById('setSpaceDelLobbies')?.addEventListener('click', () => spaceDeleteKeys(
+    (_spaceInfo?.packs || []).filter((p) => p.kind === 'lobby').map((p) => p.key)));
+  document.getElementById('setSpaceDelOtherVoice')?.addEventListener('click', () => {
+    const other = voiceLang === 'kr' ? 'voice/JP_' : 'voice/KR_';
+    spaceDeleteKeys((_spaceInfo?.packs || []).filter((p) => p.key.startsWith(other)).map((p) => p.key));
+  });
+  document.getElementById('setSpaceCleanOrphans')?.addEventListener('click', async () => {
+    const r = await window.ba.cleanOrphans?.().catch(() => null) || { removed: 0 };
+    await refreshSpaceManager();
+    setSpaceMessage(t('set.space.orphans', { n: 0 }));
+    void r;
+  });
+
+// ---- 完整性檢查：缺檔的包去掉 sha（保留檔案清單），下次下載自動補回 ----
+async function onSpaceVerify() {
+  setSpaceMessage('');
+  let res = null;
+  try { res = await window.ba.verifyPacks?.(); } catch { res = null; }
+  const broken = Object.keys(res || {});
+  _spaceBroken = {};
+  for (const k of broken) _spaceBroken[k] = true;
+  if (!broken.length) {
+    setSpaceMessage(t('set.space.verifyOk'));
+    await refreshSpaceManager();
+    return;
+  }
+  try { await window.ba.repairPacks?.(broken); } catch {}
+  await refreshSpaceManager();
+  await refreshSettingsAssets();
+  setSpaceMessage(t('set.space.brokenFound', { n: broken.length }), true);
+}
   window.addEventListener('resize', () => {
     if (document.getElementById('setTabAbout')?.style.display !== 'none') fitSteamWidget();
   });

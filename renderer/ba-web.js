@@ -628,13 +628,32 @@ const ba = {
       kind: k === 'core' ? 'core' : k === 'intro' ? 'intro' : k.split('/')[0],
       name: k.includes('/') ? k.split('/')[1] : k,
       size: pkgs[k]?.size || 0,
+      files: (files[k] || []).length,
       deletable: k !== 'core' && !!files[k],
       present: true,
     }));
+    // 無主檔：快取裡有、但沒有任何已裝包認領（舊版殘留等）
+    let orphans = 0;
+    try {
+      const claimed = new Set();
+      for (const [p, rels] of Object.entries(files)) {
+        if (p.startsWith('__') || !(p in installed)) continue;
+        for (const r of rels || []) claimed.add(r);
+      }
+      const keyReqs = await c.keys();
+      for (const r of keyReqs) {
+        try {
+          const u = new URL(r.url, location.href);
+          const p = u.pathname.replace(/^\//, '');
+          if (p.startsWith('assets/') && !claimed.has(p.slice(7))) orphans++;
+        } catch {}
+      }
+    } catch {}
     return {
       version: meta?.version || '?',
       packs,
       totalSize: packs.reduce((a, p) => a + p.size, 0),
+      orphans,
       streaming: await this.getStreamingMode(),
     };
   },
@@ -663,6 +682,65 @@ const ba = {
     }
     await writeMeta(c, meta);
     return { removed, errors };
+  },
+  // ---- 完整性：有清單的包逐檔確認在快取內，缺檔回 {key: 缺數} ----
+  async verifyPacks() {
+    const c = await activeCache();
+    if (!c) return {};
+    const meta = await readMeta(c);
+    const files = meta.__files || {};
+    const broken = {};
+    for (const [key, rels] of Object.entries(files)) {
+      if (key.startsWith('__') || !(key in meta) || !Array.isArray(rels)) continue;
+      let missing = 0;
+      for (let i = 0; i < rels.length; i += 64) {
+        const checks = await Promise.all(
+          rels.slice(i, i + 64).map((r) => c.match(cacheKey(r)).catch(() => null)));
+        for (const hit of checks) if (!hit) missing++;
+      }
+      if (missing) broken[key] = missing;
+    }
+    return broken;
+  },
+  // ---- 修復：去掉缺檔包的 sha（保留清單），下次下載自動補回 ----
+  async repairPacks(keys) {
+    const c = await activeCache();
+    if (!c) return { removed: [] };
+    const meta = await readMeta(c);
+    const list = Array.isArray(keys) ? keys : [keys];
+    const removed = [];
+    for (const key of list) {
+      if (key === 'core' || !(key in meta)) continue;
+      delete meta[key];
+      removed.push(key);
+    }
+    await writeMeta(c, meta);
+    return { removed };
+  },
+  // ---- 清除無主檔 ----
+  async cleanOrphans() {
+    const c = await activeCache();
+    if (!c) return { removed: 0 };
+    const meta = await readMeta(c);
+    const files = meta.__files || {};
+    const claimed = new Set();
+    for (const [p, rels] of Object.entries(files)) {
+      if (p.startsWith('__') || !(p in meta)) continue;
+      for (const r of rels || []) claimed.add(r);
+    }
+    let removed = 0;
+    try {
+      for (const r of await c.keys()) {
+        try {
+          const u = new URL(r.url, location.href);
+          const p = u.pathname.replace(/^\//, '');
+          if (p.startsWith('assets/') && !claimed.has(p.slice(7))) {
+            if (await c.delete(r)) removed++;
+          }
+        } catch {}
+      }
+    } catch {}
+    return { removed };
   },
 };
 

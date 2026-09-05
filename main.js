@@ -704,8 +704,45 @@ ipcMain.handle('assets-manage-list', async () => {
     });
   }
   const total = packs.reduce((a, p) => a + p.size, 0);
-  return { version: localVersion, packs, totalSize: total, streaming: isStreamingMode() };
+  return { version: localVersion, packs, totalSize: total, orphans: 0, streaming: isStreamingMode() };
 });
+
+// 管理空間：完整性（代表路徑存在性）＋修復（去 sha，缺席計數）
+function packPrimaryPath(key) {
+  const assetsDir = getAssetsDir();
+  if (key === 'core') return path.join(assetsDir, 'data');
+  if (key === 'intro') return path.join(assetsDir, 'intro');
+  if (key === 'assets-player') return path.join(assetsDir, 'bgm');
+  if (key.startsWith('lobby/')) return path.join(assetsDir, 'spine', key.slice('lobby/'.length));
+  if (key.startsWith('voice/')) return path.join(assetsDir, 'voice', key.slice('voice/'.length));
+  return null;
+}
+
+ipcMain.handle('assets-verify', async () => {
+  const installed = readInstalled();
+  const broken = {};
+  for (const key of Object.keys(installed)) {
+    if (key === 'core') continue;
+    const p = packPrimaryPath(key);
+    if (p && !fs.existsSync(p)) broken[key] = 1;
+  }
+  return broken;
+});
+
+ipcMain.handle('assets-repair', async (event, keys) => {
+  const list = Array.isArray(keys) ? keys : [keys];
+  const installed = readInstalled();
+  const removed = [];
+  for (const key of list) {
+    if (key === 'core' || !(key in installed)) continue;
+    delete installed[key];
+    removed.push(key);
+  }
+  writeInstalled(installed);
+  return { removed };
+});
+
+ipcMain.handle('assets-clean-orphans', async () => ({ removed: 0 }));
 
 ipcMain.handle('assets-manage-delete', async (event, keys) => {
   const list = Array.isArray(keys) ? keys : [keys];
