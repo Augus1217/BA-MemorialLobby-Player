@@ -3391,6 +3391,19 @@ function startSettingsDownload() {
   setProgressText.textContent = t('dl.start');
   _dlTotal.done = 0;
   _dlTotal.total = pendingBytes(_settingsAssetInfo);
+  // 總進度以「已裝＋待下」為分母：已裝包的大小先計入，續跑/重開不再從 0%
+  try {
+    const pkgs = _settingsAssetInfo?.packages || {};
+    const inst = _settingsAssetInfo?.installed || {};
+    let have = 0;
+    for (const k of Object.keys(inst)) {
+      if (k.startsWith('__')) continue;
+      if (pkgs[k] && inst[k] === pkgs[k].sha256) have += pkgs[k].size || 0;
+    }
+    _dlTotal.done = have;
+    _dlTotal.total = have + pendingBytes(_settingsAssetInfo);
+  } catch {}
+  updateTotalProgress('', 0);
   setProgressFill.style.width = '0%';
   const tfill = document.getElementById('setProgressFillTotal');
   if (tfill) tfill.style.width = '0%';
