@@ -3416,8 +3416,18 @@ function toggleSettingsPanel(force) {
     syncSettingsEffectCks();
     refreshSettingsAssets();
     refreshSpaceManager();
+    syncAboutSection();
   }
   settingsPanel.classList.toggle('open', open);
+}
+
+// ---- 關於：描述文字由 i18n 填；桌面版下載鏈結只在網頁版顯示 ----
+function syncAboutSection() {
+  const row = document.getElementById('setDesktopDlRow');
+  if (!row) return;
+  let isElectron = false;
+  try { isElectron = !!window.ba?.__electron; } catch {}
+  row.style.display = isElectron ? 'none' : '';
 }
 
 
