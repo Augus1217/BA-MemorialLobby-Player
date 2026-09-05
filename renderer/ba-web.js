@@ -427,6 +427,23 @@ const ba = {
     try { localStorage.setItem('ba_streaming', streaming ? '1' : '0'); } catch {}
     return streaming;
   },
+  // ---- 瀏覽器儲存鎖定＋配額（完整安裝前調用）----
+  // Cache Storage 與 IDB/OPFS 同一配額池、可被清除；persist 要到就不清。
+  async ensurePersistent() {
+    try {
+      if (navigator.storage?.persist) return await navigator.storage.persist();
+    } catch {}
+    return false;
+  },
+  async quotaInfo() {
+    try {
+      if (navigator.storage?.estimate) {
+        const { usage = 0, quota = 0 } = await navigator.storage.estimate();
+        return { usage, quota };
+      }
+    } catch {}
+    return { usage: 0, quota: 0 };
+  },
 };
 
 // ---- WEB_MODE activation ----

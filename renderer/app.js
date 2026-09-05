@@ -3267,6 +3267,9 @@ async function refreshSettingsAssets() {
     _settingsAssetInfo = null;
   }
   renderSettingsAssets();
+  try {
+    renderStorageLine(await window.ba?.quotaInfo?.());
+  } catch {}
 }
 
 function renderSettingsAssets() {
@@ -5774,9 +5777,60 @@ async function init() {
     try { await window.ba?.setStreamingMode?.(streaming); } catch {}
     await syncSettingsModeSegs();
     await refreshSettingsAssets();
-    // 切到完整安裝＝立刻開始抓全部（否則按鈕看似沒反應）；切回串流只改策略。
-    if (!streaming) startSettingsDownload();
+    // 切到完整安裝＝立刻開始抓全部（否則按鈕看似沒反應）；先過儲存門檻。
+    if (!streaming) {
+      if (await ensureStorageForFull()) startSettingsDownload();
+      else {
+        // 空間不夠：退回串流，避免抓一半失敗更亂
+        try { await window.ba?.setStreamingMode?.(true); } catch {}
+        await syncSettingsModeSegs();
+        await refreshSettingsAssets();
+      }
+    }
   });
+// ---- 完整安裝門檻：鎖定儲存＋配額檢查 ----
+function pendingBytes(info) {
+  let bytes = 0;
+  const packs = info?.packages || {};
+  for (const k of info?.needsDownloadPacks || []) bytes += packs[k]?.size || 0;
+  return bytes;
+}
+async function ensureStorageForFull() {
+  const info = _settingsAssetInfo;
+  try { await window.ba?.ensurePersistent?.(); } catch {}
+  let persisted = false;
+  try {
+    persisted = await navigator.storage?.persisted?.() ?? true;
+  } catch { persisted = true; }
+  if (!persisted) {
+    setAssetsStatus.innerHTML += `<br><span class="warn">⚠ ${t('set.persistWarn')}</span>`;
+  }
+  let quota = { usage: 0, quota: 0 };
+  try { quota = await window.ba?.quotaInfo?.() || quota; } catch {}
+  renderStorageLine(quota);
+  const need = pendingBytes(info);
+  const free = (quota.quota || 0) - (quota.usage || 0);
+  if (quota.quota > 0 && need > free) {
+    setAssetsStatus.innerHTML += `<br><span class="warn">⚠ ${t('set.quotaLow', { need: fmtBytes(need), free: fmtBytes(Math.max(0, free)) })}</span>`;
+    return false;
+  }
+  return true;
+}
+function renderStorageLine(quota) {
+  let el = document.getElementById('setStorageLine');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'setStorageLine';
+    el.style.cssText = 'font-size:12px; color:#c6d2f5; margin-top:6px;';
+    setAssetsStatus.after(el);
+  }
+  if (quota?.quota > 0) {
+    el.textContent = t('set.storage', { used: fmtBytes(quota.usage || 0), quota: fmtBytes(quota.quota) });
+    el.style.display = '';
+  } else {
+    el.style.display = 'none';
+  }
+}
   setDownloadBtn.addEventListener('click', startSettingsDownload);
   // 全域下載進度（註冊一次；模式切換觸發的下載也經這裡顯示）
   try {
