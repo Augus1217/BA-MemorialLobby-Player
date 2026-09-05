@@ -193,7 +193,7 @@ async function ensureAssets(neededPacks, onProgress) {
   return { ok: true, version: meta.version };
 }
 
-// ---- downloadAssets：設定面板的「完整安裝」模式（legacy） ----
+// ---- downloadAssets：設定面板的「完整安裝」模式（legacy，現無調用者保留） ----
 async function downloadAllAssets({ version, voice }, onProgress) {
   const meta = version && _versionMeta?.version === version
     ? _versionMeta
@@ -213,9 +213,11 @@ async function downloadAllAssets({ version, voice }, onProgress) {
   const results = [];
   for (let i = 0; i < toDownload.length; i++) {
     const name = toDownload[i];
-    const sendProgress = onProgress
-      ? (p) => onProgress({ package: name, index: i, total: toDownload.length, ...p })
-      : undefined;
+    const sendProgress = (p) => {
+      const full = { package: name, index: i, total: toDownload.length, ...p };
+      try { onProgress?.(full); } catch {}
+      try { ba._emitProgress(full); } catch {}
+    };
     try {
       await fetchAndInstallPack(meta, name, sendProgress);
       results.push({ name, ok: true });
@@ -295,11 +297,20 @@ const ba = {
     const installed = await readMeta(c);
     const coreOk = installed['core'] === meta.packages?.['core']?.sha256;
     const wantKr = voice === 'kr';
-    const needsDownloadPacks = Object.keys(meta.packages || {}).filter(
+    let needsDownloadPacks = Object.keys(meta.packages || {}).filter(
       (k) => installed[k] !== meta.packages[k]?.sha256
         && (!k.startsWith('voice/')
           || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')))
     );
+    // 串流模式：初始只需 core/intro（與 Electron 版一致；之前 web 版回全部，
+    // 開始下載會把串流用戶的全包也抓下來）。
+    let streaming = true;
+    try { streaming = localStorage.getItem('ba_streaming') !== '0'; } catch {}
+    if (streaming) {
+      const coreNeeds = needsDownloadPacks.filter((k) => k === 'core' || k === 'intro');
+      if (coreNeeds.length === 0 && coreOk) needsDownloadPacks = [];
+      else needsDownloadPacks = coreNeeds;
+    }
     return {
       localVersion: meta.version,
       hasAssets: !!coreOk,
@@ -309,7 +320,7 @@ const ba = {
       needsDownloadPacks,
       packages: meta.packages,
       lobbies: meta.lobbies,
-      streaming: true,
+      streaming,
       installed,
     };
   },
@@ -317,10 +328,50 @@ const ba = {
   async downloadAssets({ version, packages, onlyPacks, voice }, onProgress) {
     const meta = version && _versionMeta?.version === version
       ? _versionMeta : await fetchRemoteVersion();
-    const needed = onlyPacks
-      ? onlyPacks.filter((k) => meta.packages?.[k])
-      : Object.keys(meta.packages || {});
-    return downloadAllAssets({ version: meta.version, voice }, onProgress);
+    // 尊重呼叫端指定的包集合（過去直接忽略，開始下載永遠抓全部）。
+    const wanted = onlyPacks?.filter((k) => meta.packages?.[k])
+      ?? (packages ? Object.keys(packages).filter((k) => meta.packages?.[k]) : null)
+      ?? Object.keys(meta.packages || {});
+    const sendProgress = (p) => {
+      try { onProgress?.(p); } catch {}
+      ba._emitProgress(p);
+    };
+    // 下載 missing 的指定包（其餘邏輯同 downloadAllAssets 的收尾）
+    const c = await activeCache();
+    const installed = await readMeta(c);
+    const wantKr = voice === 'kr';
+    const toDownload = wanted.filter(
+      (k) => installed[k] !== meta.packages[k]?.sha256
+        && (!k.startsWith('voice/')
+          || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')))
+    );
+    if (!toDownload.length) return { ok: true, version: meta.version };
+    const results = [];
+    for (let i = 0; i < toDownload.length; i++) {
+      const name = toDownload[i];
+      try {
+        await fetchAndInstallPack(meta, name,
+          (p) => sendProgress({ package: name, index: i, total: toDownload.length, ...p }));
+        results.push({ name, ok: true });
+      } catch (e) {
+        results.push({ name, ok: false, error: e.message });
+      }
+    }
+    const updated = { ...installed };
+    for (const r of results) {
+      if (r.ok && meta.packages[r.name]) updated[r.name] = meta.packages[r.name].sha256;
+    }
+    await writeMeta(c, updated);
+    if (results.some((r) => r.ok)) {
+      await notifySwActive(meta.version);
+      const names = await caches.keys();
+      const activeKey = CACHE_PREFIX + meta.version;
+      await Promise.all(
+        names.filter((n) => n.startsWith(CACHE_PREFIX) && n !== activeKey)
+          .map((n) => caches.delete(n))
+      );
+    }
+    return { ok: results.every((r) => r.ok), version: meta.version, results };
   },
 
   async ensureLobby({ lobby, version, packages, lobbies, voice }) {
@@ -365,8 +416,17 @@ const ba = {
     return failed.length ? { ok: false, results } : { ok: true, results };
   },
 
-  async getStreamingMode() { return true; },
-  async setStreamingMode() { return true; },
+  // ---- 下載模式（web 真實實作；過去是永遠回 true 的 stub，設定頁切換看似沒反應）----
+  // streaming=true：只保 core/intro，大廳隨點隨下；false＝完整安裝。
+  async getStreamingMode() {
+    try { return localStorage.getItem('ba_streaming') !== '0'; }
+    catch { return true; }
+  },
+  async setStreamingMode(v) {
+    const streaming = !!v;
+    try { localStorage.setItem('ba_streaming', streaming ? '1' : '0'); } catch {}
+    return streaming;
+  },
 };
 
 // ---- WEB_MODE activation ----

@@ -3296,16 +3296,8 @@ function startSettingsDownload() {
   if (!info?.remoteVersion || !Array.isArray(info.packages)) return;
   setDownloadBtn.style.display = 'none';
   setAssetsProgress.style.display = 'block';
-  window.ba.onDownloadProgress?.((p) => {
-    if (p.status === 'downloading') {
-      setProgressText.textContent = `${p.package} (${p.index + 1}/${p.total}) — ${p.percent}%`;
-      setProgressFill.style.width = p.percent + '%';
-    } else if (p.status === 'done') {
-      setProgressFill.style.width = '100%';
-    } else if (p.status === 'error') {
-      setProgressText.textContent = `⚠ ${p.error}`;
-    }
-  });
+  setProgressText.textContent = t('dl.start');
+  // 進度由全域 handler 更新（開機時註冊一次；這裡只確保可見）
   // 下載全部缺的包（尊重目前模式：串流模式時 check-assets 已只回 core/intro）
   const version = info.remoteVersion || '1.0.0';
   const pkgs = {};
@@ -5780,8 +5772,27 @@ async function init() {
     const streaming = b.dataset.m === 'streaming';
     try { await window.ba?.setStreamingMode?.(streaming); } catch {}
     await syncSettingsModeSegs();
+    await refreshSettingsAssets();
+    // 切到完整安裝＝立刻開始抓全部（否則按鈕看似沒反應）；切回串流只改策略。
+    if (!streaming) startSettingsDownload();
   });
   setDownloadBtn.addEventListener('click', startSettingsDownload);
+  // 全域下載進度（註冊一次；模式切換觸發的下載也經這裡顯示）
+  try {
+    window.ba?.onDownloadProgress?.((p) => {
+      if (!p) return;
+      if (p.status === 'downloading') {
+        setAssetsProgress.style.display = 'block';
+        setProgressText.textContent = `${p.package} (${(p.index ?? 0) + 1}/${p.total ?? '?'}) — ${p.percent ?? 0}%`;
+        if (p.percent != null) setProgressFill.style.width = p.percent + '%';
+      } else if (p.status === 'done') {
+        setProgressFill.style.width = '100%';
+      } else if (p.status === 'error') {
+        setAssetsProgress.style.display = 'block';
+        setProgressText.textContent = `⚠ ${p.error}`;
+      }
+    });
+  } catch {}
 
   for (const id of ['expClip', 'expRes', 'expFps', 'expFmt']) {
     const box = document.getElementById(id);
