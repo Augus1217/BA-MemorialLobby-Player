@@ -3287,6 +3287,12 @@ function renderSettingsAssets() {
     let bytes = 0;
     for (const k of info.needsDownloadPacks) bytes += packs[k]?.size || 0;
     html += `<br><span class="warn">⤓</span> ${t('set.pending', { n: info.needsDownloadPacks.length, size: fmtBytes(bytes) })}`;
+    // 下載中重開面板：保持暫停鈕＋進度可見，不重貼標籤
+    if (_dlRunning) {
+      try { setDownloadBtn.textContent = t('set.pause'); } catch {}
+      setDownloadBtn.style.display = 'block';
+      setAssetsProgress.style.display = 'block';
+    } else {
     // 主按鈕標籤跟模式走：串流＝檢查更新（只補核心），完整＝下載全部（寫明大小）
     let isStream = true;
     try { isStream = !setModeSegs.querySelector('button[data-m="full"].on'); } catch {}
@@ -3296,6 +3302,7 @@ function renderSettingsAssets() {
         : t('set.downloadAll', { size: fmtBytes(bytes) });
     } catch {}
     setDownloadBtn.style.display = 'block';
+    }
   } else {
     setDownloadBtn.style.display = 'none';
   }
