@@ -3293,7 +3293,8 @@ function renderSettingsAssets() {
 
 function startSettingsDownload() {
   const info = _settingsAssetInfo;
-  if (!info?.remoteVersion || !Array.isArray(info.packages)) return;
+  // packages 是 {包名: 資訊} 物件（不是陣列）——之前用 Array.isArray 擋掉一切。
+  if (!info?.remoteVersion || !info.packages) return;
   setDownloadBtn.style.display = 'none';
   setAssetsProgress.style.display = 'block';
   setProgressText.textContent = t('dl.start');
