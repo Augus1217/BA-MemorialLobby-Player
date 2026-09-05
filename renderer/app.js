@@ -3302,6 +3302,50 @@ function renderSettingsAssets() {
   setAssetsStatus.innerHTML = html;
 }
 
+// ---- 完整安裝門檻：鎖定儲存＋配額檢查 ----
+function pendingBytes(info) {
+  let bytes = 0;
+  const packs = info?.packages || {};
+  for (const k of info?.needsDownloadPacks || []) bytes += packs[k]?.size || 0;
+  return bytes;
+}
+async function ensureStorageForFull() {
+  const info = _settingsAssetInfo;
+  try { await window.ba?.ensurePersistent?.(); } catch {}
+  let persisted = false;
+  try {
+    persisted = await navigator.storage?.persisted?.() ?? true;
+  } catch { persisted = true; }
+  if (!persisted) {
+    setAssetsStatus.innerHTML += `<br><span class="warn">⚠ ${t('set.persistWarn')}</span>`;
+  }
+  let quota = { usage: 0, quota: 0 };
+  try { quota = await window.ba?.quotaInfo?.() || quota; } catch {}
+  renderStorageLine(quota);
+  const need = pendingBytes(info);
+  const free = (quota.quota || 0) - (quota.usage || 0);
+  if (quota.quota > 0 && need > free) {
+    setAssetsStatus.innerHTML += `<br><span class="warn">⚠ ${t('set.quotaLow', { need: fmtBytes(need), free: fmtBytes(Math.max(0, free)) })}</span>`;
+    return false;
+  }
+  return true;
+}
+function renderStorageLine(quota) {
+  let el = document.getElementById('setStorageLine');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'setStorageLine';
+    el.style.cssText = 'font-size:12px; color:#c6d2f5; margin-top:6px;';
+    setAssetsStatus.after(el);
+  }
+  if (quota?.quota > 0) {
+    el.textContent = t('set.storage', { used: fmtBytes(quota.usage || 0), quota: fmtBytes(quota.quota) });
+    el.style.display = '';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
 // 雙進度條狀態（本包％＋總量％，按 manifest 標稱大小加權）
 let _dlTotal = { done: 0, total: 0 };
 function packSizeOf(name) {
@@ -5821,49 +5865,6 @@ async function init() {
       }
     }
   });
-// ---- 完整安裝門檻：鎖定儲存＋配額檢查 ----
-function pendingBytes(info) {
-  let bytes = 0;
-  const packs = info?.packages || {};
-  for (const k of info?.needsDownloadPacks || []) bytes += packs[k]?.size || 0;
-  return bytes;
-}
-async function ensureStorageForFull() {
-  const info = _settingsAssetInfo;
-  try { await window.ba?.ensurePersistent?.(); } catch {}
-  let persisted = false;
-  try {
-    persisted = await navigator.storage?.persisted?.() ?? true;
-  } catch { persisted = true; }
-  if (!persisted) {
-    setAssetsStatus.innerHTML += `<br><span class="warn">⚠ ${t('set.persistWarn')}</span>`;
-  }
-  let quota = { usage: 0, quota: 0 };
-  try { quota = await window.ba?.quotaInfo?.() || quota; } catch {}
-  renderStorageLine(quota);
-  const need = pendingBytes(info);
-  const free = (quota.quota || 0) - (quota.usage || 0);
-  if (quota.quota > 0 && need > free) {
-    setAssetsStatus.innerHTML += `<br><span class="warn">⚠ ${t('set.quotaLow', { need: fmtBytes(need), free: fmtBytes(Math.max(0, free)) })}</span>`;
-    return false;
-  }
-  return true;
-}
-function renderStorageLine(quota) {
-  let el = document.getElementById('setStorageLine');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'setStorageLine';
-    el.style.cssText = 'font-size:12px; color:#c6d2f5; margin-top:6px;';
-    setAssetsStatus.after(el);
-  }
-  if (quota?.quota > 0) {
-    el.textContent = t('set.storage', { used: fmtBytes(quota.usage || 0), quota: fmtBytes(quota.quota) });
-    el.style.display = '';
-  } else {
-    el.style.display = 'none';
-  }
-}
   setDownloadBtn.addEventListener('click', startSettingsDownload);
   // 雙進度條狀態：本包％＋總量％（總量按 manifest 標稱大小加權）
   // 全域下載進度（註冊一次；模式切換觸發的下載也經這裡顯示）
