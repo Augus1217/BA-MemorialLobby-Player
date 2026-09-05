@@ -1401,8 +1401,9 @@ function restTracks() {
 // SpineClip.IntroMix (UseDefaultIntroMix=false) 比 state.defaultMix 更精確，
 // 遊戲的 SkeletonDataAsset 是靜態值，BA code 在播放時用 IntroMix 覆蓋。
 // spine.js 不知道 SpineClip，所以要這裡手動設定 entry.mixDuration。
-function setAnimationWithClipMix(track, animName, loop) {
+function setAnimationWithClipMix(track, animName, loop, delay = 0) {
   const entry = spine.state.setAnimation(track, animName, loop);
+  if (delay > 0) entry.delay = delay;
   const cfg = CLIP_CONFIGS[animName];
   if (cfg && !cfg.UseDefaultIntroMix) {
     entry.mixDuration = cfg.IntroMix;
@@ -1848,17 +1849,23 @@ function startIntroClock() {
   introVirtualTime = 0;
   introClockStart = performance.now();
 }
-// Timeline body-spine start time for the current lobby (0 = the timeline starts
-// the body at t=0). Extracted from each spinelobbies bundle's `<char>_Timeline`
-// "Spine Animation State Track (1)" first clip start: Akari_home starts its body
-// at 3.0s (the Akari_Scene spine + opening flash run 0->5s first), so its intro
-// clip plays 3.0 -> 13.3333s and the Idle hand-off lands at 13.3333s.
-function introBodyStart() {
-  const t = FLASH_TABLE;
-  if (t && currentLobby) {
-    const e = t[currentLobby.toLowerCase()];
-    if (e && e.bodyStart) return e.bodyStart;
-  }
+// Timeline body-spine start time for the current lobby: 本體 track 的第一個 clip
+// start（lobby_timelines.json），flash_curves 的 body_start 為 fallback。
+// Akari=3.0s（特寫先跑 0→5s）、CH0184=0s（home 即本體，00 副層 4s 才進）。
+function timelineBodyStart() {
+  try {
+    const tl = TIMELINES?.[currentLobby] ?? TIMELINES?.[String(currentLobby).toLowerCase()];
+    const mainSkel = mainSkeletonName();
+    const body = (tl?.tracks || [])
+      .filter((t) => skelNorm(t.skeleton || '') === mainSkel)
+      .sort((a, b) => a.start - b.start);
+    if (body.length) return Math.max(0, body[0].start);
+  } catch {}
+  // fallback：flash_curves 的 body_start（僅 akari 有資料）
+  try {
+    const e = FLASH_TABLE?.[String(currentLobby).toLowerCase()];
+    if (e?.bodyStart) return e.bodyStart;
+  } catch {}
   return 0;
 }
 // Export (animActive) drives the clock by frame time via advanceIntroClock(dt);
@@ -1885,7 +1892,7 @@ let flashBlurOn = false;
 // Drive the #whiteflash DOM overlay (live view) + keep it in sync each frame.
 function tickWhiteFlash() {
   // 特寫壽司退場：本體進場（introDelay 到，白閃起）時移除 scene 物件
-  if (closeupArmAt >= 0 && performance.now() - closeupArmAt >= introBodyStart() * 1000) {
+  if (closeupArmAt >= 0 && performance.now() - closeupArmAt >= timelineBodyStart() * 1000) {
     closeupArmAt = -1;
     removeSceneCloseup();
   }
@@ -2011,7 +2018,7 @@ function playStart() {
     // 3.0s — the Akari_Scene spine + opening flash run first), so the intro clip
     // runs bodyStart -> bodyStart+10.3333s and the Idle hand-off lands at
     // 13.3333s exactly like the PlayableDirector.
-    introEntry.delay = introBodyStart();
+    introEntry.delay = timelineBodyStart();
     spine.state.addAnimation(0, idleClip, true, 0);
     // 背景序列與特寫（獨立 spine 物件）依 BA PlayableDirector 由 startBgSequence 統一驅動：
     // bg 與本體同在 bodyStart(3s) 進場；scene 特寫從 0s 播放，本體進場（白閃）時移除。
@@ -5198,12 +5205,12 @@ function startBgSequence({ skip = false } = {}) {
         bg.state.addAnimation(1, 'WhaleMove_01_R', true, 0);
         log(`bg: Idle_01@0 + 鯨魚序列 track1 (+${delay.toFixed(2)}s)`);
       } else {
-        // 一般 lobby：Start_X 延遲 introBodyStart() 後播一次 → X 迴圈
+        // 一般 lobby：Start_X 延遲 timelineBodyStart() 後播一次 → X 迴圈
         const bgIntro = bgAnims.find(n => n.startsWith('Start_') && bgAnims.includes(n.slice(6)));
         const bgLoop = bgIntro ? bgIntro.slice(6) : bgLoopMain;
         if (bgIntro) {
           const bgEntry = bg.state.setAnimation(0, bgIntro, false);
-          bgEntry.delay = introBodyStart();
+          bgEntry.delay = timelineBodyStart();
           bg.state.addAnimation(0, bgLoop, true, 0);
         } else {
           bg.state.setAnimation(0, bgLoop, true);
