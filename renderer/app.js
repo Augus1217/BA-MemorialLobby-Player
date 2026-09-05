@@ -3423,6 +3423,18 @@ function toggleSettingsPanel(force) {
   if (open) switchSettingsTab(false);   // 開啟預設回設定頁
 }
 
+// ---- 直向小螢幕：提示橫向使用 ----
+let _rotateDismissed = false;
+function syncRotateHint() {
+  const el = document.getElementById('rotateHint');
+  if (!el) return;
+  let portrait = false, narrow = false;
+  try {
+    portrait = !!window.matchMedia?.('(orientation: portrait)').matches;
+    narrow = !!window.matchMedia?.('(max-width: 640px)').matches;
+  } catch {}
+  el.classList.toggle('open', !!(portrait && narrow && !_rotateDismissed));
+}
 // ---- 設定／關於分頁（共用視窗）----
 function switchSettingsTab(about) {
   document.getElementById('setTabMain').style.display = about ? 'none' : '';
@@ -5706,6 +5718,13 @@ async function init() {
   settingsBackdrop?.addEventListener('click', () => toggleSettingsPanel(false));
   document.getElementById('setTabBtnMain')?.addEventListener('click', () => switchSettingsTab(false));
   document.getElementById('setTabBtnAbout')?.addEventListener('click', () => switchSettingsTab(true));
+  // 直向小螢幕旋轉提示（點一下當次不再顯示）
+  syncRotateHint();
+  window.addEventListener('resize', syncRotateHint);
+  window.addEventListener('orientationchange', syncRotateHint);
+  document.getElementById('rotateHint')?.addEventListener('click', () => {
+    _rotateDismissed = true; syncRotateHint();
+  });
 
   btnStudents.addEventListener('click', () => toggleSidebar());
   sbClose.addEventListener('click', () => toggleSidebar(false));
