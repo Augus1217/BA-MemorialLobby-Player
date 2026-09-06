@@ -479,7 +479,7 @@ function fitScene() {
       spine.skeleton.findBone('Camera_Root') ||
       spine.skeleton.findBone('All_Layer');
     cameraTargetY = camPos ? boneWorldY(camPos) : 962;   // 962 = 遊戲標準相機線
-    charScale = vw / 2500;   // 真機實測帶 2110~2500，取頂（體感 2300 太緊）
+    charScale = vw / 3000;   // 真機實測帶 2110~2500，取頂（體感 2300 太緊）
     sceneBiasY = cameraTargetY * charScale;               // 相機線置於畫面垂直中央
   }
 
