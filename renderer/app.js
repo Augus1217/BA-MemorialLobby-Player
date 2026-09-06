@@ -6138,11 +6138,13 @@ async function onSpaceVerify() {
     updateFullBtn();
     if (spine && fitted) fitScene();
   });
+  // fullscreen toggle (button + F11)。F 不綁定：在搜尋框打字會誤觸。
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'F11' || e.key === 'f' || e.key === 'F') {
-      e.preventDefault();
-      toggleFullscreen();
-    }
+    if (e.key !== 'F11') return;
+    const tag = (e.target?.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable) return;
+    e.preventDefault();
+    toggleFullscreen();
   });
   updateFullBtn();
   applyCtlI18n();
