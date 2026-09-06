@@ -426,9 +426,9 @@
        anchor chain (L79 R59 T45 B44 around the text); the 9-slice borders stay
        at their native sprite size (84/50/60/80 × --bs) and only the middle
        stretches, exactly like an NGUI sliced sprite.
-       Label per ChatDialog prefab: fontSize 52, color #3E444A, LEFT-aligned
-       (mAlignment=1 = NGUIText.Alignment.Left), letter-spacing -2,
-       line spacing +10, ResizeFreely wrapping at 740.
+       Label per ChatDialog prefab: fontSize 46, color #3E444A, LEFT-aligned
+       (mAlignment=1 = NGUIText.Alignment.Left), letter-spacing -2 (spacingX),
+       line pitch 62 (= 46 + spacingY 16), ResizeFreely wrapping at 740.
        Round-3: the prefab sizes are in the lobby UI design space, and the
        in-game balloon renders at half that (verified: app balloon was ~2x the
        real one), so --bs is vw/3840 (NOT vw/1920) for the balloon only. */
@@ -461,8 +461,8 @@
        Common_Balloon_Type2. The label padding is the NGUI label margin around
        the text; min-height floors the box at 2 label lines + vertical padding. */
     #chatDialog[data-dtype="Think"] {
-      padding: calc(43 * var(--bs)) calc(50 * var(--bs)) calc(55 * var(--bs)) calc(130 * var(--bs));
-      min-height: calc(160 * var(--bs));   /* 43+55 + 1 lineHeight 62 */
+      padding: calc(43 * var(--bs)) calc(52 * var(--bs)) calc(47 * var(--bs)) calc(130 * var(--bs));
+      min-height: calc(152 * var(--bs));   /* 43+47 + 1 lineHeight 62 */
     }
     #chatBubble {
       position: absolute; left: 0; top: 0; right: 0; bottom: 0;
@@ -478,8 +478,8 @@
     #chatName { display: none; }
     #chatText {
       position: relative; z-index: 1;
-      font-size: calc(52 * var(--bs));
-      line-height: calc(62 * var(--bs));            /* fontSize 52 + spacingY 10 */
+      font-size: calc(46 * var(--bs));
+      line-height: calc(62 * var(--bs));            /* fontSize 46 + spacingY 16 */
       letter-spacing: calc(-2 * var(--bs));
       color: #3E444A;
       font-family: var(--chatFont);

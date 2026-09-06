@@ -1037,7 +1037,8 @@ function hideChat() {
 // The balloon auto-sizes to its text (label + NGUI anchor padding L79 R59 T45
 // B44); the 9-slice borders stay at their native sprite size (L80 R50 T84 B60
 // × bs) and only the middle stretches, exactly like an NGUI sliced sprite, with
-// the tail jutting out of the sprite's LEFT edge (apex ≈ x7/136, centre ≈ y62/146).
+// the tail jutting out of the sprite's LEFT edge (measured apex: balloon x3/y66,
+// balloon2 x4/y51).
 // Each lobby carries its own sprite flip (see positionChat: H moves the tail to
 // the right edge, V mirrors it vertically), mirroring the LobbyCH*.prefab mFlip.
 // Round-3 position: the box is placed by its bottom-left corner at the Talk
@@ -3928,11 +3929,11 @@ function drawExportBalloon(c2, vw, vh, line) {  if (!balloonImg || !balloonImg2)
   const bs = vw / 3840;
   const isThink = line.dtype === 'Think';
   const img = isThink ? balloonImg2 : balloonImg;
-  const padL = (isThink ? 130 : 79) * bs, padR = (isThink ? 50 : 59) * bs;
-  const padT = (isThink ? 43 : 45) * bs, padB = (isThink ? 55 : 44) * bs;
-  const minH = (isThink ? 222 : 213) * bs;
+  const padL = (isThink ? 130 : 79) * bs, padR = (isThink ? 52 : 59) * bs;
+  const padT = (isThink ? 43 : 45) * bs, padB = (isThink ? 47 : 44) * bs;
+  const minH = (isThink ? 152 : 151) * bs;
   const maxW = 740 * bs;
-  const fontSize = 52 * bs, lineH = 62 * bs, ls = -2 * bs;
+  const fontSize = 46 * bs, lineH = 62 * bs, ls = -2 * bs;
   const fam = balloonFont(line.lang || '');
   const prevLs = c2.letterSpacing;
   c2.font = `${fontSize}px ${fam}`;
