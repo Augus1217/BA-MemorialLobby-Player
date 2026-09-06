@@ -346,8 +346,8 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 // Compute per-layer base fit.
 // The in-game camera centres on a marker bone (Camera_Pos / Camera_Root,
-// or All_Layer for e.g. CH0070). We scale the character with kivo's "fill"
-// rule (view width / 3000 against the standard 3000-unit skeleton) and place
+// or All_Layer for e.g. CH0070). We scale with the measured visible width
+// (view width / 2300 spine units, from device metrology) and place
 // the camera line at the vertical centre of the view, which puts the
 // character's chest/face mid-screen with the ground near the bottom edge.
 function boneWorldY(bone) {
@@ -439,7 +439,7 @@ function fitScene() {
       spine.skeleton.findBone('Camera_Root') ||
       spine.skeleton.findBone('All_Layer');
     cameraTargetY = camPos ? boneWorldY(camPos) : 962;   // 962 = 遊戲標準相機線
-    charScale = vw / 3000;                                // kivo fill 統一縮放
+    charScale = vw / 2300;   // 真機實測（花子眼距/臉高 vs 骨架剛性量）：可見寬約 2300 單位
     sceneBiasY = cameraTargetY * charScale;               // 相機線置於畫面垂直中央
   }
 
@@ -3726,11 +3726,9 @@ async function resolveExportSize() {
   return s && s.w && s.h ? { w: s.w & ~1, h: s.h & ~1 } : { w: app.renderer.width, h: app.renderer.height };
 }
 
-// kivo.wiki spine 檢視器的「適應」尺寸。反混淆 kivo bundle 後解出的兩個 fit 函式
-// （_0xe87989 的 contain、_0x5e2800 的 zoom clamp）都屬於圖片裁切器
-// （naturalWidth/naturalHeight），spine 檢視器本身沒有專屬的尺寸公式；
-// 因此映射為「視窗原生 backing store」= innerWidth×devicePixelRatio，
-// 與 kivo fill 的 charScale = vw/3000 邏輯一致。
+// 匯出尺寸：視窗原生 backing store = innerWidth×devicePixelRatio。
+// （舊註解曾寫 kivo fill vw/3000——已證偽：kivo 檢視器根本沒有尺寸公式，
+// 3000 是前人拍腦袋的數；真機實測可見寬約 2300，見 charScale。）
 async function kivoFitSize() {
   try {
     const dpr = window.devicePixelRatio || 1;
