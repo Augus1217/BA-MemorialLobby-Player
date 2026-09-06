@@ -19,6 +19,15 @@
       cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), auto;
     }
     #app { position: fixed; inset: 0; }
+    /* 遊戲黑邊（UILetterBox）：長寬比超出 4:3～2.1733 加蓋，內容不動 */
+    #lbTop, #lbBottom, #lbLeft, #lbRight {
+      position: fixed; background: #000; z-index: 5; display: none;
+      pointer-events: none;
+    }
+    #lbTop { top: 0; left: 0; right: 0; }
+    #lbBottom { bottom: 0; left: 0; right: 0; }
+    #lbLeft { top: 0; bottom: 0; left: 0; }
+    #lbRight { top: 0; bottom: 0; right: 0; }
     #app canvas { touch-action: none; cursor: inherit; }
 
     /* cinematic vignette + soft top shading (non-interactive) */
@@ -661,6 +670,7 @@
 </head>
 <body>
   <div id="app"></div>
+  <div id="lbTop"></div><div id="lbBottom"></div><div id="lbLeft"></div><div id="lbRight"></div>
   <div id="fx"></div>
   <div id="hud">
     <div id="hudTop" class="hudbar">

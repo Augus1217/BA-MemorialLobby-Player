@@ -387,8 +387,48 @@ function contentWorldBounds(obj) {
   } catch { return null; }
 }
 
+// 遊戲黑邊（UILetterBox，二進制驗證常數）：
+//   aspect = max(w,h)/min(w,h)；< 4/3 上下蓋，> 2.17333 左右蓋，中間不管。
+// 只蓋畫面不動內容（跟遊戲一致）；HUD/面板在上層不受影響。
+const LB_NARROW = 4 / 3, LB_WIDE = 2.173333;
+function updateLetterbox() {
+  const vw = window.innerWidth || 0, vh = window.innerHeight || 0;
+  const bars = {
+    lbTop: document.getElementById('lbTop'),
+    lbBottom: document.getElementById('lbBottom'),
+    lbLeft: document.getElementById('lbLeft'),
+    lbRight: document.getElementById('lbRight'),
+  };
+  if (!vw || !vh) return;
+  const landscape = vw >= vh;
+  const aspect = Math.max(vw, vh) / Math.min(vw, vh);
+  let t = 0, b = 0, l = 0, r = 0;
+  if (aspect < LB_NARROW) {
+    // 有效高度＝長邊/1.333，差額上下蓋
+    const eff = Math.max(vw, vh) / LB_NARROW;
+    const bar = (Math.min(vw, vh) - eff) / 2;
+    if (landscape) { t = b = Math.max(0, bar); } else { l = r = Math.max(0, bar); }
+  } else if (aspect > LB_WIDE) {
+    // 有效寬度＝短邊×2.17333，差額左右蓋（橫屏）／上下蓋（直屏）
+    const eff = Math.min(vw, vh) * LB_WIDE;
+    const bar = (Math.max(vw, vh) - eff) / 2;
+    if (landscape) { l = r = Math.max(0, bar); } else { t = b = Math.max(0, bar); }
+  }
+  const set = (el, x, y, w, h) => {
+    if (!el) return;
+    if (w <= 0 || h <= 0) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    el.style.width = w + 'px'; el.style.height = h + 'px';
+  };
+  set(bars.lbTop, 0, 0, vw, t);
+  set(bars.lbBottom, 0, vh - b, vw, b);
+  set(bars.lbLeft, 0, 0, l, vh);
+  set(bars.lbRight, vw - r, 0, r, vh);
+}
 function fitScene() {
   const vw = app.renderer.width, vh = app.renderer.height;
+  updateLetterbox();
 
   const fitObj = bg || scene;
   let ox = 0, oy = 0, ow = 0, oh = 0;
