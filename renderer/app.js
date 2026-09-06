@@ -1041,16 +1041,16 @@ function hideChat() {
 // Each lobby carries its own sprite flip (see positionChat: H moves the tail to
 // the right edge, V mirrors it vertically), mirroring the LobbyCH*.prefab mFlip.
 // Round-3 position: the box is placed by its bottom-left corner at the Talk
-// origin — the lobby container origin (skUp UI units above the spine root per
-// SkeletonAnimation localPosition (0,-962), constant across all prefabs) plus
-// the per-lobby combined NGUI offset (tx, ty) = ChatDialog.pos + Talk.pos from
-// assets/data/lobby_chat_anchors.json (extracted from the LobbyCH*.prefab
-// bundles; e.g. CH0239 = (-208,+429), Airi = (-19,+306)). bs here is the NGUI
-// canvas scale (vw/3840), the SAME scale the balloon is rendered at, so size
-// and position use one consistent unit.
+// origin. Talk/ChatDialog offsets (tx, ty) live in the LOBBY ROOT's unit space
+// (scale 1 — e.g. CH0239 = (-208,+429)), and skUp=962 is the spine-root offset
+// in the same space (lobby root → spine root localPosition (0,-962)).
+// They share the character's world projection (charScale), NOT the balloon's
+// own UI render scale (bs = vw/3840, which sizes only the sprite/text).
+// Mixing them (old code) drifts the balloon off the head as charScale changes.
 function positionChat() {
   if (!chatDialog.classList.contains('show')) return;
-  const bs = window.innerWidth / 3840;   // NGUI canvas scale (balloon)
+  const bs = window.innerWidth / 3840;   // NGUI canvas scale (balloon SIZE only)
+  const ws = charScale * (cam?.scale || 1);   // 世界投影（角色同款）：定位用
   chatDialog.style.bottom = 'auto';
   chatDialog.style.transform = 'none';
   const bw = chatDialog.offsetWidth, bh = chatDialog.offsetHeight;
@@ -1073,14 +1073,14 @@ function positionChat() {
   const tfy = (flip & 2) ? 'scaleY(-1)' : '';
   chatBubble.style.transform = tfx + (tfx && tfy ? ' ' : '') + tfy || 'none';
   const skUp = -a.skY;
-  let x = ax + tx * bs;
+  let x = ax + tx * ws;
   // Flipped lobbies (mFlip bit0 = H) mirror the whole box about the spine root:
   // the tail (now on the right edge) must face the character, so the balloon
   // sits on the OPPOSITE side at the same tail-to-root distance the prefab
   // authored. Verified vs game data: 76/98 mFlip=1 lobbies have tx>0, which
   // unmirrored would leave the right-pointing tail facing AWAY from the head.
-  if (flip & 1) x = ax - tx * bs - bw;
-  let y = ay - (skUp + ty) * bs - bh;
+  if (flip & 1) x = ax - tx * ws - bw;
+  let y = ay - (skUp + ty) * ws - bh;
   const maxX = window.innerWidth - bw - 6;
   const maxY = window.innerHeight - bh - 6;
   if (x < 6) x = 6;
