@@ -442,8 +442,9 @@
          text defaults to the TC stack (the app's TW-first subtitle behaviour). */
       --chatFont: 'BA NotoSansTC', 'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', sans-serif;
       width: fit-content; height: fit-content;
-      /* The box is bottom-pinned at the Talk origin and grows upward with
-         line count — matching the in-game NGUI balloon, which sizes to its
+      /* The box is top-pinned at the Talk origin and grows downward with
+         line count — matching the in-game NGUI balloon (frame top = Talk
+         height exactly: label top +45 = Talk), which sizes to its
          label: text height = 48 + 68×(n-1) (tight first line), no binding
          floor (B1 content 137.5u < 151u would-be floor). */
       min-height: calc(89 * var(--bs));
@@ -480,7 +481,7 @@
     #chatName { display: none; }
     #chatText {
       position: relative; z-index: 1;
-      margin-top: calc(-20 * var(--bs));   /* 首行緊貼（first-line box 48u，非整行 68u） */
+      margin-bottom: calc(-20 * var(--bs));   /* 首行緊貼（first-line box 48u，非整行 68u）：框從底部收 */
       font-size: calc(52 * var(--bs));
       line-height: calc(68 * var(--bs));            /* fontSize 52 + spacingY 16 */
       letter-spacing: calc(-2 * var(--bs));

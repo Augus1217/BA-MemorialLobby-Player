@@ -479,7 +479,7 @@ function fitScene() {
       spine.skeleton.findBone('Camera_Root') ||
       spine.skeleton.findBone('All_Layer');
     cameraTargetY = camPos ? boneWorldY(camPos) : 962;   // 962 = 遊戲標準相機線
-    charScale = vw / 3000;   // 真機實測帶 2110~2500，取頂（體感 2300 太緊）
+    charScale = vw / 2900;   // 3000 偏鬆，收一點（體感；UI 量測帶內）
     sceneBiasY = cameraTargetY * charScale;               // 相機線置於畫面垂直中央
   }
 
@@ -1081,15 +1081,15 @@ function positionChat() {
   // authored. Verified vs game data: 76/98 mFlip=1 lobbies have tx>0, which
   // unmirrored would leave the right-pointing tail facing AWAY from the head.
   if (flip & 1) x = ax - tx * ws - bw;
-  let y = ay - (skUp + ty) * ws - bh;
-  // 首行緊貼補償（#chatText margin-top -20u）：框頂下降，字墨／框底不動
-  y += 20 * bs;
+  // 頂固定：遊戲框頂＝Talk 原點高度（錨點證明：框頂＝label 頂＋45＝Talk 高），
+  // 行數增加向下長。舊碼底固定向上長，多行時整顆上飄。
+  let y = ay - (skUp + ty) * ws;
   const maxX = window.innerWidth - bw - 6;
-  const maxY = window.innerHeight - bh - 6;
   if (x < 6) x = 6;
   if (x > maxX) x = maxX;
   if (y < 6) y = 6;
-  if (y > maxY) y = maxY;
+  if (y + bh > window.innerHeight - 6) y = window.innerHeight - 6 - bh;
+  if (y < 6) y = 6;
   chatDialog.style.left = x + 'px';
   chatDialog.style.top = y + 'px';
 }
@@ -3957,17 +3957,18 @@ function drawExportBalloon(c2, vw, vh, line) {  if (!balloonImg || !balloonImg2)
   const g = spine ? spine.toGlobal({ x: 0, y: 0 }) : { x: vw / 2, y: vh };
   let x = g.x + tx * bs;
   if (flip & 1) x = g.x - tx * bs - bw;
-  let y = g.y - (skUp + ty) * bs - bh;
-  const maxX = vw - bw - 6, maxY = vh - bh - 6;
+  let y = g.y - (skUp + ty) * bs;
+  const maxX = vw - bw - 6;
   if (x < 6) x = 6;
   if (x > maxX) x = maxX;
   if (y < 6) y = 6;
-  if (y > maxY) y = maxY;
+  if (y + bh > vh - 6) y = vh - 6 - bh;
+  if (y < 6) y = 6;
 
   drawNineSlice(c2, img, x, y, bw, bh, bs, isThink ? [85, 50, 55, 130] : [84, 50, 60, 80], flip);
 
   const contentH = bh - padT - padB;
-  const textTop = padT + (contentH - textH) / 2;
+  const textTop = padT;   /* 頂固定：字從框頂＋padT 開始（遊戲同），不垂直置中 */
   c2.save();
   c2.font = `${fontSize}px ${fam}`;
   c2.letterSpacing = ls + 'px';
