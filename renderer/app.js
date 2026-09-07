@@ -1082,6 +1082,8 @@ function positionChat() {
   // unmirrored would leave the right-pointing tail facing AWAY from the head.
   if (flip & 1) x = ax - tx * ws - bw;
   let y = ay - (skUp + ty) * ws - bh;
+  // 首行緊貼補償（#chatText margin-top -20u）：框頂下降，字墨／框底不動
+  y += 20 * bs;
   const maxX = window.innerWidth - bw - 6;
   const maxY = window.innerHeight - bh - 6;
   if (x < 6) x = 6;
@@ -3926,14 +3928,14 @@ function drawExportWhiteFlash(c2, vw, vh, alpha) {
 
 // 畫一幀氣泡。layout 完全對應 #chatDialog CSS + positionChat()（以輸出寬度為 vw）。
 function drawExportBalloon(c2, vw, vh, line) {  if (!balloonImg || !balloonImg2) return;
-  const bs = vw / 3840;
+  const bs = vw / 3000;
   const isThink = line.dtype === 'Think';
   const img = isThink ? balloonImg2 : balloonImg;
   const padL = (isThink ? 130 : 79) * bs, padR = (isThink ? 52 : 59) * bs;
   const padT = (isThink ? 43 : 45) * bs, padB = (isThink ? 47 : 44) * bs;
-  const minH = (isThink ? 152 : 151) * bs;
+  const minH = (isThink ? 90 : 89) * bs;
   const maxW = 740 * bs;
-  const fontSize = 46 * bs, lineH = 62 * bs, ls = -2 * bs;
+  const fontSize = 52 * bs, lineH = 68 * bs, ls = -2 * bs;
   const fam = balloonFont(line.lang || '');
   const prevLs = c2.letterSpacing;
   c2.font = `${fontSize}px ${fam}`;
@@ -3943,7 +3945,7 @@ function drawExportBalloon(c2, vw, vh, line) {  if (!balloonImg || !balloonImg2)
   for (const l of lines) { const w = c2.measureText(l).width; if (w > maxLineW) maxLineW = w; }
   c2.letterSpacing = prevLs;
 
-  const textH = lines.length * lineH;
+  const textH = (lines.length - 1) * lineH + 48 * bs;   /* 首行緊貼 48u，其餘整行 68u */
   const bw = Math.ceil(maxLineW) + padL + padR;
   const bh = Math.max(minH, Math.ceil(textH) + padT + padB);
 
