@@ -4647,17 +4647,24 @@ function renderInfoPanel() {
     empty.textContent = t('info.noLines');
     infoLines.appendChild(empty);
   } else {
+    const seenGroups = new Set();
     lines.forEach((ln, i) => {
       const div = document.createElement('div');
       div.className = 'line';
       div.dataset.vid = ln.id;
-      const btn = document.createElement('button');
-      btn.className = 'play';
-      btn.title = t('info.playLine');
-      btn.setAttribute('aria-label', t('info.playLine'));
-      btn.innerHTML = SVG_PLAY;
-      btn.addEventListener('click', (ev) => { ev.stopPropagation(); playPreviewLine(ln.id, div); });
-      div.appendChild(btn);
+      // 播放鈕只在每組第一句（同 canonical clip＝同組；孤句自成一組）
+      const gkey = previewGroupFor(ln.id).key;
+      const isFirst = !seenGroups.has(gkey);
+      seenGroups.add(gkey);
+      if (isFirst) {
+        const btn = document.createElement('button');
+        btn.className = 'play';
+        btn.title = t('info.playLine');
+        btn.setAttribute('aria-label', t('info.playLine'));
+        btn.innerHTML = SVG_PLAY;
+        btn.addEventListener('click', (ev) => { ev.stopPropagation(); playPreviewLine(ln.id, div); });
+        div.appendChild(btn);
+      }
       const no = document.createElement('span');
       no.className = 'no';
       no.textContent = String(i + 1).padStart(2, '0');
@@ -4682,36 +4689,74 @@ function toggleInfoPanel(force) {
   infoPanel.classList.toggle('open', on);
 }
 
-// ---- 單句試播（介紹面板每句台詞的播放鈕）----
-// 按下播該句的 Talk 動作＋語音（氣泡照常）；播別句則取代；再按一次停止。
+// ---- 整組試播（介紹面板：每組第一句才有播放鈕）----
+// 遊戲沒有「只播第二句」這種操作——Talk clip 是一組連續表演，直接播該組
+// 全程（動作從頭、語音逐句、氣泡跟著換行，mini-CoDialog）；播別組則取代；
+// 播中再按第一句＝停止。找不到 clip 的孤句退化成單句播。
 // 實現要點：
-//  * 動作取「時間軸上掛著該 voice 事件」的 Talk_*_M（schedule 反查），找不到退回首個
-//  * 語音立即播（不等事件時間），試播期間 onAnimationEvent 被抑制、不會重音
-//  * busy='preview'＋自有 block requester：點按/按住手勢全部拒絕（見各 starter）
-//  * 進度條吃 audio timeupdate；播完/失敗/被取代/切 lobby 都走同一清理路徑
-let preview = null;   // { voiceId, lobby, audio, lineEl, barEl }
+//  * 組＝schedule 上同一 canonical clip 的台詞（Talk_*_M 優先無前綴版；
+//    talk/talk2/Dev_Talk 變體只在別無選擇時認領）
+//  * 語音逐句 await（playVoice 的 endPromise），氣泡靠 dialogActive 常駐跨句
+//  * 試播期間 onAnimationEvent 被抑制、不會重音；busy='preview'＋自有 block
+//    requester：點按/按住手勢全部拒絕（見各 starter）
+//  * 進度條吃 audio timeupdate（逐句重新綁定）；播完/失敗/被取代/切 lobby
+//    都走同一清理路徑
+let preview = null;   // { groupKey, lobby, lines, idx, audio, lineEl, barEl }
 const SVG_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path class="ring" d="M12 2.9c5-.4 9.1 3.7 8.9 8.8-.2 5-4.3 8.7-9.2 8.5-4.9-.2-8.7-4.4-8.4-9.3.2-4.8 3.8-7.7 8.7-8z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path class="tri" d="M10.1 8.7l4.9 3-4.8 3.1z" fill="currentColor"/><rect class="stop" x="9" y="9" width="6" height="6" rx="1.2" fill="currentColor"/></svg>';
 
 function previewClipFor(voiceId) {
   const anims = SCHEDULE?.lobbies?.[currentLobby]?.animations || {};
   const want = voiceId.toLowerCase();
+  let fallback = null;
   for (const [clip, cfg] of Object.entries(anims)) {
-    if (!clip.startsWith('Talk_') || !clip.endsWith('_M')) continue;
+    if (!clip.endsWith('_M')) continue;
     const vs = cfg?.voice || [];
-    if (vs.some(v => String(v?.name || v).toLowerCase() === want)) return clip;
+    if (!vs.some(v => String(v?.name || v).toLowerCase() === want)) continue;
+    if (clip.startsWith('Talk_')) return clip;   // canonical 優先
+    if (!fallback) fallback = clip;
   }
+  if (fallback) return fallback;
   const talks = animNames().filter(n => n.startsWith('Talk_') && n.endsWith('_M'));
   return talks[0] || null;
 }
+// 同組＝同一 canonical clip 的面板台詞（面板順序）；找不到 clip 則自成一組。
+function previewGroupFor(voiceId) {
+  const clip = previewClipFor(voiceId);
+  if (!clip) return { key: 'solo:' + voiceId, clip: null, lines: [voiceId] };
+  const lines = [];
+  for (const ln of lobbyLinesFor(currentLobby)) {
+    if (previewClipFor(ln.id) === clip) lines.push(ln.id);
+  }
+  if (!lines.includes(voiceId)) lines.push(voiceId);
+  return { key: 'clip:' + clip, clip, lines };
+}
+function refreshPreviewButtons() {
+  if (!infoLines) return;
+  const playingKey = (preview && preview.lobby === currentLobby) ? preview.groupKey : null;
+  for (const el of infoLines.querySelectorAll('.line')) {
+    const btn = el.querySelector('.play');
+    if (!btn) continue;
+    const active = !!playingKey && previewGroupFor(el.dataset.vid).key === playingKey;
+    btn.title = t(active ? 'info.stopLine' : 'info.playLine');
+    btn.setAttribute('aria-label', btn.title);
+  }
+}
+function markPreviewLineEl(voiceId) {
+  if (!preview || preview.lobby !== currentLobby) return;
+  if (preview.lineEl) {
+    preview.lineEl.classList.remove('playing');
+    const bar = preview.lineEl.querySelector('.prog i');
+    if (bar) bar.style.width = '0';
+  }
+  const el = infoLines?.querySelector(`[data-vid="${CSS.escape(voiceId)}"]`);
+  preview.lineEl = el || null;
+  preview.barEl = el?.querySelector('.prog i') || null;
+  if (el) el.classList.add('playing');
+  refreshPreviewButtons();
+}
 function markPreviewLine() {
   if (!preview || preview.lobby !== currentLobby) return;
-  const el = infoLines?.querySelector(`[data-vid="${CSS.escape(preview.voiceId)}"]`);
-  if (!el) return;
-  preview.lineEl = el;
-  preview.barEl = el.querySelector('.prog i');
-  el.classList.add('playing');
-  const btn = el.querySelector('.play');
-  if (btn) btn.title = t('info.stopLine');
+  markPreviewLineEl(preview.lines[preview.idx] || preview.lines[0]);
 }
 function stopPreview() {
   if (!preview) return;
@@ -4719,13 +4764,13 @@ function stopPreview() {
   preview = null;
   try { p.audio?.pause(); } catch {}
   lipActive = false;
+  dialogActive = false;
   if (p.lineEl) {
     p.lineEl.classList.remove('playing');
     const bar = p.lineEl.querySelector('.prog i');
     if (bar) bar.style.width = '0';
-    const btn = p.lineEl.querySelector('.play');
-    if (btn) btn.title = t('info.playLine');
   }
+  refreshPreviewButtons();
   blockInteraction('preview', false);
   if (state.busy === 'preview') {
     state.busy = null;
@@ -4734,10 +4779,31 @@ function stopPreview() {
   }
   hideChat();
 }
+async function advancePreview() {
+  const p = preview;
+  if (!p || p.lobby !== currentLobby || !spine) { stopPreview(); return; }
+  p.idx++;
+  if (p.idx >= p.lines.length) { stopPreview(); return; }
+  markPreviewLineEl(p.lines[p.idx]);
+  const done = playVoice(p.lines[p.idx]);
+  const audio = lastVoiceAudio;
+  if (preview !== p) return;   // 播出瞬間被取代／停止
+  p.audio = audio;
+  p.barEl = p.lineEl?.querySelector('.prog i') || null;
+  if (audio && p.barEl) {
+    audio.addEventListener('timeupdate', () => {
+      if (preview !== p || p.audio !== audio || !p.barEl) return;
+      const d = audio.duration;
+      if (d && isFinite(d) && d > 0) p.barEl.style.width = `${Math.min(100, audio.currentTime / d * 100)}%`;
+    });
+  }
+  done.then(() => { if (preview === p) advancePreview(); });
+}
 function playPreviewLine(voiceId, lineEl) {
   if (!spine || state.introBlock || exporting) return;
-  // 再按一次＝停止
-  if (preview && preview.voiceId === voiceId && preview.lobby === currentLobby) {
+  const g = previewGroupFor(voiceId);
+  // 同組播中再按＝停止
+  if (preview && preview.groupKey === g.key && preview.lobby === currentLobby) {
     stopPreview();
     return;
   }
@@ -4749,31 +4815,18 @@ function playPreviewLine(voiceId, lineEl) {
   else if (state.busy === 'look') endLook();
   else if (patting) endPat();
   dialogSession++;   //  supersede 進行中的 Talk：它的 finally 不會誤關新氣泡
-  const clip = previewClipFor(voiceId);
-  if (clip) {
-    setAnimationWithClipMix(1, clip, false);
-    const twin = clip.replace(/_M$/, '_A');
+  if (g.clip && has(g.clip)) {
+    setAnimationWithClipMix(1, g.clip, false);
+    const twin = g.clip.replace(/_M$/, '_A');
     if (has(twin)) setAnimationWithClipMix(2, twin, false);
     else spine.state.setEmptyAnimation(2, 0.3);
   }
   state.busy = 'preview';
   blockInteraction('preview', true);
-  const done = playVoice(voiceId);
-  const audio = lastVoiceAudio;
-  preview = { voiceId, lobby: currentLobby, audio, lineEl, barEl: lineEl?.querySelector('.prog i') || null };
-  if (lineEl) {
-    lineEl.classList.add('playing');
-    const btn = lineEl.querySelector('.play');
-    if (btn) btn.title = t('info.stopLine');
-  }
-  if (audio && preview.barEl) {
-    audio.addEventListener('timeupdate', () => {
-      if (!preview || preview.audio !== audio || !preview.barEl) return;
-      const d = audio.duration;
-      if (d && isFinite(d) && d > 0) preview.barEl.style.width = `${Math.min(100, audio.currentTime / d * 100)}%`;
-    });
-  }
-  done.then(() => { if (preview && preview.audio === audio) stopPreview(); });
+  dialogActive = true;   // 氣泡整組常駐、逐句換字（CoDialog 式），收尾才關
+  preview = { groupKey: g.key, lobby: currentLobby, lines: g.lines, idx: -1,
+              audio: null, lineEl: lineEl || null, barEl: null };
+  advancePreview();
 }
 
 // ---- collapsible student sidebar ----
