@@ -1232,6 +1232,7 @@ const voiceSkip = new Set();
 // (e.g. the Start_Idle_01 greeting) still close on their own.
 let dialogActive = false;   // true while a playTalk() dialog is running
 let dialogSession = 0;      // guards the balloon watcher against stale closes
+let lobbyGen = 0;           // guards rapid lobby switches (stale loads bail out)
 let validVoices = null;   // 合法語音檔名集合（voice_index.json[characterId]），過濾泛用事件
 let VOICE_INDEX = {};     // characterId -> 該角色語音檔名清單
 
@@ -2262,6 +2263,25 @@ window.ba_debug = {
     return rec;
   },
   triggerLook: (on) => on ? startLook() : endLook(),
+  trackProbe: () => {
+    if (!spine) return null;
+    const snapTrack = (i) => {
+      const e = spine.state.getCurrent(i);
+      if (!e || !e.animation) return null;
+      return { nm: e.animation.name,
+        at: +((typeof e.getAnimationTime === 'function' ? e.getAnimationTime() : 0)).toFixed(3),
+        tt: +((e.trackTime ?? 0)).toFixed(3) };
+    };
+    return { t0: snapTrack(0), t1: snapTrack(1) };
+  },
+  voiceProbe: () => {
+    if (!lastVoiceAudio) return null;
+    try {
+      return { t: +lastVoiceAudio.currentTime.toFixed(3), d: +lastVoiceAudio.duration.toFixed(3),
+               paused: lastVoiceAudio.paused, ended: lastVoiceAudio.ended,
+               name: lastVoiceName };
+    } catch { return null; }
+  },
   triggerPat: (on) => on ? startPat() : endPat(),
   skipMemoryLobby: () => memoryLobbySkip(),
   headPos: () => {
@@ -4656,10 +4676,19 @@ function renderInfoPanel() {
       const div = document.createElement('div');
       div.className = 'line';
       div.dataset.vid = ln.id;
-      // 播放鈕只在每組第一句（同 canonical clip＝同組；孤句自成一組）
+      // 播放鈕只在每組第一句（同 canonical clip＝同組；孤句自成一組），
+      // 放框右邊讓句首對齊
       const gkey = previewGroupFor(ln.id).key;
       const isFirst = !seenGroups.has(gkey);
       seenGroups.add(gkey);
+      const no = document.createElement('span');
+      no.className = 'no';
+      no.textContent = String(i + 1).padStart(2, '0');
+      div.appendChild(no);
+      const txt = document.createElement('span');
+      txt.className = 'txt';
+      txt.textContent = ln.text;
+      div.appendChild(txt);
       if (isFirst) {
         const btn = document.createElement('button');
         btn.className = 'play';
@@ -4669,14 +4698,6 @@ function renderInfoPanel() {
         btn.addEventListener('click', (ev) => { ev.stopPropagation(); playPreviewLine(ln.id, div); });
         div.appendChild(btn);
       }
-      const no = document.createElement('span');
-      no.className = 'no';
-      no.textContent = String(i + 1).padStart(2, '0');
-      div.appendChild(no);
-      const txt = document.createElement('span');
-      txt.className = 'txt';
-      txt.textContent = ln.text;
-      div.appendChild(txt);
       const prog = document.createElement('div');
       prog.className = 'prog';
       prog.innerHTML = '<i></i>';
@@ -5254,17 +5275,22 @@ function selectLobby(key) {
   if (exporting) return;
   if (key === currentLobby) { toggleSidebar(false); return; }
   toggleSidebar(false);
-  fadeIn().then(() => loadLobby(key));
+  // fade 與載入並行：舊碼等 720ms 黑場走完才開始載，等於白白罰站；
+  // loading 指示器（z-40）在 fade（z-30）之上，使用者立刻看到反饋。
+  fadeIn();
+  loadLobby(key);
 }
 
 async function loadScene(entry) {
   const s = entry?.scene;
   const b = entry?.bg;
   // 允許只有 bg（背景）而無 scene（特寫）的角色（如 Yuzu：僅有 Yuzu_BG，無 Yuzu_Scene）
-  if (!s && !b) return;
+  if (!s && !b) return null;
   // 如果主骨架已合併場景（has Start_Idle_03），不需要載入獨立 scene/bg
   const animNames = spine?.state?.data?.skeletonData?.animations?.map(a => a.name) || [];
-  if (animNames.includes('Start_Idle_03')) return;
+  if (animNames.includes('Start_Idle_03')) return null;
+  // 回傳局部物件、不碰全域：由呼叫端在 lobby 世代正確時掛載（開場不等場景）。
+  let sceneObj = null, bgObj = null;
   try {
     const loadOne = async (res) => {
       if (!res || !res.skel || !res.atlas) return null;
@@ -5279,17 +5305,35 @@ async function loadScene(entry) {
       // intro 之前就跑 idle 迴圈，導致 startBgSequence 的冪等判斷誤判而跳過開場）。
       return obj;
     };
-    scene = await loadOne(s);
-    bg = await loadOne(b);
-    // 圖層：bg 插到最底，scene 置頂（特寫前景）；spine 由 loadLobby 排在 bg 之上、scene 之下。
-    if (bg) app.stage.addChildAt(bg, 0);
-    if (scene) app.stage.addChild(scene);
-    if (scene || bg) log(`場景: ${currentLobby}`);
+    // scene/bg 並行載入（舊碼序列 await，白白多等一份）
+    [sceneObj, bgObj] = await Promise.all([loadOne(s), loadOne(b)]);
+    return { scene: sceneObj, bg: bgObj };
   } catch (e) {
     console.warn('[lobby] 場景載入失敗，略過', e);
-    if (scene) { destroyTextures(collectTextures(scene)); scene.destroy(); scene = null; }
-    if (bg) { destroyTextures(collectTextures(bg)); bg.destroy(); bg = null; }
+    for (const o of [sceneObj, bgObj]) {
+      if (!o) continue;
+      try { destroyTextures(collectTextures(o)); o.destroy(); } catch {}
+    }
+    return null;
   }
+}
+
+// 圖層順序（主體/bg/scene 三者現有的排）：bg 最底 → spine 中 → scene 最頂。
+// loadLobby 主流程與場景遲到掛載共用。
+function layerSpines() {
+  if (!spine) return;
+  try {
+    if (bg && scene) {
+      app.stage.setChildIndex(bg, 0);
+      app.stage.setChildIndex(spine, 1);
+      app.stage.setChildIndex(scene, app.stage.children.length - 1);
+    } else if (scene) {
+      app.stage.setChildIndex(scene, app.stage.children.length - 1);
+      app.stage.setChildIndex(spine, app.stage.children.length - 2 >= 0 ? app.stage.children.length - 2 : 0);
+    } else {
+      app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 1));
+    }
+  } catch (e) { console.warn('[lobby] 圖層排序失敗', e.message); }
 }
 
 // 收集顯示物件樹上的 texture（含 children / spine attachmentCacheData）
@@ -5382,6 +5426,7 @@ async function loadLobby(name) {
   if (exporting) return;
   stopPreview();   // 切 lobby：停掉單句試播（音訊＋氣泡＋busy 一併收）
   clearTimeout(sceneStabTimer);
+  const myGen = ++lobbyGen;   // 連點切換時舊的載入在 await 點後直接棄權（見下）
   const oldLobby = currentLobby;
   let oldTextures = new Set();
   if (spine) {
@@ -5471,6 +5516,7 @@ async function loadLobby(name) {
       ? [assetUrl(`assets/spine/${name}/${entry.skel}`), assetUrl(`assets/spine/${name}/${entry.atlas}`)]
       : [];
     await Promise.all(charAssets.map(a => Assets.load(a)));
+    if (myGen !== lobbyGen) return;   // 已被更新的切換取代：Spine.from 都不建，直接棄權
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
     fixAdditiveSlots(spine);
     const sch = SCHEDULE?.lobbies?.[name];
@@ -5491,7 +5537,28 @@ async function loadLobby(name) {
     return;
   }
 
-  await loadScene(entry);
+  // 場景（bg/scene）不擋開場：主體就位立刻播 intro，場景到了再掛載＋重排＋重 fit。
+  // （舊碼 await loadScene，開場被背景拖慢約一個場景載入時間。）
+  loadScene(entry).then((res) => {
+    if (!res) return;
+    // 世代檢查：使用者又切走了就銷毀，避免舊場景污染新 lobby
+    if (currentLobby !== name || !spine) {
+      for (const o of [res.scene, res.bg]) {
+        if (!o) continue;
+        try { destroyTextures(collectTextures(o)); o.destroy(); } catch {}
+      }
+      return;
+    }
+    scene = res.scene;
+    bg = res.bg;
+    if (bg) app.stage.addChildAt(bg, 0);
+    if (scene) app.stage.addChild(scene);
+    if (scene || bg) log(`場景: ${currentLobby}`);
+    layerSpines();
+    fitted = false;
+    fitScene();
+    try { startBgSequence(); } catch (e) { console.warn('[lobby] 場景到達後 bg 序列啟動失敗', e.message); }
+  });
   // Akari 為三獨立 spine（spine=本體 / bg=背景 / scene=特寫）：本體無 Start_Idle_03，
   // 故 sceneIndependent=true，由 fitScene/applyCamera 對獨立 scene 物件個別定位。
   const animNames2 = spine?.state?.data?.skeletonData?.animations?.map(a => a.name) || [];
@@ -5500,16 +5567,7 @@ async function loadLobby(name) {
     : !!(entry.bg) || !!(entry.scene && entry.scene.skel && entry.scene.skel !== entry.skel);
   // 圖層順序：bg 最底 → spine（本體）中 → scene（特寫）最頂（前景）。其餘 UI/對話在互動時
   // 才 addChild，自然位於最上層。
-  if (bg && scene) {
-    app.stage.setChildIndex(bg, 0);
-    app.stage.setChildIndex(spine, 1);
-    app.stage.setChildIndex(scene, app.stage.children.length - 1);
-  } else if (scene) {
-    app.stage.setChildIndex(scene, app.stage.children.length - 1);
-    app.stage.setChildIndex(spine, app.stage.children.length - 2 >= 0 ? app.stage.children.length - 2 : 0);
-  } else {
-    app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 1));
-  }
+  layerSpines();
   fitted = false;
   // frame on the Idle pose (mesh geometry only exists after a render), then play the intro
   idleClip = resolveIdleClip();
@@ -5518,6 +5576,7 @@ async function loadLobby(name) {
   const waitFit = () => {
     if (++frames < 3) requestAnimationFrame(waitFit);
     else {
+      if (currentLobby !== name || !spine) return;   // 已被更新的切換取代
       fitScene();
       playStart();
       log(`[layout] ${name}: scene=${!!scene} charScale=${charScale.toFixed(3)} cameraTargetY=${cameraTargetY.toFixed(0)}`);
@@ -5532,6 +5591,7 @@ async function loadLobby(name) {
   loadingEl.classList.remove('show');
   fadeOut();
   try { await loadPostConfig(); } catch (e) {}
+  if (myGen !== lobbyGen) return;   // 過期：後來的切換會自己 apply，別蓋掉它
   applyPostGrade(name);
   log(`${name} 載入完成 — ${prettyName(name)}`);
 }
@@ -5555,7 +5615,8 @@ function switchLobby(dir) {
   const i = Math.max(0, order.indexOf(currentLobby));
   const next = order[(i + dir + order.length) % order.length];
   if (next === currentLobby) return;
-  fadeIn().then(() => loadLobby(next));
+  fadeIn();
+  loadLobby(next);
 }
 
 // spine track completion -> return reactive tracks to rest
