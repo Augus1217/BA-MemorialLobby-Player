@@ -1167,8 +1167,12 @@ function playVoice(voiceId) {
     showChat(speakerName(), text);
   };
   audio.onended = done;
-  audio.onerror = () => {
-    // KR 模式缺檔 → 靜默退回 JP 語音（換 src 重播一次）
+  // 介紹面板同步：播出聲才標記（play 事件），播完/失敗立刻清（不等氣泡）。
+  // preview 進行中一律讓路（由試播自己管理 UI）。
+  audio.addEventListener('play', () => onTalkVoicePlay(voiceId, audio));
+  audio.addEventListener('ended', () => onTalkVoiceEnd(voiceId));
+  audio.addEventListener('error', () => onTalkVoiceEnd(voiceId));
+  audio.onerror = () => {    // KR 模式缺檔 → 靜默退回 JP 語音（換 src 重播一次）
     if (voiceLang === 'kr' && !audio.dataset.jpFallback) {
       audio.dataset.jpFallback = '1';
       audio.src = jpBase;
@@ -4680,6 +4684,7 @@ function renderInfoPanel() {
       infoLines.appendChild(div);
     });
     markPreviewLine();   // 面板重繪時恢復試播中的行（進度條不斷）
+    if (!preview) markTalkLine();   // 否則恢復點按說話播出中的行
   }
 }
 
@@ -4743,12 +4748,8 @@ function refreshPreviewButtons() {
 }
 function markPreviewLineEl(voiceId) {
   if (!preview || preview.lobby !== currentLobby) return;
-  if (preview.lineEl) {
-    preview.lineEl.classList.remove('playing');
-    const bar = preview.lineEl.querySelector('.prog i');
-    if (bar) bar.style.width = '0';
-  }
-  const el = infoLines?.querySelector(`[data-vid="${CSS.escape(voiceId)}"]`);
+  clearAllLinePlaying();
+  const el = talkLineEl(voiceId);
   preview.lineEl = el || null;
   preview.barEl = el?.querySelector('.prog i') || null;
   if (el) el.classList.add('playing');
@@ -4765,11 +4766,7 @@ function stopPreview() {
   try { p.audio?.pause(); } catch {}
   lipActive = false;
   dialogActive = false;
-  if (p.lineEl) {
-    p.lineEl.classList.remove('playing');
-    const bar = p.lineEl.querySelector('.prog i');
-    if (bar) bar.style.width = '0';
-  }
+  clearAllLinePlaying();
   refreshPreviewButtons();
   blockInteraction('preview', false);
   if (state.busy === 'preview') {
@@ -4799,6 +4796,61 @@ async function advancePreview() {
   }
   done.then(() => { if (preview === p) advancePreview(); });
 }
+// ---- 台詞行播放態（介紹面板；試播＋點按說話共用）----
+// preview 擁有 UI 時一切讓路（由試播自己的 mark/stop 處理）。點按說話的
+// 語音走這裡：只認真的播出聲（play 事件），播完/失敗立刻清，不等氣泡 +0.5s。
+function talkLineEl(voiceId) {
+  if (!infoLines) return null;
+  try {
+    return infoLines.querySelector(`[data-vid="${CSS.escape(String(voiceId).toLowerCase())}"]`);
+  } catch { return null; }
+}
+function clearAllLinePlaying() {
+  if (!infoLines) return;
+  for (const el of infoLines.querySelectorAll('.line.playing')) {
+    el.classList.remove('playing');
+    const bar = el.querySelector('.prog i');
+    if (bar) bar.style.width = '0';
+  }
+}
+function bindLineProgress(audio, barEl) {
+  if (!audio || !barEl) return;
+  audio.addEventListener('timeupdate', () => {
+    if (!document.contains(barEl)) return;
+    const d = audio.duration;
+    if (d && isFinite(d) && d > 0) barEl.style.width = `${Math.min(100, audio.currentTime / d * 100)}%`;
+  });
+}
+// 標記某句播出中（會先清掉其他行；回傳行元素或 null）
+function setLinePlaying(voiceId, audio) {
+  clearAllLinePlaying();
+  const el = talkLineEl(voiceId);
+  if (!el) return null;
+  el.classList.add('playing');
+  bindLineProgress(audio, el.querySelector('.prog i'));
+  return el;
+}
+function onTalkVoicePlay(voiceId, audio) {
+  if (preview) return;
+  setLinePlaying(voiceId, audio);
+}
+function onTalkVoiceEnd(voiceId) {
+  if (preview) return;
+  const el = talkLineEl(voiceId);
+  if (el && el.classList.contains('playing')) {
+    el.classList.remove('playing');
+    const bar = el.querySelector('.prog i');
+    if (bar) bar.style.width = '0';
+  }
+}
+// 面板（重）繪時恢復：試播優先，否則看有沒有說話音訊播出中
+function markTalkLine() {
+  if (preview || !lastVoiceAudio || !lastVoiceName) return;
+  try {
+    if (lastVoiceAudio.paused || lastVoiceAudio.ended) return;
+  } catch { return; }
+  setLinePlaying(lastVoiceName, lastVoiceAudio);
+}
 function playPreviewLine(voiceId, lineEl) {
   if (!spine || state.introBlock || exporting) return;
   const g = previewGroupFor(voiceId);
@@ -4809,6 +4861,10 @@ function playPreviewLine(voiceId, lineEl) {
   }
   // 取代：先停舊的（含正在跑的 Talk 手勢收尾由各 ender 自理）
   stopPreview();
+  // 若有非試播的說話音訊還在播（點按 Talk 中途轉試播），暫停它以免重音
+  try {
+    if (lastVoiceAudio && !lastVoiceAudio.paused && !lastVoiceAudio.ended) lastVoiceAudio.pause();
+  } catch {}
   if (pinchActive) endPinch();
   else if (handFollowActive) endHandFollow();
   else if (state.busy === 'touch') endTouch();
