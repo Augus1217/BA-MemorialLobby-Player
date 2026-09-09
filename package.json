@@ -12,7 +12,6 @@
     "build:win": "vite build && electron-builder --win",
     "build:mac": "vite build && electron-builder --mac",
     "copy-assets": "python3 scripts/copy_assets.py",
-    "update-assets": "python3 scripts/build_assets.py",
     "dist": "vite build && electron-builder -mwl --publish always"
   },
   "build": {

@@ -80,6 +80,14 @@ const infoLines = document.getElementById('infoLines');
 // fixed, so capture the spine root once per dialog. Cleared on hide.
 let chatAnchor = null;
 let CHAT_ANCHORS = {};   // app lobby key -> { tx, ty, skY, skScale } from lobby_chat_anchors.json
+let BODYTOUCH = {};      // app lobby key -> [{ cx, cy, w, h }] tap-to-talk boxes
+// (skeleton-root units, from SpineCharacterBodyTouch + BoxCollider in the
+// lobby prefab). Missing/empty -> fall back to tap-anywhere (old behaviour).
+let IKZONES = {};        // app lobby key -> { eye, hairpat, pat2[], pinch, touch, hand }
+// per-gesture press zones from the lobby prefab (SpineDragIK + BoxCollider +
+// UIWidget, assets/data/lobby_ikzones.json). Each zone: { cx, cy, w, h,
+// depth, trigDelay, dragSpd, relSpd, dragBone, drag:{ox,oy,x0,y0,x1,y1,
+// offx,offy,scale}, [clip, end] }. Missing lobby -> legacy circle behaviour.
 
 // ---- i18n (UI language, bound to the settings/側欄語言 cycle) ----
 // Dictionary: assets/ui/ui_i18n.json — flat "key": text per UI lang
@@ -718,8 +726,9 @@ function setupLipHook(target) {
       }
     }
     applyEyeFollow(self);
+    updateIkDrag();   // generic SpineDragIK bone driver (zone path; no-op otherwise)
     if (pinchActive && interactionMode === 'pinch') updatePinch();
-    if (handFollowActive && interactionMode === 'handfollow') updateHandFollow();
+    if (handFollowActive && interactionMode === 'handfollow' && !ikDrag) updateHandFollow();
   };
 }
 
@@ -763,6 +772,9 @@ function applyEyeFollow(self) {
   const dt = Math.min(0.05, Math.max(0, now - (lastEyeFollowT || now)));
   lastEyeFollowT = now;
   if (state.busy === 'look') {
+    // Zone path drives Touch_Eye through the generic IK driver (per-lobby
+    // rect + speed from the prefab); legacy path keeps the circle clamp.
+    if (ikDrag && ikDrag.kind === 'look') return;
     // 抓眼：Touch_Eye 朝指標移動（clamp 到 LOOK_RADIUS_UNITS 內），constraints 帶動全臉。
     const c = self.worldTransform.applyInverse({ x: mouse.x, y: mouse.y });
     const rest = bone.parent.localToWorld({ x: bone.data.x, y: bone.data.y });
@@ -830,6 +842,7 @@ function setupInteraction() {
 // 循環」的 SpineClip 鏈（FM=PlayNext，見 clip_graph.json），不需額外距離推圖。
 function startPinch() {
   if (!spine || pinchActive) return;
+  if (state.busy === 'preview') return;
   if (state.introBlock) return;
   if (state.busy === 'talk' && !isInteractionAvailable()) return;
   const main = has('Pinch_01_M') ? 'Pinch_01_M' : (has('Pinch_01') ? 'Pinch_01' : null);
@@ -864,6 +877,7 @@ function endPinch() {
 // press-and-hold，非 tap-and-release-after-timeout）。
 function startTouch() {
   if (!spine) return;
+  if (state.busy === 'preview') return;
   if (state.introBlock) return;
   if (state.busy === 'talk' && !isInteractionAvailable()) return;
   const main = has('Touch_01_M') ? 'Touch_01_M' : (has('Touch_02_M') ? 'Touch_02_M' : null);
@@ -889,6 +903,7 @@ function endTouch() {
 // pointer-move pulse 換圖——遊戲的 02 是循環維持，由 PlayNext 鏈自動接上。
 function startHandFollow() {
   if (!spine || handFollowActive) return;
+  if (state.busy === 'preview') return;
   if (state.introBlock) return;
   if (state.busy === 'talk' && !isInteractionAvailable()) return;
   if (!has('HandFollow_01_M')) return;
@@ -1041,16 +1056,17 @@ function hideChat() {
 // balloon2 x4/y51).
 // Each lobby carries its own sprite flip (see positionChat: H moves the tail to
 // the right edge, V mirrors it vertically), mirroring the LobbyCH*.prefab mFlip.
-// Round-3 position: the box is placed by its bottom-left corner at the Talk
-// origin. Talk/ChatDialog offsets (tx, ty) live in the LOBBY ROOT's unit space
+// Round-3 position: the box is placed by its TOP-left corner at the Talk
+// origin (frame top = Talk height exactly) and grows downward with line
+// count. Talk/ChatDialog offsets (tx, ty) live in the LOBBY ROOT's unit space
 // (scale 1 — e.g. CH0239 = (-208,+429)), and skUp=962 is the spine-root offset
 // in the same space (lobby root → spine root localPosition (0,-962)).
 // They share the character's world projection (charScale), NOT the balloon's
-// own UI render scale (bs = vw/3840, which sizes only the sprite/text).
+// own UI render scale (bs = vw/3000, which sizes only the sprite/text).
 // Mixing them (old code) drifts the balloon off the head as charScale changes.
 function positionChat() {
   if (!chatDialog.classList.contains('show')) return;
-  const bs = window.innerWidth / 3840;   // NGUI canvas scale (balloon SIZE only)
+  const bs = window.innerWidth / 3000;   // NGUI canvas scale (balloon SIZE only)
   const ws = charScale * (cam?.scale || 1);   // 世界投影（角色同款）：定位用
   chatDialog.style.bottom = 'auto';
   chatDialog.style.transform = 'none';
@@ -1111,6 +1127,7 @@ function playVoice(voiceId) {
   const jpBase = `assets/voice/${currentLobbyVoiceFolder}/${name}.ogg`;
   const base = voiceUrl(currentLobbyVoiceFolder, name);
   const audio = new Audio(base);
+  lastVoiceAudio = audio;   // 單句試播用：中斷暫停＋進度條
   const ctx = ensureAudio();
   if (ctx) {
     try {
@@ -1179,6 +1196,7 @@ function onAnimationEvent(_entry, ev) {
   // against the non-existent talk.ogg, erroring instantly and cutting the whole
   // talk animation short.) lowercase id + voiceFolder -> /assets/voice/<Folder>/<id>.ogg.
   if (animActive) return;   // 逐幀匯出自行驅動語音/嘴型/對話框（非即時，時間軸驅動）
+  if (preview) return;        // 單句試播中：時間軸上的其他句不許插播（防重音/搶氣泡）
   if (!ev || !ev.data) return;
   let voiceId = (ev.stringValue || ev.data.stringValue || ev.data.name || '').trim();
   if (!voiceId) return;
@@ -1583,6 +1601,7 @@ function resolveEndClip(mainName) {
 
 async function playTalk() {
   if (!spine) return;
+  if (preview) { log('Talk: 拒絕 (試播中)'); return; }
   // ---- BlockInteraction constraint from reversed code ----
   // In-game, the dialog system calls BlockInteraction(dialogBox, true) which
   // pushes the blocking requester onto [SpineCharacter+0xc8] (the blockList).
@@ -1691,6 +1710,7 @@ async function playTalk() {
 // has fired (and await the corresponding `lastVoicePromise`).
 let lastVoicePromise = Promise.resolve();
 let lastVoiceName = null;
+let lastVoiceAudio = null;   // 最近一次 playVoice 的 Audio（單句試播：暫停＋進度）
 let voiceToken = 0;
 function nextVoiceToken() { return ++voiceToken; }
 
@@ -1710,6 +1730,7 @@ function nextVoiceToken() { return ++voiceToken; }
 // head region test (Touch_Eye/Touch_Point anchor).
 function startLook() {
   if (!spine) return;
+  if (state.busy === 'preview') return;
   if (state.introBlock) return;                 // intro timeline locks input
   if (state.blockInteractionOnPlay) { log('Look: 拒絕 (voice busy)'); return; }
   if (state.busy === 'pat') { log('Look: 拒絕 (pat)'); return; }
@@ -1748,18 +1769,31 @@ function pickPatGroup() {
   return has('Pat2_01_M') && Math.random() < 0.5 ? 'Pat2' : 'Pat';
 }
 
-function startPat() {
+function startPat(clipMain = null, clipEnd = null) {
   if (!spine || patting) return;
+  if (state.busy === 'preview') return;      // 單句試播中不接受手勢
   if (state.introBlock) return;                 // intro timeline locks input
   if (state.busy === 'talk' && !isInteractionAvailable()) return; // blocked by dialog
   patting = true;
-  state.patGroup = pickPatGroup();
-  const main = state.patGroup + '_01_M';
-  if (!has(main)) { patting = false; state.patGroup = null; return; }
+  let main;
+  if (clipMain && has(clipMain)) {
+    // Zone-explicit clip (CH0346/47 Pat vs Pat2 bands, proven from the prefab).
+    state.patGroup = null;
+    main = clipMain;
+    state.patMain = main;
+    state.patEndOverride = (clipEnd && has(clipEnd)) ? clipEnd : null;
+  } else {
+    state.patGroup = pickPatGroup();
+    main = state.patGroup + '_01_M';
+    state.patMain = null;
+    state.patEndOverride = null;
+  }
+  if (!has(main)) { patting = false; state.patGroup = null; state.patMain = null; state.patEndOverride = null; return; }
   clearTimers();              // interrupt an ongoing talk / look
   state.busy = 'pat';
-  playHoldGesture(main, has(state.patGroup + '_01_A') ? [state.patGroup + '_01_A'] : null);
-  log('摸頭 (' + state.patGroup + ')');
+  const syncA = state.patGroup ? (state.patGroup + '_01_A') : main.replace(/_M$/, '_A');
+  playHoldGesture(main, has(syncA) ? [syncA] : null);
+  log('摸頭 (' + (state.patGroup || main) + ')');
 }
 
 function endPat() {
@@ -1767,9 +1801,13 @@ function endPat() {
   patting = false;
   if (state.busy !== 'pat') return;
   state.busy = null;
-  const main = (state.patGroup || 'Pat') + '_01_M';
+  const main = state.patMain || (state.patGroup || 'Pat') + '_01_M';
+  const endName = (state.patEndOverride && has(state.patEndOverride))
+    ? state.patEndOverride : resolveEndClip(main);
   state.patGroup = null;
-  playGestureEnd(resolveEndClip(main));
+  state.patMain = null;
+  state.patEndOverride = null;
+  playGestureEnd(endName);
   after(1200, () => {
     if (state.busy || patting) return;
     restTracks();
@@ -2227,6 +2265,67 @@ window.ba_debug = {
     if (!spine || !b) return null;
     const g = spine.toGlobal({ x: b.worldX, y: b.worldY });
     return { x: g.x, y: g.y, scale: spine.scale.x, radius: HEAD_PAT_RADIUS * spine.scale.x };
+  },
+  touchBoxes: () => {
+    if (!spine) return null;
+    return (BODYTOUCH[currentLobby] || []).map((b) => ({ quad: zoneCornersScreen(b) }));
+  },
+  touchHit: (x, y) => isBodyTouchRegion(x, y),
+  ikZones: () => {
+    if (!spine) return null;
+    const Z = IKZONES[currentLobby] || {};
+    const out = {};
+    const put = (k, rec) => { if (rec) out[k] = { quad: zoneCornersScreen(rec), depth: rec.depth ?? -89, src: rec.src }; };
+    put('eye', Z.eye);
+    put('hairpat', Z.hairpat);
+    (Z.pat2 || []).forEach((b, i) => put('pat2_' + i + ':' + (b.clip || '?'), b));
+    put('pinch', Z.pinch);
+    put('touch', Z.touch);
+    put('hand', Z.hand);
+    return out;
+  },
+  zoneAt: (x, y) => { const z = zoneAt(x, y); return { kind: z.kind, src: z.rec?.src || null }; },
+  boneBounds: () => {
+    if (!spine) return null;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const b of spine.skeleton.bones) {
+      if (b.worldX < x0) x0 = b.worldX;
+      if (b.worldY < y0) y0 = b.worldY;
+      if (b.worldX > x1) x1 = b.worldX;
+      if (b.worldY > y1) y1 = b.worldY;
+    }
+    return { x0, y0, x1, y1 };
+  },
+  boneNames: () => {
+    if (!spine) return null;
+    return spine.skeleton.bones.map((b) => ({
+      n: b.data.name, x: Math.round(b.worldX), y: Math.round(b.worldY) }));
+  },
+  lobbyKey: () => currentLobby,
+  clipBones: (clipName) => {
+    if (!spine) return null;
+    const a = spine.state.data.skeletonData.findAnimation(clipName);
+    if (!a) return null;
+    const bones = {};
+    for (const t of a.timelines) {
+      const b = (t.boneIndex != null && spine.skeleton.bones[t.boneIndex])
+        ? spine.skeleton.bones[t.boneIndex].data.name : null;
+      const k = (t.constructor && t.constructor.name || '?') + (b ? ':' + b : '');
+      bones[k] = (bones[k] || 0) + 1;
+    }
+    return { clip: clipName, dur: a.duration, timelines: bones };
+  },
+  boneScale: (name) => {
+    if (!spine) return null;
+    const b = spine.skeleton.findBone(name);
+    if (!b) return null;
+    const m = b;
+    const p = b.parent;
+    return { worldScaleX: Math.hypot(m.a, m.c), worldScaleY: Math.hypot(m.b, m.d),
+             worldX: b.worldX, worldY: b.worldY,
+             localScale: [b.data.scaleX, b.data.scaleY],
+             parent: p ? p.data.name : null,
+             parentWorldScaleX: p ? Math.hypot(p.a, p.c) : null };
   },
   railPos: () => {
     if (!spine) return null;
@@ -4551,13 +4650,29 @@ function renderInfoPanel() {
     lines.forEach((ln, i) => {
       const div = document.createElement('div');
       div.className = 'line';
+      div.dataset.vid = ln.id;
+      const btn = document.createElement('button');
+      btn.className = 'play';
+      btn.title = t('info.playLine');
+      btn.setAttribute('aria-label', t('info.playLine'));
+      btn.innerHTML = SVG_PLAY;
+      btn.addEventListener('click', (ev) => { ev.stopPropagation(); playPreviewLine(ln.id, div); });
+      div.appendChild(btn);
       const no = document.createElement('span');
       no.className = 'no';
       no.textContent = String(i + 1).padStart(2, '0');
       div.appendChild(no);
-      div.appendChild(document.createTextNode(ln.text));
+      const txt = document.createElement('span');
+      txt.className = 'txt';
+      txt.textContent = ln.text;
+      div.appendChild(txt);
+      const prog = document.createElement('div');
+      prog.className = 'prog';
+      prog.innerHTML = '<i></i>';
+      div.appendChild(prog);
       infoLines.appendChild(div);
     });
+    markPreviewLine();   // 面板重繪時恢復試播中的行（進度條不斷）
   }
 }
 
@@ -4565,6 +4680,100 @@ function toggleInfoPanel(force) {
   const on = force !== undefined ? force : !infoPanel.classList.contains('open');
   if (on) renderInfoPanel();
   infoPanel.classList.toggle('open', on);
+}
+
+// ---- 單句試播（介紹面板每句台詞的播放鈕）----
+// 按下播該句的 Talk 動作＋語音（氣泡照常）；播別句則取代；再按一次停止。
+// 實現要點：
+//  * 動作取「時間軸上掛著該 voice 事件」的 Talk_*_M（schedule 反查），找不到退回首個
+//  * 語音立即播（不等事件時間），試播期間 onAnimationEvent 被抑制、不會重音
+//  * busy='preview'＋自有 block requester：點按/按住手勢全部拒絕（見各 starter）
+//  * 進度條吃 audio timeupdate；播完/失敗/被取代/切 lobby 都走同一清理路徑
+let preview = null;   // { voiceId, lobby, audio, lineEl, barEl }
+const SVG_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path class="ring" d="M12 2.9c5-.4 9.1 3.7 8.9 8.8-.2 5-4.3 8.7-9.2 8.5-4.9-.2-8.7-4.4-8.4-9.3.2-4.8 3.8-7.7 8.7-8z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path class="tri" d="M10.1 8.7l4.9 3-4.8 3.1z" fill="currentColor"/><rect class="stop" x="9" y="9" width="6" height="6" rx="1.2" fill="currentColor"/></svg>';
+
+function previewClipFor(voiceId) {
+  const anims = SCHEDULE?.lobbies?.[currentLobby]?.animations || {};
+  const want = voiceId.toLowerCase();
+  for (const [clip, cfg] of Object.entries(anims)) {
+    if (!clip.startsWith('Talk_') || !clip.endsWith('_M')) continue;
+    const vs = cfg?.voice || [];
+    if (vs.some(v => String(v?.name || v).toLowerCase() === want)) return clip;
+  }
+  const talks = animNames().filter(n => n.startsWith('Talk_') && n.endsWith('_M'));
+  return talks[0] || null;
+}
+function markPreviewLine() {
+  if (!preview || preview.lobby !== currentLobby) return;
+  const el = infoLines?.querySelector(`[data-vid="${CSS.escape(preview.voiceId)}"]`);
+  if (!el) return;
+  preview.lineEl = el;
+  preview.barEl = el.querySelector('.prog i');
+  el.classList.add('playing');
+  const btn = el.querySelector('.play');
+  if (btn) btn.title = t('info.stopLine');
+}
+function stopPreview() {
+  if (!preview) return;
+  const p = preview;
+  preview = null;
+  try { p.audio?.pause(); } catch {}
+  lipActive = false;
+  if (p.lineEl) {
+    p.lineEl.classList.remove('playing');
+    const bar = p.lineEl.querySelector('.prog i');
+    if (bar) bar.style.width = '0';
+    const btn = p.lineEl.querySelector('.play');
+    if (btn) btn.title = t('info.playLine');
+  }
+  blockInteraction('preview', false);
+  if (state.busy === 'preview') {
+    state.busy = null;
+    restTracks();
+    scheduleAutonomy();
+  }
+  hideChat();
+}
+function playPreviewLine(voiceId, lineEl) {
+  if (!spine || state.introBlock || exporting) return;
+  // 再按一次＝停止
+  if (preview && preview.voiceId === voiceId && preview.lobby === currentLobby) {
+    stopPreview();
+    return;
+  }
+  // 取代：先停舊的（含正在跑的 Talk 手勢收尾由各 ender 自理）
+  stopPreview();
+  if (pinchActive) endPinch();
+  else if (handFollowActive) endHandFollow();
+  else if (state.busy === 'touch') endTouch();
+  else if (state.busy === 'look') endLook();
+  else if (patting) endPat();
+  dialogSession++;   //  supersede 進行中的 Talk：它的 finally 不會誤關新氣泡
+  const clip = previewClipFor(voiceId);
+  if (clip) {
+    setAnimationWithClipMix(1, clip, false);
+    const twin = clip.replace(/_M$/, '_A');
+    if (has(twin)) setAnimationWithClipMix(2, twin, false);
+    else spine.state.setEmptyAnimation(2, 0.3);
+  }
+  state.busy = 'preview';
+  blockInteraction('preview', true);
+  const done = playVoice(voiceId);
+  const audio = lastVoiceAudio;
+  preview = { voiceId, lobby: currentLobby, audio, lineEl, barEl: lineEl?.querySelector('.prog i') || null };
+  if (lineEl) {
+    lineEl.classList.add('playing');
+    const btn = lineEl.querySelector('.play');
+    if (btn) btn.title = t('info.stopLine');
+  }
+  if (audio && preview.barEl) {
+    audio.addEventListener('timeupdate', () => {
+      if (!preview || preview.audio !== audio || !preview.barEl) return;
+      const d = audio.duration;
+      if (d && isFinite(d) && d > 0) preview.barEl.style.width = `${Math.min(100, audio.currentTime / d * 100)}%`;
+    });
+  }
+  done.then(() => { if (preview && preview.audio === audio) stopPreview(); });
 }
 
 // ---- collapsible student sidebar ----
@@ -5062,6 +5271,7 @@ function unloadLobbyAssets(lobbyName) {
 
 async function loadLobby(name) {
   if (exporting) return;
+  stopPreview();   // 切 lobby：停掉單句試播（音訊＋氣泡＋busy 一併收）
   clearTimeout(sceneStabTimer);
   const oldLobby = currentLobby;
   let oldTextures = new Set();
@@ -5383,6 +5593,19 @@ function isFaceRegion(sx, sy) {
   return Math.hypot(sx - g.x, sy - g.y) <= r;
 }
 
+// tap-to-talk 碰撞盒：遊戲本體用掛在 BodyTouch 物件上的 BoxCollider 接 NGUI
+// OnClick（SpineCharacterBodyTouch → BodyTouch()），點中盒內才 Talk，
+// 點外不說話。盒座標是骨架-root 單位（prefab arb），經 spine.toGlobal 轉螢幕
+//（含翻轉/縮放），與頭/臉頰判定同路。無資料 lobby 回 true（舊行為：點哪都 Talk）。
+function isBodyTouchRegion(sx, sy) {
+  const boxes = BODYTOUCH[currentLobby];
+  if (!spine || !boxes || !boxes.length) return true;
+  for (const b of boxes) {
+    if (pointInQuad(sx, sy, zoneCornersScreen(b))) return true;
+  }
+  return false;
+}
+
 // 按住區路由：臉頰→特別手勢（Pinch/Touch/HandFollow），頭→Pat/Pat2，其餘→Look。
 // 特別 lobby 在臉頰區保留特別反應，頭區仍可撫摸（Pat/Pat2 交替）。
 function gestureForHold(sx, sy) {
@@ -5393,14 +5616,145 @@ function gestureForHold(sx, sy) {
   return 'look';
 }
 
-// ---- input: tap → Talk, press-and-hold / press-and-drag → Look, on head → Pat ----
-// VERIFIED interaction model (JP community wiki wikiru + GameWith + NoxPlayer):
-//   * tap               → Talk (one-shot _M + _A + voice)
-//   * hold head region  → Pat (撫でる, eyes close — Pat_01_M Loop=1 → PatEnd_01_M)
-//   * hold / drag body  → Look (目で追う — Look_01_M Loop=1 → LookEnd_01_M, eyes
-//                         follow the pointer). Confirmed by the Touch_Point /
-//                         Touch_Eye anchor bones the Pat/Look animations key.
-// No drag / zoom / pan.
+// ---- game-faithful input model (SpineDragIK + SpineCharacterBodyTouch) ----
+// The client gates every gesture behind its own prefab BoxCollider with NGUI
+// depth priority: Pinch(0) > Pat/Touch/Hand(-89) > Talk BodyTouch(-90) >
+// Look EyeIK(-100, near-fullscreen). Press arms the topmost zone; after its
+// TriggerDelay (0.1s, Touch 0.0) the IngClip plays and the zone's bone lerps
+// toward the pointer (clamped to its Min/Max); release plays the EndClip and
+// eases the bone back. Talk has NO time limit (OnClick has no timing check).
+function zoneCornersScreen(rec) {
+  // rot 為 skeleton 幀角（y 朝下系，直接可用）；無 rot 時退化為 AABB。
+  const rot = rec.rot || 0;
+  const c = Math.cos(rot), s = Math.sin(rot);
+  const hw = rec.w / 2, hh = rec.h / 2;
+  const pts = [];
+  for (const [lx, ly] of [[hw, hh], [-hw, hh], [-hw, -hh], [hw, -hh]]) {
+    pts.push(spine.toGlobal({ x: rec.cx + lx * c - ly * s, y: rec.cy + lx * s + ly * c }));
+  }
+  return pts;
+}
+function zoneRectScreen(rec) {
+  const q = zoneCornersScreen(rec);
+  const xs = q.map(p => p.x), ys = q.map(p => p.y);
+  return { x0: Math.min(...xs), y0: Math.min(...ys),
+           x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+function pointInQuad(px, py, q) {
+  let inside = false;
+  for (let i = 0, j = q.length - 1; i < q.length; j = i++) {
+    const xi = q[i].x, yi = q[i].y, xj = q[j].x, yj = q[j].y;
+    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+function hasZoneData() {
+  return !!(IKZONES[currentLobby] || BODYTOUCH[currentLobby]);
+}
+// Topmost zone at the press point. pat2 entries (CH0346/47) carry their own
+// clip/end (Pat vs Pat2 by pressed band); same-depth ties -> nearest center.
+function zoneAt(sx, sy) {
+  const Z = IKZONES[currentLobby];
+  const cands = [];
+  if (Z) {
+    if (Z.pinch) cands.push({ kind: 'pinch', rec: Z.pinch });
+    if (Z.hairpat) cands.push({ kind: 'pat', rec: Z.hairpat });
+    for (const b of (Z.pat2 || [])) cands.push({ kind: 'pat', rec: b });
+    if (Z.touch) cands.push({ kind: 'touch', rec: Z.touch });
+    if (Z.hand) cands.push({ kind: 'hand', rec: Z.hand });
+  }
+  let best = null;
+  for (const c of cands) {
+    const q = zoneCornersScreen(c.rec);
+    if (!pointInQuad(sx, sy, q)) continue;
+    const r = zoneRectScreen(c.rec);
+    const d = c.rec.depth ?? -89;
+    const nc = Math.hypot(sx - (r.x0 + r.x1) / 2, sy - (r.y0 + r.y1) / 2);
+    if (!best || d > best.d || (d === best.d && nc < best.nc)) best = { ...c, d, nc };
+  }
+  if (best) return best;
+  if (isBodyTouchRegion(sx, sy)) return { kind: 'talk', rec: null };
+  return { kind: 'look', rec: Z ? Z.eye : null };
+}
+
+let pressSess = null;   // { kind, rec, timer, triggered }
+let ikDrag = null;      // { bone, kind, rest:{x,y}, T:{x,y}, rect, off, spd, relSpd, pressing }
+let lastIkT = 0;
+
+function ikSetupDrag(kind, rec) {
+  if (!spine || !rec || !rec.dragBone || !rec.drag) return false;
+  const bone = spine.skeleton.findBone(rec.dragBone);
+  if (!bone) return false;
+  const g = rec.drag;
+  ikDrag = { bone, kind,
+    rest: { x: bone.worldX, y: bone.worldY },
+    T: { x: bone.worldX - (g.ox || 0), y: bone.worldY - (g.oy || 0) },
+    rect: { x0: g.x0, y0: g.y0, x1: g.x1, y1: g.y1 },
+    off: { x: g.offx || 0, y: g.offy || 0 },
+    spd: rec.dragSpd || 0.1, relSpd: rec.relSpd || 0.1, pressing: true };
+  return true;
+}
+// Pointer -> bone target in skeleton units: the baked Min/Max/Orig are lobby
+// (== skeleton) units in the bone-parent frame whose origin sits at T.
+function ikDragTarget() {
+  const c = spine.worldTransform.applyInverse({ x: mouse.x, y: mouse.y });
+  const d = ikDrag;
+  const plx = c.x - d.T.x + d.off.x, ply = c.y - d.T.y + d.off.y;
+  const dx = Math.min(Math.max(plx, d.rect.x0), d.rect.x1) - d.off.x;
+  const dy = Math.min(Math.max(ply, d.rect.y0), d.rect.y1) - d.off.y;
+  return { x: d.T.x + dx, y: d.T.y + dy };
+}
+function updateIkDrag() {
+  if (!spine || !ikDrag || !ikDrag.bone) return;
+  const now = performance.now() / 1000;
+  const dt = Math.min(0.05, Math.max(0, now - (lastIkT || now)));
+  lastIkT = now;
+  const d = ikDrag;
+  let tx, ty, k;
+  if (d.pressing) {
+    const t = ikDragTarget();
+    tx = t.x; ty = t.y;
+    k = Math.min(1, Math.max(0, d.spd * dt * 60));
+  } else {
+    tx = d.rest.x; ty = d.rest.y;
+    k = Math.min(1, Math.max(0, d.relSpd * dt * 60));
+  }
+  if (k <= 0) return;
+  setBoneWorld(d.bone,
+    d.bone.worldX + (tx - d.bone.worldX) * k,
+    d.bone.worldY + (ty - d.bone.worldY) * k);
+  if (!d.pressing && Math.hypot(tx - d.bone.worldX, ty - d.bone.worldY) < 0.05) {
+    setBoneWorld(d.bone, d.rest.x, d.rest.y);
+    if (ikDrag === d) ikDrag = null;
+  }
+}
+
+function pressTrigger() {
+  const sess = pressSess;
+  if (!sess || sess.triggered || !spine || sess.lobby !== currentLobby) return;
+  let ok = false;
+  if (sess.kind === 'pinch') { startPinch(); ok = pinchActive; }
+  else if (sess.kind === 'touch') { startTouch(); ok = state.busy === 'touch'; }
+  else if (sess.kind === 'hand') { startHandFollow(); ok = handFollowActive; }
+  else if (sess.kind === 'pat') { startPat(sess.rec?.clip || null, sess.rec?.end || null); ok = patting; }
+  else if (sess.kind === 'look') { startLook(); ok = state.busy === 'look'; }
+  sess.triggered = ok;
+  if (ok && sess.rec) ikSetupDrag(sess.kind, sess.rec);
+  else if (ok && sess.kind === 'look') ikSetupLookFallback();
+}
+// No-zone lobbies (or missing eye rec): legacy circle clamp as the drag rect.
+function ikSetupLookFallback() {
+  if (!spine) return;
+  const b = lookBone || headBone();
+  if (!b) return;
+  const r = LOOK_RADIUS_UNITS;
+  ikDrag = { bone: b, kind: 'look',
+    rest: { x: b.worldX, y: b.worldY }, T: { x: b.worldX, y: b.worldY },
+    rect: { x0: -r, y0: -r, x1: r, y1: r }, off: { x: 0, y: 0 },
+    spd: 0.1, relSpd: 0.1, pressing: true };
+}
+
+// ---- input (legacy path: lobbies without prefab zone data only) ----
 function onPointerDown(e) {
   if (exporting) return;
   ensureAudio();
@@ -5409,7 +5763,20 @@ function onPointerDown(e) {
   if (e.pointerType === 'touch') e.preventDefault();
   downTime = performance.now();
   downPos = { x: e.clientX, y: e.clientY };
+  if (hasZoneData() && spine) {
+    // Game path: arm the topmost zone; its TriggerDelay fires the gesture.
+    // (Talk needs no timer — release inside the box clicks. Movement never
+    // cancels the trigger: NGUI OnPress already fired.)
+    const z = zoneAt(e.clientX, e.clientY);
+    const sess = pressSess = { kind: z.kind, rec: z.rec || null, timer: 0, triggered: false, lobby: currentLobby };
+    if (z.kind !== 'talk') {
+      const delayMs = Math.max(0, ((z.rec && z.rec.trigDelay) ?? 0.1)) * 1000;
+      sess.timer = setTimeout(() => { if (pressSess === sess) pressTrigger(); }, delayMs);
+    }
+    return;
+  }
   longPressTimer = setTimeout(() => {
+    if (state.busy === 'preview') return;      // 單句試播中不接受按住手勢
     if (downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) < 10) {
       // Hold gesture: cheek → the lobby's special Pinch/Touch/HandFollow when it
       // owns one, head → Pat (or Pat2 alternate), anywhere else → Look.
@@ -5427,10 +5794,9 @@ function onPointerMove(e) {
   mouse.x = e.clientX;
   mouse.y = e.clientY;
   mouse.active = true;
-  // Press-and-drag gesture — matches the real game: "頭以外の場所をタップしたまま
-  // 指を移動させると目で追ってくれます". Moving while pressed starts Pat on the
-  // head (撫でる) or Look anywhere else; a stationary long-press still falls back to
-  // the 420 ms hold timer in onPointerDown.
+  // Press-and-drag gesture — legacy path only. (Game path: the trigger timer
+  // is never cancelled by movement; the drag only steers the bone.)
+  if (pressSess) return;
   if (longPressTimer && downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 7) {
     clearTimeout(longPressTimer);
     if (state.busy === null) {
@@ -5452,16 +5818,30 @@ function onPointerMove(e) {
 
 function onPointerUp(e) {
   clearTimeout(longPressTimer);
-  if (downPos) {
+  if (pressSess) {
+    const sess = pressSess;
+    pressSess = null;
+    clearTimeout(sess.timer);
+    if (sess.triggered) {
+      // Release: the hold branches end the gesture (EndClip + bone eases back).
+      if (ikDrag) ikDrag.pressing = false;
+    } else if (sess.kind === 'talk' && !state.introBlock &&
+        isBodyTouchRegion(e.clientX, e.clientY)) {
+      // NGUI OnClick: press + release inside the box, no time limit.
+      playTalk();
+    }
+  } else if (downPos) {
     const dt = performance.now() - downTime;
     const d = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
-    // Quick tap (short, still) → Talk (one-shot _M + _A + voice); for Touch
-    // lobbies a face-region tap is the poke reaction instead. A tap while a hold
-    // is active is ignored — the hold branches below handle the release.
+    // Quick tap (short, still) → Talk (one-shot _M + _A + voice), but only
+    // inside the lobby's BodyTouch box (the real client's BoxCollider gate);
+    // a tap outside the box does nothing. For Touch lobbies a face-region
+    // tap is the poke reaction instead. A tap while a hold is active is
+    // ignored — the hold branches below handle the release.
     if (dt < 340 && d < 10 && !state.introBlock && state.busy !== 'look' &&
-        state.busy !== 'pat' && state.busy !== 'pinch' && state.busy !== 'handfollow' && state.busy !== 'touch') {
+        state.busy !== 'pat' && state.busy !== 'pinch' && state.busy !== 'handfollow' && state.busy !== 'touch' && state.busy !== 'preview') {
       if (interactionMode === 'touch' && isFaceRegion(e.clientX, e.clientY)) startTouch();
-      else playTalk();
+      else if (isBodyTouchRegion(e.clientX, e.clientY)) playTalk();
     }
   }
   if (pinchActive) endPinch();
@@ -5820,7 +6200,7 @@ async function loadBootData() {
     return r.text();
   };
 
-  const [camera, idx, transforms, icons, chat, schedule, voiceIdx,
+  const [camera, idx, transforms, icons, chat, touch, zones, schedule, voiceIdx,
          timelines, clipMix, clipGraph, titleVoices, flash,
          bgmCsv, studentsCsv, subtitles, dialogTypes, postConfig, charProfiles] = await Promise.all([
     settle(json('assets/data/lobby_camera_config.json')),
@@ -5828,6 +6208,8 @@ async function loadBootData() {
     settle(json('assets/data/lobby_transforms.json')),
     settle(json('assets/students/icon_index.json')),
     settle(json('assets/data/lobby_chat_anchors.json')),
+    settle(json('assets/data/lobby_bodytouch.json')),
+    settle(json('assets/data/lobby_ikzones.json')),
     settle(json('assets/data/lobby_voice_schedule.json')),
     settle(json('assets/data/voice_index.json')),
     settle(json('assets/data/lobby_timelines.json')),
@@ -5849,6 +6231,8 @@ async function loadBootData() {
   LOBBY_TRANSFORMS = transforms;
   STUDENT_ICONS = icons || {};
   CHAT_ANCHORS = chat || {};
+  BODYTOUCH = touch || {};
+  IKZONES = zones || {};
   SCHEDULE = schedule;
   VOICE_INDEX = voiceIdx || {};
   TIMELINES = timelines;

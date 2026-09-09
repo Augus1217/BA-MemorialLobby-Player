@@ -138,7 +138,9 @@
   "info.schoolYear": "學年",
   "info.hobby": "興趣",
   "info.cv": "CV",
-  "info.noLines": "（此大廳沒有可顯示的台詞）"
+  "info.noLines": "（此大廳沒有可顯示的台詞）",
+  "info.playLine": "播放台詞",
+  "info.stopLine": "停止播放"
  },
  "zh-CN": {
   "boot.checking": "检查更新中……",
@@ -279,7 +281,9 @@
   "info.schoolYear": "学年",
   "info.hobby": "兴趣",
   "info.cv": "CV",
-  "info.noLines": "（此大厅没有可显示的台词）"
+  "info.noLines": "（此大厅没有可显示的台词）",
+  "info.playLine": "播放台词",
+  "info.stopLine": "停止播放"
  },
  "ja": {
   "boot.checking": "確認中です……",
@@ -420,7 +424,9 @@
   "info.schoolYear": "学年",
   "info.hobby": "趣味",
   "info.cv": "CV",
-  "info.noLines": "（表示できる台詞がありません）"
+  "info.noLines": "（表示できる台詞がありません）",
+  "info.playLine": "台詞を再生",
+  "info.stopLine": "再生を停止"
  },
  "en": {
   "boot.checking": "Checking for updates...",
@@ -561,7 +567,9 @@
   "info.schoolYear": "School Year",
   "info.hobby": "Hobby",
   "info.cv": "CV",
-  "info.noLines": "(No lines available for this lobby)"
+  "info.noLines": "(No lines available for this lobby)",
+  "info.playLine": "Play line",
+  "info.stopLine": "Stop"
  },
  "ko": {
   "boot.checking": "업데이트 확인 중...",
@@ -702,6 +710,8 @@
   "info.schoolYear": "학년",
   "info.hobby": "취미",
   "info.cv": "CV",
-  "info.noLines": "(표시할 대사가 없습니다)"
+  "info.noLines": "(표시할 대사가 없습니다)",
+  "info.playLine": "대사 재생",
+  "info.stopLine": "재생 중지"
  }
 }

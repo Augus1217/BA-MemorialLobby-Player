@@ -259,7 +259,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_SPINE = os.environ.get("BA_SRC_SPINE", "/home/augus/JP_Extracted_Full/Assets/_MX/SpineLobbies")
 SRC_MEDIA = os.environ.get("BA_SRC_MEDIA", "/home/augus/JP_Voice_Extracted")
 SRC_BGM = os.environ.get("BA_SRC_BGM", "/home/augus/Blue-Archive-Asset-Downloader/JP_Android_RawData/Media/GameData/Audio/BGM")
-SRC_DATA = os.environ.get("BA_SRC_DATA", "/home/augus/BA_MemorialLobby/data")
+SRC_DATA = os.environ.get("BA_SRC_DATA", "/home/augus/BA-MemorialLobby-Assets/data")
 SRC_PORTRAIT = os.environ.get(
     "BA_SRC_PORTRAIT",
     "/home/augus/JP_Extracted_Full/Assets/_MX/AddressableAsset/UIs/01_Common/01_Character",
@@ -272,8 +272,70 @@ DST_BGM = os.path.join(ROOT, "assets", "bgm")
 DST_DATA = os.path.join(ROOT, "assets", "data")
 
 
+WORKER_BASE = os.environ.get("BA_WORKER_BASE", "https://ba-assets.imlindora.workers.dev")
+
+
+def fetch_data_from_worker(version=None, worker_base=None):
+    """從 Worker 最新 core 包只抽 assets/data/*（stdlib only）。
+    回傳解出的 data 目錄；失敗拋 RuntimeError。給 --from-worker 用：
+    任何機器無需本地 Assets checkout 即可同步 metadata。"""
+    import tarfile
+    import tempfile
+    import urllib.request
+    UA = {"User-Agent": "BA-MemorialLobby-Player/copy_assets"}
+    base = (worker_base or WORKER_BASE).rstrip("/")
+    if not version or version == "latest":
+        req = urllib.request.Request(base + "/latest/assets_version.json",
+                                     headers=UA)
+        with urllib.request.urlopen(req, timeout=30) as r:
+            manifest = json.load(r)
+            version = manifest["version"]
+            core_url = ((manifest.get("packages") or {}).get("core") or {}).get("url")
+    else:
+        core_url = None
+    url = core_url or f"{base}/v{version}/assets-core-v{version}.tar.gz"
+    tmpd = tempfile.mkdtemp(prefix="ba_core_")
+    try:
+        tg = os.path.join(tmpd, "core.tar.gz")
+        req = urllib.request.Request(url, headers=UA)
+        with urllib.request.urlopen(req, timeout=120) as r, open(tg, "wb") as f:
+            shutil.copyfileobj(r, f, length=1024 * 256)
+        with tarfile.open(tg, "r:gz") as tf:
+            members = [m for m in tf.getmembers()
+                       if m.isfile() and m.name.startswith("assets/data/")]
+            if not members:
+                raise RuntimeError("core 包內無 assets/data 成員")
+            tf.extractall(tmpd, members=[m for m in members])
+        return os.path.join(tmpd, "assets", "data")
+    except Exception:
+        shutil.rmtree(tmpd, ignore_errors=True)
+        raise
+
+
 def main():
-    only = sys.argv[1:] if len(sys.argv) > 1 else None
+    argv = sys.argv[1:]
+    # --from-worker[=version]：data 改從 Worker core 包抽（local 備援：BA_SRC_DATA）
+    # --worker-base URL：自訂 Worker（預設官方）。其餘位置參數維持 lobby 過濾。
+    from_worker = None
+    worker_base = None
+    rest = []
+    for a in argv:
+        if a == "--from-worker":
+            from_worker = "latest"
+        elif a.startswith("--from-worker="):
+            from_worker = a.split("=", 1)[1]
+        elif a.startswith("--worker-base="):
+            worker_base = a.split("=", 1)[1]
+        else:
+            rest.append(a)
+    only = rest or None
+    global SRC_DATA
+    if from_worker:
+        try:
+            SRC_DATA = fetch_data_from_worker(from_worker, worker_base)
+            print(f"data source: Worker core pack ({from_worker})")
+        except Exception as e:
+            print(f"Worker 取包失敗 ({e})，退回本地 {SRC_DATA}", file=sys.stderr)
     os.makedirs(DST_SPINE, exist_ok=True)
     os.makedirs(DST_SCENE, exist_ok=True)
     os.makedirs(DST_VOICE, exist_ok=True)

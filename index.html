@@ -431,7 +431,8 @@
        (mAlignment=1 = NGUIText.Alignment.Left), letter-spacing -2 (spacingX),
        line pitch 68 (= 52 + spacingY 16), ResizeFreely wrapping at 740.
        First line box is TIGHT (cap-top ≈ box top, measured A≈0): text height =
-       48 + 68×(n-1), not 68×n — compensated by #chatText margin-top -20.
+       48 + 68×(n-1), not 68×n — compensated by #chatText margins -10u/-10u
+       (split evenly so the ink stays vertically centered; total -20u).
        Round-3: --bs is vw/3000 (metrology: true UI scale 0.61–0.65 at 1920w),
        same as charScale, so anchor math stays in one unit. */
     #chatDialog {
@@ -481,7 +482,13 @@
     #chatName { display: none; }
     #chatText {
       position: relative; z-index: 1;
-      margin-bottom: calc(-20 * var(--bs));   /* 首行緊貼（first-line box 48u，非整行 68u）：框從底部收 */
+      /* 首行緊貼（first-line box 48u，非整行 68u）共 -20u：上下各半
+         （Electron 實測：全放底部字偏下 top38.1/bottom25.6px、
+         全放頂部字偏上 25.3/38.4px；對半分 31.8/31.8 置中，
+         中英字體皆適用，且與匯出 canvas 版差 1.3px 內）。
+         總高不變（68n-20u），框頂固定向下長不受影響。 */
+      margin-top: calc(-10 * var(--bs));
+      margin-bottom: calc(-10 * var(--bs));
       font-size: calc(52 * var(--bs));
       line-height: calc(68 * var(--bs));            /* fontSize 52 + spacingY 16 */
       letter-spacing: calc(-2 * var(--bs));
@@ -543,11 +550,36 @@
     .info-intro:empty { display: none; }
     .info-lines { display: flex; flex-direction: column; gap: 8px; }
     .info-lines .line {
-      font-size: 13px; line-height: 1.7; padding: 9px 12px;
+      position: relative;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; line-height: 1.7; padding: 9px 12px 13px;
       background: rgba(255,255,255,.045); border-radius: 8px;
       border: 1px solid rgba(255,255,255,.06); color: #e6eaff;
     }
-    .info-lines .line .no { opacity: .4; font-size: 11px; margin-right: 8px; }
+    .info-lines .line .no { opacity: .4; font-size: 11px; flex: none; }
+    .info-lines .line .txt { flex: 1; min-width: 0; }
+    .info-lines .line .play {
+      flex: none; width: 26px; height: 26px; padding: 0; margin-left: -4px;
+      background: none; border: none; cursor: pointer; color: #a9b6ff;
+      opacity: .75; transition: opacity .15s, transform .15s;
+    }
+    .info-lines .line .play:hover { opacity: 1; transform: scale(1.12); }
+    .info-lines .line .play svg { width: 100%; height: 100%; display: block; }
+    .info-lines .line .play .stop { display: none; }
+    .info-lines .line.playing { border-color: rgba(143,180,255,.55); background: rgba(143,180,255,.08); }
+    .info-lines .line.playing .play { opacity: 1; color: #cdd8ff; }
+    .info-lines .line.playing .play .tri { display: none; }
+    .info-lines .line.playing .play .stop { display: block; }
+    .info-lines .line .prog {
+      position: absolute; left: 12px; right: 12px; bottom: 6px; height: 3px;
+      border-radius: 2px; background: rgba(255,255,255,.12); overflow: hidden;
+      opacity: 0; transition: opacity .2s; pointer-events: none;
+    }
+    .info-lines .line.playing .prog { opacity: 1; }
+    .info-lines .line .prog i {
+      display: block; height: 100%; width: 0;
+      background: linear-gradient(90deg, #8fb4ff, #cdd8ff); border-radius: 2px;
+    }
     .info-empty { font-size: 12.5px; opacity: .45; padding: 8px 0; }
 
     /* Loading screen: intro + spinner + 確認中です…… */
