@@ -1232,7 +1232,6 @@ const voiceSkip = new Set();
 // (e.g. the Start_Idle_01 greeting) still close on their own.
 let dialogActive = false;   // true while a playTalk() dialog is running
 let dialogSession = 0;      // guards the balloon watcher against stale closes
-let lobbyGen = 0;           // guards rapid lobby switches (stale loads bail out)
 let validVoices = null;   // 合法語音檔名集合（voice_index.json[characterId]），過濾泛用事件
 let VOICE_INDEX = {};     // characterId -> 該角色語音檔名清單
 
@@ -4784,6 +4783,7 @@ function stopPreview() {
   if (!preview) return;
   const p = preview;
   preview = null;
+  try { clearTimeout(p.pending); } catch {}
   try { p.audio?.pause(); } catch {}
   lipActive = false;
   dialogActive = false;
@@ -4892,8 +4892,13 @@ function playPreviewLine(voiceId, lineEl) {
   else if (state.busy === 'look') endLook();
   else if (patting) endPat();
   dialogSession++;   //  supersede 進行中的 Talk：它的 finally 不會誤關新氣泡
+  let leadMs = 0;
   if (g.clip && has(g.clip)) {
-    setAnimationWithClipMix(1, g.clip, false);
+    const e1 = setAnimationWithClipMix(1, g.clip, false);
+    // 動畫先行：等 blend-in（IntroMix，Talk 約 0.3s）完成再出聲，否則語音
+    // 壓在融合中的 pose 上、看起來慢半拍。點按 Talk 沒這問題——它的語音是
+    // 時間軸事件（1s 後）觸發的，那時早已融合完。
+    leadMs = Math.min(1000, Math.max(0, (e1?.mixDuration || 0) * 1000));
     const twin = g.clip.replace(/_M$/, '_A');
     if (has(twin)) setAnimationWithClipMix(2, twin, false);
     else spine.state.setEmptyAnimation(2, 0.3);
@@ -4902,8 +4907,9 @@ function playPreviewLine(voiceId, lineEl) {
   blockInteraction('preview', true);
   dialogActive = true;   // 氣泡整組常駐、逐句換字（CoDialog 式），收尾才關
   preview = { groupKey: g.key, lobby: currentLobby, lines: g.lines, idx: -1,
-              audio: null, lineEl: lineEl || null, barEl: null };
-  advancePreview();
+              audio: null, lineEl: lineEl || null, barEl: null, pending: 0 };
+  const p = preview;
+  p.pending = setTimeout(() => { if (preview === p) advancePreview(); }, leadMs);
 }
 
 // ---- collapsible student sidebar ----
@@ -5275,22 +5281,17 @@ function selectLobby(key) {
   if (exporting) return;
   if (key === currentLobby) { toggleSidebar(false); return; }
   toggleSidebar(false);
-  // fade 與載入並行：舊碼等 720ms 黑場走完才開始載，等於白白罰站；
-  // loading 指示器（z-40）在 fade（z-30）之上，使用者立刻看到反饋。
-  fadeIn();
-  loadLobby(key);
+  fadeIn().then(() => loadLobby(key));
 }
 
 async function loadScene(entry) {
   const s = entry?.scene;
   const b = entry?.bg;
   // 允許只有 bg（背景）而無 scene（特寫）的角色（如 Yuzu：僅有 Yuzu_BG，無 Yuzu_Scene）
-  if (!s && !b) return null;
+  if (!s && !b) return;
   // 如果主骨架已合併場景（has Start_Idle_03），不需要載入獨立 scene/bg
   const animNames = spine?.state?.data?.skeletonData?.animations?.map(a => a.name) || [];
-  if (animNames.includes('Start_Idle_03')) return null;
-  // 回傳局部物件、不碰全域：由呼叫端在 lobby 世代正確時掛載（開場不等場景）。
-  let sceneObj = null, bgObj = null;
+  if (animNames.includes('Start_Idle_03')) return;
   try {
     const loadOne = async (res) => {
       if (!res || !res.skel || !res.atlas) return null;
@@ -5305,35 +5306,17 @@ async function loadScene(entry) {
       // intro 之前就跑 idle 迴圈，導致 startBgSequence 的冪等判斷誤判而跳過開場）。
       return obj;
     };
-    // scene/bg 並行載入（舊碼序列 await，白白多等一份）
-    [sceneObj, bgObj] = await Promise.all([loadOne(s), loadOne(b)]);
-    return { scene: sceneObj, bg: bgObj };
+    scene = await loadOne(s);
+    bg = await loadOne(b);
+    // 圖層：bg 插到最底，scene 置頂（特寫前景）；spine 由 loadLobby 排在 bg 之上、scene 之下。
+    if (bg) app.stage.addChildAt(bg, 0);
+    if (scene) app.stage.addChild(scene);
+    if (scene || bg) log(`場景: ${currentLobby}`);
   } catch (e) {
     console.warn('[lobby] 場景載入失敗，略過', e);
-    for (const o of [sceneObj, bgObj]) {
-      if (!o) continue;
-      try { destroyTextures(collectTextures(o)); o.destroy(); } catch {}
-    }
-    return null;
+    if (scene) { destroyTextures(collectTextures(scene)); scene.destroy(); scene = null; }
+    if (bg) { destroyTextures(collectTextures(bg)); bg.destroy(); bg = null; }
   }
-}
-
-// 圖層順序（主體/bg/scene 三者現有的排）：bg 最底 → spine 中 → scene 最頂。
-// loadLobby 主流程與場景遲到掛載共用。
-function layerSpines() {
-  if (!spine) return;
-  try {
-    if (bg && scene) {
-      app.stage.setChildIndex(bg, 0);
-      app.stage.setChildIndex(spine, 1);
-      app.stage.setChildIndex(scene, app.stage.children.length - 1);
-    } else if (scene) {
-      app.stage.setChildIndex(scene, app.stage.children.length - 1);
-      app.stage.setChildIndex(spine, app.stage.children.length - 2 >= 0 ? app.stage.children.length - 2 : 0);
-    } else {
-      app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 1));
-    }
-  } catch (e) { console.warn('[lobby] 圖層排序失敗', e.message); }
 }
 
 // 收集顯示物件樹上的 texture（含 children / spine attachmentCacheData）
@@ -5426,7 +5409,6 @@ async function loadLobby(name) {
   if (exporting) return;
   stopPreview();   // 切 lobby：停掉單句試播（音訊＋氣泡＋busy 一併收）
   clearTimeout(sceneStabTimer);
-  const myGen = ++lobbyGen;   // 連點切換時舊的載入在 await 點後直接棄權（見下）
   const oldLobby = currentLobby;
   let oldTextures = new Set();
   if (spine) {
@@ -5516,7 +5498,6 @@ async function loadLobby(name) {
       ? [assetUrl(`assets/spine/${name}/${entry.skel}`), assetUrl(`assets/spine/${name}/${entry.atlas}`)]
       : [];
     await Promise.all(charAssets.map(a => Assets.load(a)));
-    if (myGen !== lobbyGen) return;   // 已被更新的切換取代：Spine.from 都不建，直接棄權
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
     fixAdditiveSlots(spine);
     const sch = SCHEDULE?.lobbies?.[name];
@@ -5537,28 +5518,7 @@ async function loadLobby(name) {
     return;
   }
 
-  // 場景（bg/scene）不擋開場：主體就位立刻播 intro，場景到了再掛載＋重排＋重 fit。
-  // （舊碼 await loadScene，開場被背景拖慢約一個場景載入時間。）
-  loadScene(entry).then((res) => {
-    if (!res) return;
-    // 世代檢查：使用者又切走了就銷毀，避免舊場景污染新 lobby
-    if (currentLobby !== name || !spine) {
-      for (const o of [res.scene, res.bg]) {
-        if (!o) continue;
-        try { destroyTextures(collectTextures(o)); o.destroy(); } catch {}
-      }
-      return;
-    }
-    scene = res.scene;
-    bg = res.bg;
-    if (bg) app.stage.addChildAt(bg, 0);
-    if (scene) app.stage.addChild(scene);
-    if (scene || bg) log(`場景: ${currentLobby}`);
-    layerSpines();
-    fitted = false;
-    fitScene();
-    try { startBgSequence(); } catch (e) { console.warn('[lobby] 場景到達後 bg 序列啟動失敗', e.message); }
-  });
+  await loadScene(entry);
   // Akari 為三獨立 spine（spine=本體 / bg=背景 / scene=特寫）：本體無 Start_Idle_03，
   // 故 sceneIndependent=true，由 fitScene/applyCamera 對獨立 scene 物件個別定位。
   const animNames2 = spine?.state?.data?.skeletonData?.animations?.map(a => a.name) || [];
@@ -5567,7 +5527,16 @@ async function loadLobby(name) {
     : !!(entry.bg) || !!(entry.scene && entry.scene.skel && entry.scene.skel !== entry.skel);
   // 圖層順序：bg 最底 → spine（本體）中 → scene（特寫）最頂（前景）。其餘 UI/對話在互動時
   // 才 addChild，自然位於最上層。
-  layerSpines();
+  if (bg && scene) {
+    app.stage.setChildIndex(bg, 0);
+    app.stage.setChildIndex(spine, 1);
+    app.stage.setChildIndex(scene, app.stage.children.length - 1);
+  } else if (scene) {
+    app.stage.setChildIndex(scene, app.stage.children.length - 1);
+    app.stage.setChildIndex(spine, app.stage.children.length - 2 >= 0 ? app.stage.children.length - 2 : 0);
+  } else {
+    app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 1));
+  }
   fitted = false;
   // frame on the Idle pose (mesh geometry only exists after a render), then play the intro
   idleClip = resolveIdleClip();
@@ -5576,7 +5545,6 @@ async function loadLobby(name) {
   const waitFit = () => {
     if (++frames < 3) requestAnimationFrame(waitFit);
     else {
-      if (currentLobby !== name || !spine) return;   // 已被更新的切換取代
       fitScene();
       playStart();
       log(`[layout] ${name}: scene=${!!scene} charScale=${charScale.toFixed(3)} cameraTargetY=${cameraTargetY.toFixed(0)}`);
@@ -5591,7 +5559,6 @@ async function loadLobby(name) {
   loadingEl.classList.remove('show');
   fadeOut();
   try { await loadPostConfig(); } catch (e) {}
-  if (myGen !== lobbyGen) return;   // 過期：後來的切換會自己 apply，別蓋掉它
   applyPostGrade(name);
   log(`${name} 載入完成 — ${prettyName(name)}`);
 }
@@ -5615,8 +5582,7 @@ function switchLobby(dir) {
   const i = Math.max(0, order.indexOf(currentLobby));
   const next = order[(i + dir + order.length) % order.length];
   if (next === currentLobby) return;
-  fadeIn();
-  loadLobby(next);
+  fadeIn().then(() => loadLobby(next));
 }
 
 // spine track completion -> return reactive tracks to rest
