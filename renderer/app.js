@@ -2281,6 +2281,29 @@ window.ba_debug = {
                name: lastVoiceName };
     } catch { return null; }
   },
+  avTrace: (ms) => new Promise((resolve) => {
+    const rows = [];
+    const t0 = performance.now();
+    const tick = () => {
+      const now = (performance.now() - t0) / 1000;
+      let tn = null, ta = null;
+      try {
+        const e = spine && spine.state.getCurrent(1);
+        if (e && e.animation) {
+          tn = e.animation.name;
+          ta = +((typeof e.getAnimationTime === 'function' ? e.getAnimationTime() : 0)).toFixed(3);
+        }
+      } catch {}
+      let au = null;
+      try {
+        if (lastVoiceAudio) au = +lastVoiceAudio.currentTime.toFixed(3);
+      } catch {}
+      rows.push({ t: +now.toFixed(3), tn, ta, au });
+      if (now * 1000 < ms) requestAnimationFrame(tick);
+      else resolve(rows);
+    };
+    requestAnimationFrame(tick);
+  }),
   triggerPat: (on) => on ? startPat() : endPat(),
   skipMemoryLobby: () => memoryLobbySkip(),
   headPos: () => {
@@ -4716,16 +4739,16 @@ function toggleInfoPanel(force) {
 
 // ---- 整組試播（介紹面板：每組第一句才有播放鈕）----
 // 遊戲沒有「只播第二句」這種操作——Talk clip 是一組連續表演，直接播該組
-// 全程（動作從頭、語音逐句、氣泡跟著換行，mini-CoDialog）；播別組則取代；
-// 播中再按第一句＝停止。找不到 clip 的孤句退化成單句播。
-// 實現要點：
-//  * 組＝schedule 上同一 canonical clip 的台詞（Talk_*_M 優先無前綴版；
+// 全程。關鍵教訓（實測 pose 能量）：clip 內是「動→靜止→動」結構，語音永遠
+// 落在靜止段（Airi Talk_01：0.25-1.0s 動、1.33s 出聲、5-9s 再動、8.6s 出聲）。
+// 所以各句語音必須照該 clip 的事件時間出——提前播就會壓在靜止 pose 上，
+// 看起來動作慢半拍。按下後動作立刻開始（跟點按 Talk 一模一樣），
+// 第一句聲音在事件時間到，後面逐句跟上。
+//  * 組＝同一 canonical clip 的台詞（Talk_*_M 優先無前綴版；
 //    talk/talk2/Dev_Talk 變體只在別無選擇時認領）
-//  * 語音逐句 await（playVoice 的 endPromise），氣泡靠 dialogActive 常駐跨句
-//  * 試播期間 onAnimationEvent 被抑制、不會重音；busy='preview'＋自有 block
-//    requester：點按/按住手勢全部拒絕（見各 starter）
-//  * 進度條吃 audio timeupdate（逐句重新綁定）；播完/失敗/被取代/切 lobby
-//    都走同一清理路徑
+//  * 語音照 clip 事件 t 排時（setTimeout 鏈；找不到 t 的行立即播）
+//  * 氣泡靠 dialogActive 常駐跨句；進度條逐句走
+//  * busy='preview'＋自有 block requester：點按/按住手勢全部拒絕（見各 starter）
 let preview = null;   // { groupKey, lobby, lines, idx, audio, lineEl, barEl }
 const SVG_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path class="ring" d="M12 2.9c5-.4 9.1 3.7 8.9 8.8-.2 5-4.3 8.7-9.2 8.5-4.9-.2-8.7-4.4-8.4-9.3.2-4.8 3.8-7.7 8.7-8z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path class="tri" d="M10.1 8.7l4.9 3-4.8 3.1z" fill="currentColor"/><rect class="stop" x="9" y="9" width="6" height="6" rx="1.2" fill="currentColor"/></svg>';
 
@@ -4777,13 +4800,14 @@ function markPreviewLineEl(voiceId) {
 }
 function markPreviewLine() {
   if (!preview || preview.lobby !== currentLobby) return;
-  markPreviewLineEl(preview.lines[preview.idx] || preview.lines[0]);
+  const vid = preview.lineEl?.dataset?.vid || preview.lines[0];
+  if (vid) markPreviewLineEl(vid);
 }
 function stopPreview() {
   if (!preview) return;
   const p = preview;
   preview = null;
-  try { clearTimeout(p.pending); } catch {}
+  if (p.timers) for (const id of p.timers) { try { clearTimeout(id); } catch {} }
   try { p.audio?.pause(); } catch {}
   lipActive = false;
   dialogActive = false;
@@ -4798,24 +4822,42 @@ function stopPreview() {
   hideChat();
 }
 async function advancePreview() {
+  // 旧单句直播路径已改由 scheduleGroupVoices 按事件时间出声；保留空壳以防外部引用。
+  return;
+}
+// 整组语音按 clip 事件时间排播（t 秒后出声；找不到 t 立即播）。
+// 每句播出时推进高亮＋进度条；最后一句播完收尾。
+function scheduleGroupVoices() {
   const p = preview;
   if (!p || p.lobby !== currentLobby || !spine) { stopPreview(); return; }
-  p.idx++;
-  if (p.idx >= p.lines.length) { stopPreview(); return; }
-  markPreviewLineEl(p.lines[p.idx]);
-  const done = playVoice(p.lines[p.idx]);
-  const audio = lastVoiceAudio;
-  if (preview !== p) return;   // 播出瞬間被取代／停止
-  p.audio = audio;
-  p.barEl = p.lineEl?.querySelector('.prog i') || null;
-  if (audio && p.barEl) {
-    audio.addEventListener('timeupdate', () => {
-      if (preview !== p || p.audio !== audio || !p.barEl) return;
-      const d = audio.duration;
-      if (d && isFinite(d) && d > 0) p.barEl.style.width = `${Math.min(100, audio.currentTime / d * 100)}%`;
-    });
-  }
-  done.then(() => { if (preview === p) advancePreview(); });
+  const anims = SCHEDULE?.lobbies?.[currentLobby]?.animations || {};
+  const schedVoices = (p.clip && anims[p.clip]?.voice) || [];
+  const tOf = (vid) => {
+    const v = schedVoices.find(v => String(v?.name || v).toLowerCase() === vid.toLowerCase());
+    return v ? Math.max(0, v.t || 0) : 0;
+  };
+  p.timers = [];
+  p.lines.forEach((vid, i) => {
+    const id = setTimeout(() => {
+      if (preview !== p) return;
+      markPreviewLineEl(vid);
+      const done = playVoice(vid);
+      const audio = lastVoiceAudio;
+      if (preview !== p) return;   // 播出瞬间被取代／停止
+      p.audio = audio;
+      p.barEl = p.lineEl?.querySelector('.prog i') || null;
+      if (audio && p.barEl) {
+        audio.addEventListener('timeupdate', () => {
+          if (preview !== p || p.audio !== audio || !p.barEl) return;
+          const d = audio.duration;
+          if (d && isFinite(d) && d > 0) p.barEl.style.width = `${Math.min(100, audio.currentTime / d * 100)}%`;
+        });
+      }
+      const last = i === p.lines.length - 1;
+      done.then(() => { if (last && preview === p) stopPreview(); });
+    }, Math.max(0, tOf(vid)) * 1000);
+    p.timers.push(id);
+  });
 }
 // ---- 台詞行播放態（介紹面板；試播＋點按說話共用）----
 // preview 擁有 UI 時一切讓路（由試播自己的 mark/stop 處理）。點按說話的
@@ -4892,13 +4934,8 @@ function playPreviewLine(voiceId, lineEl) {
   else if (state.busy === 'look') endLook();
   else if (patting) endPat();
   dialogSession++;   //  supersede 進行中的 Talk：它的 finally 不會誤關新氣泡
-  let leadMs = 0;
   if (g.clip && has(g.clip)) {
-    const e1 = setAnimationWithClipMix(1, g.clip, false);
-    // 動畫先行：等 blend-in（IntroMix，Talk 約 0.3s）完成再出聲，否則語音
-    // 壓在融合中的 pose 上、看起來慢半拍。點按 Talk 沒這問題——它的語音是
-    // 時間軸事件（1s 後）觸發的，那時早已融合完。
-    leadMs = Math.min(1000, Math.max(0, (e1?.mixDuration || 0) * 1000));
+    setAnimationWithClipMix(1, g.clip, false);
     const twin = g.clip.replace(/_M$/, '_A');
     if (has(twin)) setAnimationWithClipMix(2, twin, false);
     else spine.state.setEmptyAnimation(2, 0.3);
@@ -4907,9 +4944,9 @@ function playPreviewLine(voiceId, lineEl) {
   blockInteraction('preview', true);
   dialogActive = true;   // 氣泡整組常駐、逐句換字（CoDialog 式），收尾才關
   preview = { groupKey: g.key, lobby: currentLobby, lines: g.lines, idx: -1,
-              audio: null, lineEl: lineEl || null, barEl: null, pending: 0 };
-  const p = preview;
-  p.pending = setTimeout(() => { if (preview === p) advancePreview(); }, leadMs);
+              audio: null, lineEl: null, barEl: null,
+              clip: (g.clip && has(g.clip)) ? g.clip : null, timers: [] };
+  scheduleGroupVoices();
 }
 
 // ---- collapsible student sidebar ----
