@@ -175,20 +175,7 @@ const LOCAL_I18N = {
   'set.space.kindIntro': { 'zh-TW': '開場', 'zh-CN': '开场', 'ja': 'オープニング', 'en': 'Intro', 'ko': '오프닝' },
   'set.space.kindLobby': { 'zh-TW': '大廳', 'zh-CN': '大厅', 'ja': 'ホール', 'en': 'Lobby', 'ko': '로비' },
   'set.space.kindVoice': { 'zh-TW': '語音', 'zh-CN': '语音', 'ja': 'ボイス', 'en': 'Voice', 'ko': '보이스' },
-  'set.space.search':     { 'zh-TW': '搜尋資源包…', 'zh-CN': '搜索资源包…', 'ja': 'パックを検索…', 'en': 'Search packs…', 'ko': '팩 검색…' },
-  'set.space.sortName':   { 'zh-TW': '名稱', 'zh-CN': '名称', 'ja': '名前', 'en': 'Name', 'ko': '이름' },
-  'set.space.sortSize':   { 'zh-TW': '大小↓', 'zh-CN': '大小↓', 'ja': 'サイズ↓', 'en': 'Size↓', 'ko': '크기↓' },
-  'set.space.verify':     { 'zh-TW': '檢查完整性', 'zh-CN': '检查完整性', 'ja': '整合性チェック', 'en': 'Verify integrity', 'ko': '무결성 검사' },
-  'set.space.verifyOk':   { 'zh-TW': '全部完整 ✓', 'zh-CN': '全部完整 ✓', 'ja': 'すべて正常 ✓', 'en': 'All intact ✓', 'ko': '모두 정상 ✓' },
-  'set.space.brokenFound':{ 'zh-TW': '{n} 個包缺檔，已加入待下載', 'zh-CN': '{n} 个包缺文件，已加入待下载', 'ja': '{n} 個のパックに欠損、再DL対象に追加', 'en': '{n} pack(s) incomplete, queued for download', 'ko': '{n}개 팩 손상, 다운로드 대기열에 추가' },
-  'set.space.files':      { 'zh-TW': '{n} 檔', 'zh-CN': '{n} 个文件', 'ja': '{n} ファイル', 'en': '{n} files', 'ko': '{n}개 파일' },
-  'set.space.usedBy':     { 'zh-TW': '{n} 個大廳使用', 'zh-CN': '{n} 个大厅使用', 'ja': '{n} ホールが使用', 'en': 'Used by {n} lobbies', 'ko': '{n}개 로비에서 사용' },
-  'set.space.broken':     { 'zh-TW': '缺檔', 'zh-CN': '缺文件', 'ja': '欠損', 'en': 'broken', 'ko': '손상됨' },
-  'set.space.delLobbies': { 'zh-TW': '刪全部大廳包', 'zh-CN': '删全部大厅包', 'ja': 'ホール全削除', 'en': 'Delete all lobby packs', 'ko': '로비 팩 전체 삭제' },
-  'set.space.delOtherVoice': { 'zh-TW': '刪另一語言語音', 'zh-CN': '删另一语言语音', 'ja': '他言語ボイス削除', 'en': 'Delete other-language voices', 'ko': '다른 언어 보이스 삭제' },
-  'set.space.confirmAll': { 'zh-TW': '確定刪除 {n} 個包（約 {size}）？', 'zh-CN': '确定删除 {n} 个包（约 {size}）？', 'ja': '{n} 個のパック（約 {size}）を削除しますか？', 'en': 'Delete {n} packs (≈ {size})?', 'ko': '팩 {n}개(약 {size})를 삭제할까요?' },
-  'set.space.orphans':    { 'zh-TW': '無主檔 {n} 個', 'zh-CN': '无主文件 {n} 个', 'ja': '孤立ファイル {n} 個', 'en': '{n} orphaned file(s)', 'ko': '고아 파일 {n}개' },
-  'set.space.cleanOrphans': { 'zh-TW': '清除', 'zh-CN': '清除', 'ja': '削除', 'en': 'Clean', 'ko': '정리' },
+  // set.space.* 其餘字串已併入 assets/ui/ui_i18n.json（單一來源），此處不再重複。
 };
 
 function t(key, params) {
@@ -3751,6 +3738,7 @@ function renderSpaceSummary() {
   if (!_spaceInfo || !_spaceInfo.packs?.length) {
     setSpaceSummary.textContent = t('set.space.empty');
     if (setSpaceList) setSpaceList.innerHTML = '';
+    renderSpaceMissing();
     const or = document.getElementById('setSpaceOrphanRow');
     if (or) or.style.display = 'none';
     return;
@@ -3764,17 +3752,110 @@ function renderSpaceSummary() {
   if (ot) ot.textContent = t('set.space.orphans', { n: orphans });
 }
 
+function spacePackName(p) {
+  const key = p.key || '';
+  const human = (rec, fb) =>
+    (rec && (rec[langField(langMode)] || rec.name_tw || rec.name_en || rec.name_jp)) || fb;
+  if (p.kind === 'lobby') {
+    const lk = key.replace(/^lobby\//, '');
+    const rec = (typeof studentForLobby === 'function') ? studentForLobby(lk) : null;
+    const title = human(rec, prettyName(lk));
+    return { title, sub: (title === key || title === lk) ? '' : key };
+  }
+  if (p.kind === 'voice') {
+    const f = key.replace(/^voice\//, '').replace(/^(JP|KR|CN|EN|TW)_/i, '');
+    const rec = (typeof studentForLobby === 'function') ? studentForLobby(f) : null;
+    const title = human(rec, prettyName(f));
+    return { title, sub: (title === key) ? '' : key };
+  }
+  return { title: p.name || key, sub: '' };
+}
+
+// ---- 儲存空間：未下載大廳（逐一下載） ----
+const _spaceDownloading = new Set(); // 下載中的 lobbyKey
+function spaceMissingLobbies() {
+  const out = [];
+  try {
+    const lobs = _settingsAssetInfo?.lobbies || {};
+    const installed = new Set((_spaceInfo?.packs || []).map(p => p.key));
+    for (const key of (ORDER || [])) {
+      try {
+        if (lobbyGroupInfo(key).isDup) continue; // 資源複本不顯示
+      } catch { continue; }
+      // 只看當前語音語言需要的包（另一語言的 voice 包本來就不會下載，不算缺）
+      const wantKr = String(typeof voiceLang !== 'undefined' ? voiceLang : '').toLowerCase() === 'kr';
+      const need = (lobs[key]?.packs || []).filter((pk) => {
+        if (!String(pk).startsWith('voice/')) return true;
+        return wantKr ? !pk.startsWith('voice/JP_') : !pk.startsWith('voice/KR_');
+      });
+      if (!need.length) continue;
+      if (need.some(pk => !installed.has(pk))) out.push(key);
+    }
+  } catch {}
+  return out;
+}
+function spaceLobbyDisplay(key) {
+  let info = null;
+  try { info = lobbyGroupInfo(key); } catch {}
+  const rec = (typeof studentForLobby === 'function') ? studentForLobby(key) : null;
+  const base = (typeof studentDisplay === 'function' ? studentDisplay(rec) : null) || prettyName(key);
+  const v = (info && info.labels.length) ? `（${info.labels.join('・')}）` : '';
+  return base + v;
+}
+function renderSpaceMissing() {
+  const wrap = document.getElementById('setSpaceMissingWrap');
+  const head = document.getElementById('setSpaceMissingHead');
+  const box = document.getElementById('setSpaceMissing');
+  if (!wrap || !head || !box) return;
+  const all = spaceMissingLobbies();
+  const q = (_spaceQuery || '').toLowerCase();
+  const miss = all
+    .filter(k => !q || k.toLowerCase().includes(q) || spaceLobbyDisplay(k).toLowerCase().includes(q))
+    .sort((a, b) => spaceLobbyDisplay(a).localeCompare(spaceLobbyDisplay(b), undefined, { sensitivity: 'base' }));
+  if (!all.length) { wrap.style.display = 'none'; box.innerHTML = ''; return; }
+  wrap.style.display = '';
+  head.textContent = t('set.space.notDownloaded', { n: all.length });
+  box.innerHTML = miss.map(k => {
+    const busy = _spaceDownloading.has(k);
+    return `<div class="spaceRow"><div class="spaceMain">`
+      + `<span class="spaceName">${escapeHtml(spaceLobbyDisplay(k))}</span>`
+      + `<span class="spaceKey">${escapeHtml(k)}</span></div>`
+      + `<button class="btnTxt spaceDl" data-key="${escapeHtml(k)}"${busy ? ' disabled' : ''}>`
+      + `${busy ? t('set.space.downloading') : t('set.space.download')}</button></div>`;
+  }).join('') || `<div style="font-size:12px;color:#7f8ac0;padding:8px;">${t('set.space.empty')}</div>`;
+  for (const btn of box.querySelectorAll('.spaceDl')) {
+    btn.addEventListener('click', async () => {
+      const key = btn.dataset.key;
+      if (!key || _spaceDownloading.has(key)) return;
+      _spaceDownloading.add(key);
+      renderSpaceMissing();
+      try { await ensureLobbyAssets(key); }
+      catch (e) { console.warn('[space] 下載大廳失敗', key, e?.message); }
+      finally { _spaceDownloading.delete(key); }
+      _spaceBroken = {};
+      setSpaceMessage('');
+      await refreshSpaceManager();
+      await refreshSettingsAssets();
+    });
+  }
+}
+
 function renderSpaceList() {
   if (!setSpaceList || !_spaceInfo) return;
   const usedBy = spaceUsedBy();
   const q = (_spaceQuery || '').toLowerCase();
-  let packs = (_spaceInfo.packs || []).filter((p) =>
-    !q || p.key.toLowerCase().includes(q) || p.name.toLowerCase().includes(q));
+  let packs = (_spaceInfo.packs || []).filter((p) => {
+    if (!q) return true;
+    const dn = spacePackName(p);
+    return p.key.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)
+        || dn.title.toLowerCase().includes(q);
+  });
   packs = [...packs].sort((a, b) => _spaceSort === 'name'
-    ? a.key.localeCompare(b.key)
+    ? spacePackName(a).title.localeCompare(spacePackName(b).title, undefined, { sensitivity: 'base' })
     : (b.size - a.size) || a.key.localeCompare(b.key));
   let html = '';
   for (const p of packs) {
+    const dn = spacePackName(p);
     const delBtn = p.deletable
       ? `<button class="spaceDel" data-key="${p.key}" data-i18n-title="set.space.delete" title="刪除">✕</button>`
       : `<span class="spaceLock" data-i18n-title="set.space.locked" title="必要資源">🔒</span>`;
@@ -3786,9 +3867,10 @@ function renderSpaceList() {
     ].filter(Boolean).join(' · ');
     html += `<div class="spaceRow">
       <div class="spaceMain">
-        <span class="spaceName">${escapeHtml(p.name)}</span>
+        <span class="spaceName">${escapeHtml(dn.title)}</span>
         <span class="spaceKind">${spaceKindLabel(p.kind)}</span>
         ${broken}
+        ${dn.sub ? `<span class="spaceKey">${escapeHtml(dn.sub)}</span>` : ''}
         ${meta ? `<span class="spaceMeta">${escapeHtml(meta)}</span>` : ''}
         ${p.present ? '' : `<span class="warn" style="font-size:10px;">⚠</span>`}
       </div>
@@ -3797,6 +3879,7 @@ function renderSpaceList() {
     </div>`;
   }
   setSpaceList.innerHTML = html || `<div style="font-size:12px;color:#7f8ac0;padding:8px;">${t('set.space.empty')}</div>`;
+  renderSpaceMissing();
   for (const btn of setSpaceList.querySelectorAll('.spaceDel')) {
     btn.addEventListener('click', async () => {
       const key = btn.dataset.key;
@@ -4699,9 +4782,15 @@ function renderInfoPanel() {
       div.className = 'line';
       div.dataset.vid = ln.id;
       // 播放鈕只在每組第一句（同 canonical clip＝同組；孤句自成一組），
-      // 放框右邊讓句首對齊
+      // 放框右邊讓句首對齊；組與組之間加分割線（首組之前不加）
       const gkey = previewGroupFor(ln.id).key;
       const isFirst = !seenGroups.has(gkey);
+      if (seenGroups.size > 0 && isFirst) {
+        const sep = document.createElement('div');
+        sep.className = 'gsep';
+        sep.setAttribute('aria-hidden', 'true');
+        infoLines.appendChild(sep);
+      }
       seenGroups.add(gkey);
       const no = document.createElement('span');
       no.className = 'no';
@@ -5549,6 +5638,7 @@ async function loadLobby(name) {
     setupInteraction();
     app.stage.addChild(spine);
     currentLobby = name;
+    try { localStorage.setItem('ba_lastLobby', name); } catch {}
   } catch (e) {
     showErr(t('msg.loadFail', { name, err: e.message }));
     loadingEl.classList.remove('show');
@@ -6229,10 +6319,27 @@ async function showAssetDownload(assetInfo) {
   btn.style.display = 'none';
 
   return new Promise((resolve) => {
+    const cancelBtn = document.getElementById('assetBtnCancel');
+    let userCancelled = false;
+    const showChoice = () => {
+      if (choiceRow) choiceRow.style.display = 'flex';
+      btn.style.display = 'none';
+      progress.style.display = 'none';
+      if (cancelBtn) cancelBtn.style.display = 'none';
+      status.textContent = '';
+      detail.textContent = '';
+    };
+    if (cancelBtn) cancelBtn.onclick = async () => {
+      userCancelled = true;
+      cancelBtn.disabled = true;
+      try { await window.ba.cancelDownload?.(); } catch {}
+    };
     const runDownload = async (streaming) => {
       if (choiceRow) choiceRow.style.display = 'none';
       btn.style.display = 'none';
       progress.style.display = 'block';
+      userCancelled = false;
+      if (cancelBtn) { cancelBtn.style.display = 'inline-block'; cancelBtn.disabled = false; }
       fill.style.width = '0%';
       pctText.textContent = '0%';
       try { await window.ba?.setStreamingMode?.(streaming); } catch {}
@@ -6258,12 +6365,23 @@ async function showAssetDownload(assetInfo) {
       const pkgs = streaming
         ? Object.fromEntries(quickNames.map((k) => [k, assetInfo.packages[k]]).filter(([, v]) => v))
         : assetInfo.packages;
-      const results = await window.ba.downloadAssets({ version, packages: pkgs, voice: voiceLang });
+      let results = null;
+      try {
+        results = await window.ba.downloadAssets({ version, packages: pkgs, voice: voiceLang });
+      } catch (e) {
+        results = [{ name: '', ok: false, error: e?.message || String(e) }];
+      }
+      if (cancelBtn) cancelBtn.style.display = 'none';
+
+      // 使用者主動取消：回到二選一，不當成失敗
+      if (userCancelled) { showChoice(); return; }
 
       // 有包失敗（如 release 缺檔 404）：顯示錯誤並保留面板讓使用者重試，
       // 不關閉面板、不 resolve（避免半套資源被當成安裝完成）。
       if (Array.isArray(results) && results.some(r => !r.ok)) {
         const failed = results.filter(r => !r.ok);
+        // 取消競態：若失敗全是 cancelled 也視為取消
+        if (failed.length && failed.every(r => r.error === 'cancelled')) { showChoice(); return; }
         status.textContent = t('dl.failed');
         detail.textContent = t('dl.failedDetail', { n: failed.length, err: failed[0]?.error || '' });
         btn.textContent = t('dl.retry');
@@ -6751,7 +6869,16 @@ async function onSpaceVerify() {
 
   if (ORDER.length) {
     const m = location.hash.match(/[?#]lobby=([^&]+)/);
-    const first = m && LOBBY_INDEX[m[1]] ? m[1] : ORDER[0];
+    // 開機 lobby：deep-link > 上次看的（localStorage）> index 首位。
+    // 自動化（autostart/PROBE）固定走首位，保證 determinism。
+    const auto = /autostart=1|PROBE=1/.test(location.search + location.hash);
+    let remembered = null;
+    if (!auto) {
+      try { remembered = localStorage.getItem('ba_lastLobby'); } catch {}
+    }
+    const first = (m && LOBBY_INDEX[m[1]])
+      ? m[1]
+      : (remembered && LOBBY_INDEX[remembered] ? remembered : ORDER[0]);
     await loadLobby(first);
   } else {
     showErr(t('msg.emptyIndex'));

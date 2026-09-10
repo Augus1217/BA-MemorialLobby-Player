@@ -334,6 +334,7 @@
     .spaceMain { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
     .spaceName { color: #e8ecff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .spaceKind { font-size: 10px; color: #7f8ac0; flex-shrink: 0; }
+    .spaceKey { font-size: 10px; color: #5b6494; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
     .spaceMeta { font-size: 10px; color: #7f8ac0; flex-shrink: 0; }
     .spaceBroken { font-size: 10px; color: #e8c268; flex-shrink: 0; }
     .spaceSize { color: #9aa4e0; font-variant-numeric: tabular-nums; flex-shrink: 0; }
@@ -549,6 +550,10 @@
     .info-intro { font-size: 13.5px; line-height: 1.85; white-space: pre-line; color: #eef1ff; }
     .info-intro:empty { display: none; }
     .info-lines { display: flex; flex-direction: column; gap: 8px; }
+    .info-lines .gsep {
+      height: 1px; margin: 4px 4px 0;
+      background: linear-gradient(90deg, transparent, rgba(169,182,255,.35), transparent);
+    }
     .info-lines .line {
       position: relative;
       display: flex; align-items: center; gap: 8px;
@@ -915,6 +920,10 @@
         <button id="setSpaceCleanOrphans" class="btnTxt" data-i18n="set.space.cleanOrphans">清除</button>
       </div>
       <div id="setSpaceList" style="margin-top:8px; max-height:46vh; overflow-y:auto;"></div>
+      <details id="setSpaceMissingWrap" style="margin-top:8px; display:none;">
+        <summary id="setSpaceMissingHead" style="font-size:12px; color:#9aa4e0; cursor:pointer;"></summary>
+        <div id="setSpaceMissing" style="margin-top:4px; max-height:30vh; overflow-y:auto;"></div>
+      </details>
     </div>
 
     <div id="setTabAbout" style="display:none;">
@@ -974,6 +983,7 @@
         <button id="assetBtnQuick" class="btnTxt" data-i18n="dl.quickStart">先進大廳</button>
       </div>
       <button id="assetBtn" class="btnTxt primary" style="display:none" data-i18n="dl.start">開始下載</button>
+      <button id="assetBtnCancel" class="btnTxt" style="display:none; margin-top:8px;" data-i18n="dl.cancel">取消</button>
     </div>
   </div>
 
