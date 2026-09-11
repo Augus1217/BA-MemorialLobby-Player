@@ -47,6 +47,7 @@ const btnCtlFull = document.getElementById('btnCtlFull');
 const btnCtlFocus = document.getElementById('btnCtlFocus');
 const btnCtlExport = document.getElementById('btnCtlExport');
 const btnCtlSettings = document.getElementById('btnCtlSettings');
+const btnCtlRank = document.getElementById('btnCtlRank');
 const btnCtlVignette = document.getElementById('btnCtlVignette');
 const ctlVoiceSegs = document.getElementById('ctlVoiceSegs');
 const fxEl = document.getElementById('fx');
@@ -63,6 +64,8 @@ const expTalkSel = document.getElementById('expTalkSel');
 const expCustomRow = document.getElementById('expCustomRow');
 const expCustomW = document.getElementById('expCustomW');
 const expCustomH = document.getElementById('expCustomH');
+const expFpsR = document.getElementById('expFpsR');
+const expFpsN = document.getElementById('expFpsN');
 const recBadge = document.getElementById('recBadge');
 const recTime = document.getElementById('recTime');
 const recDur = document.getElementById('recDur');
@@ -217,6 +220,7 @@ const CTL_I18N = {
   focus:     { 'zh-TW': '專注模式',      'zh-CN': '专注模式',  'ja': 'フォーカスモード',    'en': 'Focus mode',           'ko': '집중 모드' },
   export:    { 'zh-TW': '匯出影片',      'zh-CN': '导出视频',  'ja': '動画を書き出す',      'en': 'Export video',         'ko': '영상 내보내기' },
   settings:  { 'zh-TW': '設定',          'zh-CN': '设置',      'ja': '設定',                'en': 'Settings',             'ko': '설정' },
+  rank:      { 'zh-TW': '人氣排行',      'zh-CN': '人气排行',  'ja': '人気ランキング',      'en': 'Top lobbies',          'ko': '인기 순위' },
   vignette:  { 'zh-TW': '電影燈光效果',  'zh-CN': '电影灯光效果', 'ja': '映画ライト効果',    'en': 'Cinematic lighting',   'ko': '시네마 조명 효과' },
   voiceLang: { 'zh-TW': '語音',          'zh-CN': '语音',      'ja': 'ボイス',              'en': 'Voice',                'ko': '보이스' },
   voiceJp:   { 'zh-TW': '日文',          'zh-CN': '日文',      'ja': '日本語',              'en': 'JP',                   'ko': '일본어' },
@@ -238,6 +242,7 @@ function applyCtlI18n() {
   setLabel('bgm', btnCtlBgm);
   setLabel('export', btnCtlExport);
   setLabel('settings', btnCtlSettings);
+  setLabel('rank', btnCtlRank);
   setLabel('focus', btnCtlFocus);
   setLabel('vignette', btnCtlVignette);
   const vl = document.getElementById('ctlVoiceLbl');
@@ -3402,6 +3407,7 @@ function segVal(id) {
   if (on.dataset.w !== undefined) return on.dataset.w;
   if (on.dataset.r !== undefined) return on.dataset.r;
   if (on.dataset.k !== undefined) return on.dataset.k;
+  if (on.dataset.ratio !== undefined) return on.dataset.ratio;
   return on.dataset.fmt;
 }
 
@@ -3420,6 +3426,8 @@ function openExportPanel() {
   }
   expTalkSel.disabled = talks.length === 0;
   updateClipUI();
+  // 開面板：W 取目前渲染寬、H 按比例重算（16:9 視窗即原「目前視窗」行為）
+  try { expCustomW.value = Math.round(app.renderer.width || 1920); } catch {}
   updateResUI();
   exportPanel.classList.add('open');
 }
@@ -3808,7 +3816,13 @@ function spaceMissingLobbies() {
         return wantKr ? !pk.startsWith('voice/JP_') : !pk.startsWith('voice/KR_');
       });
       if (!need.length) continue;
-      if (need.some(pk => !installed.has(pk))) out.push(key);
+      const missing = need.filter(pk => !installed.has(pk));
+      if (!missing.length) continue;
+      // 待下載量：manifest 標稱大小加總（與上表同欄位對齊用）
+      const pkgs = _settingsAssetInfo?.packages || {};
+      let bytes = 0;
+      for (const pk of missing) bytes += pkgs[pk]?.size || 0;
+      out.push({ key, bytes });
     }
   } catch {}
   return out;
@@ -3829,16 +3843,20 @@ function renderSpaceMissing() {
   const all = spaceMissingLobbies();
   const q = (_spaceQuery || '').toLowerCase();
   const miss = all
-    .filter(k => !q || k.toLowerCase().includes(q) || spaceLobbyDisplay(k).toLowerCase().includes(q))
-    .sort((a, b) => spaceLobbyDisplay(a).localeCompare(spaceLobbyDisplay(b), undefined, { sensitivity: 'base' }));
+    .filter(m => !q || m.key.toLowerCase().includes(q) || spaceLobbyDisplay(m.key).toLowerCase().includes(q))
+    .sort((a, b) => spaceLobbyDisplay(a.key).localeCompare(spaceLobbyDisplay(b.key), undefined, { sensitivity: 'base' }));
   if (!all.length) { wrap.style.display = 'none'; box.innerHTML = ''; return; }
   wrap.style.display = '';
   head.textContent = t('set.space.notDownloaded', { n: all.length });
-  box.innerHTML = miss.map(k => {
+  // 欄位與上表一致：名稱｜種類｜資訊｜大小｜操作
+  box.innerHTML = miss.map(m => {
+    const k = m.key;
     const busy = _spaceDownloading.has(k);
     return `<div class="spaceRow">`
       + `<span class="spaceName sg-cell">${escapeHtml(spaceLobbyDisplay(k))}</span>`
-      + `<span class="spaceKey sg-cell">${escapeHtml(k)}</span>`
+      + `<span class="spaceKind sg-cell">${spaceKindLabel('lobby')}</span>`
+      + `<span class="sg-cell sg-info"><span class="spaceKey">${escapeHtml(k)}</span></span>`
+      + `<span class="spaceSize sg-num">${m.bytes > 0 ? fmtBytes(m.bytes) : '—'}</span>`
       + `<span class="sg-act"><button class="btnTxt spaceDl" data-key="${escapeHtml(k)}"${busy ? ' disabled' : ''}>`
       + `${busy ? t('set.space.downloading') : t('set.space.download')}</button></span></div>`;
   }).join('') || `<div style="font-size:12px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('set.space.empty')}</div>`;
@@ -4033,44 +4051,43 @@ function showRecBadge(duration) {
 }
 function hideRecBadge() { recBadge.classList.remove('show'); }
 
-// 解析度：目前視窗 / 目前螢幕 / kivo 適應 / 自訂（輸出四捨五入到偶數，H.264 yuv420p）
+// 解析度：比例列（expRatio）＋常駐 W×H 輸入框連動。輸出四捨五入到偶數（H.264 yuv420p）。
 async function resolveExportSize() {
-  const mode = segVal('expRes') || 'win';
-  if (mode === 'win') return { w: app.renderer.width, h: app.renderer.height };
-  if (mode === 'screen') {
-    try {
-      const s = await window.ba.screenSize();
-      if (s && s.width && s.height) return { w: Math.round(s.width) & ~1, h: Math.round(s.height) & ~1 };
-    } catch (e) { console.warn('[anim] 讀取螢幕尺寸失敗', e); }
-    return { w: app.renderer.width, h: app.renderer.height };
-  }
-  if (mode === 'custom') {
-    const w = clamp(Math.round(+expCustomW.value || 0), 64, 7680);
-    const h = clamp(Math.round(+expCustomH.value || 0), 64, 4320);
-    if (!w || !h) return { w: app.renderer.width, h: app.renderer.height };
-    return { w: w & ~1, h: h & ~1 };
-  }
-  const s = await kivoFitSize();
-  return s && s.w && s.h ? { w: s.w & ~1, h: s.h & ~1 } : { w: app.renderer.width, h: app.renderer.height };
+  const w = clamp(Math.round(+expCustomW.value || 0), 64, 7680) & ~1;
+  const h = clamp(Math.round(+expCustomH.value || 0), 64, 4320) & ~1;
+  if (w > 0 && h > 0) return { w, h };
+  return { w: app.renderer.width, h: app.renderer.height };
 }
 
-// 匯出尺寸：視窗原生 backing store = innerWidth×devicePixelRatio。
-// （舊註解曾寫 kivo fill vw/3000——已證偽：kivo 檢視器根本沒有尺寸公式，
-// 3000 是前人拍腦袋的數；真機實測可見寬約 2300，見 charScale。）
-// kivo 適應＝最佳觀賞 4:3：以目前渲染寬為基準（人物大小不變），高度補到
-// 4:3——可視世界高回到 2175 單位、零黑邊（橫屏結論；見版面量測）。
-// 上限與自訂一致（寬 ≤7680、高 ≤4320），超過等比縮。
-async function kivoFitSize() {
-  try {
-    let w = Math.round(app.renderer.width || window.innerWidth || 1600);
-    let h = Math.round((w * 3) / 4);
-    if (w > 7680 || h > 4320) {
-      const k = Math.min(7680 / w, 4320 / h);
-      w = Math.round(w * k);
-      h = Math.round(h * k);
-    }
-    return { w: Math.max(64, w), h: Math.max(64, h) };
-  } catch (e) { return null; }
+// 比例連動：改一欄、另一欄按比例跟著變（偶數化＋上下限內再反推，保持比例精確）。
+function expRatioWH() {
+  const m = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(segVal('expRatio') || '16:9');
+  const a = m ? +m[1] : 16, b = m ? +m[2] : 9;
+  return (a > 0 && b > 0) ? [a, b] : [16, 9];
+}
+function fitExpSize(fromW = true) {
+  const [a, b] = expRatioWH();
+  if (fromW) {
+    let w = clamp(Math.round(+expCustomW.value || 0), 64, 7680);
+    let h = Math.round((w * b) / a);
+    if (h > 4320) { h = 4320; w = Math.round((h * a) / b); }
+    if (h < 64) { h = 64; w = Math.round((h * a) / b); }
+    expCustomW.value = w & ~1;
+    expCustomH.value = h & ~1;
+  } else {
+    let h = clamp(Math.round(+expCustomH.value || 0), 64, 4320);
+    let w = Math.round((h * a) / b);
+    if (w > 7680) { w = 7680; h = Math.round((w * b) / a); }
+    if (w < 64) { w = 64; h = Math.round((w * b) / a); }
+    expCustomW.value = w & ~1;
+    expCustomH.value = h & ~1;
+  }
+}
+function expFpsSet(v, src) {
+  v = clamp(Math.round(+v || 30), 10, 60);
+  if (src !== expFpsR && expFpsR) expFpsR.value = v;
+  if (src !== expFpsN && expFpsN) expFpsN.value = v;
+  return v;
 }
 
 // ---- 語音時間軸 ----
@@ -4278,7 +4295,7 @@ function drawExportBalloon(c2, vw, vh, line) {  if (!balloonImg || !balloonImg2)
 async function startAnimExport() {
   if (!spine || animActive || exporting) return;
   const clipType = exportClipType();
-  const fps = Math.min(60, Math.max(10, +segVal('expFps') || 30));
+  const fps = expFpsSet(expFpsN ? expFpsN.value : 30);
   const fmt = segVal('expFmt') || 'mp4';
   const withVoice = expVoice.checked;
   const withDialog = expDialog.checked;
@@ -4543,8 +4560,8 @@ function updateClipUI() {
   }
 }
 function updateResUI() {
-  const m = segVal('expRes') || 'win';
-  expCustomRow.style.display = m === 'custom' ? '' : 'none';
+  // 比例列切換 → 維持 W、重算 H
+  fitExpSize(true);
 }
 
 // ---- asset loading ----
@@ -6967,6 +6984,10 @@ async function init() {
 
   // ---- settings panel ----
   btnCtlSettings.addEventListener('click', toggleSettingsPanel);
+  if (btnCtlRank) btnCtlRank.addEventListener('click', () => {
+    toggleSettingsPanel(true);
+    switchSettingsTab('rank');
+  });
   setClose.addEventListener('click', toggleSettingsPanel);
   settingsBackdrop?.addEventListener('click', () => toggleSettingsPanel(false));
   document.getElementById('setTabBtnMain')?.addEventListener('click', () => switchSettingsTab('main'));
@@ -7141,7 +7162,7 @@ async function onSpaceVerify() {
     });
   } catch {}
 
-  for (const id of ['expClip', 'expRes', 'expFps', 'expFmt']) {
+  for (const id of ['expClip', 'expRatio', 'expFmt']) {
     const box = document.getElementById(id);
     box.addEventListener('click', (e) => {
       const b = e.target.closest('button');
@@ -7149,9 +7170,13 @@ async function onSpaceVerify() {
       for (const sib of box.children) sib.classList.remove('on');
       b.classList.add('on');
       if (id === 'expClip') updateClipUI();
-      if (id === 'expRes') updateResUI();
+      if (id === 'expRatio') updateResUI();
     });
   }
+  if (expCustomW) expCustomW.addEventListener('change', () => fitExpSize(true));
+  if (expCustomH) expCustomH.addEventListener('change', () => fitExpSize(false));
+  if (expFpsR) expFpsR.addEventListener('input', () => expFpsSet(expFpsR.value, expFpsR));
+  if (expFpsN) expFpsN.addEventListener('change', () => expFpsSet(expFpsN.value, expFpsN));
   expTalkSel.addEventListener('change', () => {});
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && exportPanel.classList.contains('open')) closeExportPanel();

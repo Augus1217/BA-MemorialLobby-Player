@@ -334,7 +334,7 @@
     .spaceRow { display: contents; }
     .spaceGrid { display: grid; column-gap: 10px; row-gap: 3px; align-items: center; }
     .sg-spaces { grid-template-columns: minmax(90px, 1.4fr) auto minmax(0, 2fr) auto 22px; }
-    .sg-missing { grid-template-columns: minmax(90px, 1.2fr) minmax(0, 1fr) auto; }
+    .sg-missing { grid-template-columns: minmax(90px, 1.4fr) auto minmax(0, 2fr) auto auto; }
     .sg-rank { grid-template-columns: 26px minmax(100px, 1.5fr) minmax(0, 1fr) auto auto auto; }
     .sg-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sg-num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; color: #9aa4e0; font-size: 11px; }
@@ -768,6 +768,7 @@
         <button id="btnCtlFocus" class="ctl-btn" title="專注模式"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.1"/><circle cx="12" cy="12" r="4.3"/><circle cx="12" cy="12" r="1.15" fill="currentColor" stroke="none"/></svg></span><span class="tt" data-ck="focus">專注模式</span></button>
         <button id="btnCtlExport" class="ctl-btn" title="匯出影片"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7.2" width="13.4" height="9.6" rx="2.4"/><circle cx="9.7" cy="12" r="2.6"/><path d="M16.4 10.2l4.6-2.2v8l-4.6-2.2"/></svg></span><span class="tt" data-ck="export">匯出影片</span></button>
         <button id="btnCtlSettings" class="ctl-btn" title="設定"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.4"/><path d="M12 3.5V7"/><path d="M20.5 12H17"/><path d="M3.5 12H7"/><path d="M12 20.5V17"/><path d="M6.2 6.2l2.3 2.3"/><path d="M17.8 6.2l-2.3 2.3"/><path d="M6.2 17.8l2.3-2.3"/><path d="M17.8 17.8l-2.3-2.3"/></svg></span><span class="tt" data-ck="settings">設定</span></button>
+        <button id="btnCtlRank" class="ctl-btn" title="人氣排行"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v4.5a5 5 0 0 1-10 0V4z"/><path d="M7 5.5H4.5a2.6 2.6 0 0 0 2.7 4.6M17 5.5h2.5a2.6 2.6 0 0 1-2.7 4.6"/><path d="M12 13.5V17M8.5 20h7M10 17.2h4"/></svg></span><span class="tt" data-ck="rank">人氣排行</span></button>
         <button id="btnCtlVignette" class="ctl-btn" title="電影燈光效果"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><path d="M12 3.8a8.2 8.2 0 0 1 0 16.4z" fill="currentColor" stroke="none" opacity=".4"/></svg></span><span class="tt" data-ck="vignette">電影燈光效果</span></button>
       </div>
       <div class="ctl-sep"></div>
@@ -817,21 +818,20 @@
       <span class="lbl" data-i18n="exp.talkClip">Talk clip</span>
       <select id="expTalkSel"></select>
     </div>
-    <div class="panel-row"><span class="lbl" data-i18n="exp.res">解析度</span>
-      <div class="segs" id="expRes">
-        <button data-r="win" class="on" data-i18n="exp.resWin">目前視窗</button><button data-r="screen" data-i18n="exp.resScreen">目前螢幕</button><button data-r="kivo" data-i18n="exp.resKivo">kivo 適應</button><button data-r="custom" data-i18n="exp.resCustom">自訂</button>
+    <div class="panel-row"><span class="lbl" data-i18n="exp.ratio">比例</span>
+      <div class="segs" id="expRatio">
+        <button data-ratio="16:9" class="on">16:9</button><button data-ratio="16:10">16:10</button><button data-ratio="4:3">4:3</button><button data-ratio="3:2">3:2</button><button data-ratio="21:9">21:9</button><button data-ratio="1:1">1:1</button>
       </div>
     </div>
-    <div class="panel-row" id="expCustomRow" style="display:none">
-      <span class="lbl" data-i18n="exp.custom">自訂</span>
+    <div class="panel-row" id="expCustomRow">
+      <span class="lbl" data-i18n="exp.res">解析度</span>
       <input type="number" id="expCustomW" min="64" max="7680" value="1920" />
       <span class="lbl">×</span>
       <input type="number" id="expCustomH" min="64" max="4320" value="1080" />
     </div>
     <div class="panel-row"><span class="lbl" data-i18n="exp.fps">幀率</span>
-      <div class="segs" id="expFps">
-        <button data-v="30" class="on">30</button><button data-v="60">60</button>
-      </div>
+      <input type="range" id="expFpsR" min="10" max="60" step="1" value="30" style="flex:1; min-width:120px; accent-color:#7f8ac0;" />
+      <input type="number" id="expFpsN" min="10" max="60" step="1" value="30" style="width:64px; flex:none;" />
     </div>
     <div class="panel-row"><span class="lbl" data-i18n="exp.fmt">格式</span>
       <div class="segs" id="expFmt">
@@ -970,7 +970,7 @@
         <span data-i18n="set.officialDl">官方遊戲下載：</span>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px;">
           <a href="https://play.google.com/store/apps/details?id=com.nexon.bluearchive" target="_blank" rel="noopener"><img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" height="64"></a>
-          <a href="https://apps.apple.com/us/app/blue-archive/id1571873795?itscg=30200&itsct=apps_box_badge&mttnsubad=1571873795" target="_blank" rel="noopener" style="display:inline-block;"><img src="https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us?releaseDate=1636243200" alt="Download on the App Store" style="width:175px; height:59px; vertical-align:middle; object-fit:contain;"></a>
+          <a href="https://apps.apple.com/us/app/blue-archive/id1571873795?itscg=30200&itsct=apps_box_badge&mttnsubad=1571873795" target="_blank" rel="noopener" style="display:inline-block;"><img src="https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us?releaseDate=1636243200" alt="Download on the App Store" style="height:64px; width:auto; vertical-align:middle; object-fit:contain;"></a>
         </div>
         <div id="steamWidgetWrap" style="margin-top:10px; width:100%; overflow:hidden;">
           <iframe id="steamWidget" src="https://store.steampowered.com/widget/3557620/" frameborder="0" width="646" height="190" style="transform-origin:top left;"></iframe>
