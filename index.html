@@ -331,11 +331,15 @@
     .spaceToolbar .btnTxt { padding: 7px 14px; font-size: 12px; }
     #setSpaceMsg { font-size: 12px; color: #8fd49c; margin: 4px 0; min-height: 0; }
     #setSpaceMsg.warn { color: #e8c268; }
-    .spaceRow {
-      display: flex; align-items: center; gap: 8px; padding: 5px 8px;
-      border-radius: 6px; font-size: 12px;
-    }
-    .spaceRow:hover { background: rgba(255,255,255,.06); }
+    .spaceRow { display: contents; }
+    .spaceGrid { display: grid; column-gap: 10px; row-gap: 3px; align-items: center; }
+    .sg-spaces { grid-template-columns: minmax(90px, 1.4fr) auto minmax(0, 2fr) auto 22px; }
+    .sg-missing { grid-template-columns: minmax(90px, 1.2fr) minmax(0, 1fr) auto; }
+    .sg-rank { grid-template-columns: 26px minmax(100px, 1.5fr) minmax(0, 1fr) auto auto auto; }
+    .sg-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sg-num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; color: #9aa4e0; font-size: 11px; }
+    .sg-act { display: flex; align-items: center; justify-content: center; }
+    .sg-empty { grid-column: 1 / -1; }
     .spaceMain { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
     .spaceName { color: #e8ecff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .spaceKind { font-size: 11px; color: #9aa4e0; flex-shrink: 0; }
@@ -937,10 +941,10 @@
         <span id="setSpaceOrphans" style="font-size:12px; color:#c6d2f5;"></span>
         <button id="setSpaceCleanOrphans" class="btnTxt" data-i18n="set.space.cleanOrphans">清除</button>
       </div>
-      <div id="setSpaceList" style="margin-top:8px; max-height:46vh; overflow-y:auto;"></div>
+      <div id="setSpaceList" class="spaceGrid sg-spaces" style="margin-top:8px; max-height:46vh; overflow-y:auto;"></div>
       <details id="setSpaceMissingWrap" style="margin-top:8px; display:none;">
         <summary id="setSpaceMissingHead" style="font-size:12px; color:#9aa4e0; cursor:pointer;"></summary>
-        <div id="setSpaceMissing" style="margin-top:4px; max-height:30vh; overflow-y:auto;"></div>
+        <div id="setSpaceMissing" class="spaceGrid sg-missing" style="margin-top:4px; max-height:30vh; overflow-y:auto;"></div>
       </details>
     </div>
 
@@ -953,7 +957,7 @@
         <button id="setRankRefresh" class="btnTxt" data-i18n="set.rankRefresh">重新整理</button>
       </div>
       <div id="setRankSummary" style="font-size:13px; color:#c6d2f5; margin:6px 0;"></div>
-      <div id="setRankList" style="margin-top:4px; max-height:46vh; overflow-y:auto;"></div>
+      <div id="setRankList" class="spaceGrid sg-rank" style="margin-top:4px; max-height:46vh; overflow-y:auto;"></div>
       <div style="margin-top:8px; font-size:12px; color:#9aa4e0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <span data-i18n="set.rankFoot">開啟使用統計來參與排行，讓榜單更準。</span>
         <button id="setRankJoin" class="btnTxt" data-i18n="set.rankJoin">去開啟</button>
