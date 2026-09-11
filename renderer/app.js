@@ -7192,6 +7192,34 @@ async function onSpaceVerify() {
 
 // Headless self-test: with PROBE=1 the renderer dumps i18n state to the console
 // (main relays [renderer] lines). Must run before CAPTURE_DELAY elapses.
+// LAYOUT=1 附加：暴露即時版面數值供多比例量測（charScale/sceneScale/黑邊）。
+if (/LAYOUT=1/.test(location.search + location.hash)) {
+  window.__layout = () => {
+    const bar = (id) => {
+      const el = document.getElementById(id);
+      if (!el || el.style.display === 'none') return 0;
+      return Math.round(parseFloat(el.style.width || el.style.height || 0));
+    };
+    let spineBox = null;
+    try {
+      const b = spine ? spine.getBounds() : null;  // pixi 全域（螢幕像素）包圍盒
+      if (b && b.maxX > b.minX && b.maxY > b.minY) {
+        spineBox = {
+          x: Math.round(b.minX), y: Math.round(b.minY),
+          w: Math.round(b.maxX - b.minX), h: Math.round(b.maxY - b.minY),
+        };
+      }
+    } catch {}
+    return {
+      vw: app.renderer.width, vh: app.renderer.height,
+      lobby: currentLobby,
+      charScale, sceneScale, cameraTargetY,
+      spinePos: spine ? { x: Math.round(spine.x), y: Math.round(spine.y) } : null,
+      spineBox,   // 螢幕像素包圍盒（世界包圍盒 × charScale）
+      bars: { top: bar('lbTop'), bottom: bar('lbBottom'), left: bar('lbLeft'), right: bar('lbRight') },
+    };
+  };
+}
 if (/PROBE=1/.test(location.search + location.hash)) {
   // 可選：PROBE 加 cursorOff=1 預置 ba_cursor=0，驗證游標關閉 class
   if (/cursorOff=1/.test(location.search + location.hash)) {
