@@ -3681,6 +3681,7 @@ function syncSettingsEffectCks() {
   if (setCursorCk) setCursorCk.checked = settingsPref('ba_cursor', true);
   if (setClickFxCk) setClickFxCk.checked = settingsPref('ba_clickfx', true);
   if (setJpOnlyCk) setJpOnlyCk.checked = settingsPref('ba_jpOnly', true);
+  if (setStatsCk) setStatsCk.checked = statsEnabled();
 }
 
 // ---- 管理空間（已下載資源包檢視 + 刪除 + 完整性 + 孤兒清理）----
@@ -5531,6 +5532,108 @@ function unloadLobbyAssets(lobbyName) {
   for (const k of spineCacheKeys) { try { if (Cache.has(k)) Cache.remove(k); } catch {} }
 }
 
+// ---- 匿名使用統計（opt-in，預設關） ----
+// 只記「lobby 看幾次、共幾秒」，每日彙總一次 POST 到 Worker D1；
+// installId 是本地隨機 UUID（可重置），server 只存其 pepper 雜湊，不存 IP/UA。
+const STATS_URL = 'https://ba-assets.imlindora.workers.dev/api/stats';
+const setStatsCk = document.getElementById('setStatsCk');
+function statsEnabled() {
+  try { return localStorage.getItem('ba_stats_optin') === '1'; } catch { return false; }
+}
+function statsInstallId(create = true) {
+  try {
+    let id = localStorage.getItem('ba_install_id');
+    if (!id && create) {
+      id = (crypto?.randomUUID
+        ? crypto.randomUUID()
+        : 'id-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+      localStorage.setItem('ba_install_id', id);
+    }
+    return id || null;
+  } catch { return null; }
+}
+function statsLocalDate(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function statsLoadPending() {
+  try {
+    const p = JSON.parse(localStorage.getItem('ba_stats_pending') || 'null');
+    if (p && typeof p === 'object' && p.dates && typeof p.dates === 'object') return p;
+  } catch {}
+  return { dates: {} };
+}
+function statsSavePending(p) {
+  try {
+    const ks = Object.keys(p.dates || {}).sort();
+    while (ks.length > 8) delete p.dates[ks.shift()]; // 最多留 8 天
+    localStorage.setItem('ba_stats_pending', JSON.stringify(p));
+  } catch {}
+}
+let _statsLobby = null, _statsLobbySince = 0;
+function statsSettle() {
+  // 結算當前 lobby 的秒數（不算一次進入）
+  if (!statsEnabled()) { _statsLobby = null; return; }
+  if (!_statsLobby) return;
+  const secs = Math.floor((Date.now() - _statsLobbySince) / 1000);
+  _statsLobbySince = Date.now();
+  if (secs <= 0) return;
+  const p = statsLoadPending();
+  const day = statsLocalDate();
+  const d = p.dates[day] || (p.dates[day] = {});
+  const e = d[_statsLobby] || (d[_statsLobby] = { views: 0, seconds: 0 });
+  e.seconds = Math.min(86400, (e.seconds || 0) + secs);
+  statsSavePending(p);
+}
+function statsEnterLobby(name) {
+  statsSettle();
+  _statsLobby = null;
+  if (!name || !statsEnabled()) return;
+  _statsLobby = name;
+  _statsLobbySince = Date.now();
+  const p = statsLoadPending();
+  const day = statsLocalDate();
+  const d = p.dates[day] || (p.dates[day] = {});
+  const e = d[name] || (d[name] = { views: 0, seconds: 0 });
+  e.views = Math.min(10000, (e.views || 0) + 1);
+  statsSavePending(p);
+}
+async function statsFlush(useBeacon = false) {
+  // 只送「今天以前」的完整天；今天的繼續累積（server 端 REPLACE，冪等重送安全）
+  if (!statsEnabled()) return;
+  const id = statsInstallId(false);
+  if (!id) return;
+  const p = statsLoadPending();
+  const today = statsLocalDate();
+  const days = Object.keys(p.dates || {}).filter((d) => d < today).sort();
+  for (const day of days) {
+    const entries = Object.entries(p.dates[day] || {})
+      .filter(([, v]) => v && ((v.views || 0) > 0 || (v.seconds || 0) > 0))
+      .map(([lobby, v]) => ({ lobby, views: v.views || 0, seconds: v.seconds || 0 }));
+    if (!entries.length) { delete p.dates[day]; continue; }
+    const payload = JSON.stringify({ installId: id, date: day, entries });
+    let ok = false;
+    try {
+      if (useBeacon && navigator.sendBeacon) {
+        ok = navigator.sendBeacon(STATS_URL, new Blob([payload], { type: 'application/json' }));
+      } else {
+        const r = await fetch(STATS_URL, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: payload, keepalive: true,
+        });
+        ok = r.ok;
+      }
+    } catch { ok = false; }
+    if (ok) delete p.dates[day];
+    else break; // 網路不行就留著下次送
+  }
+  statsSavePending(p);
+}
+// 離開頁面：結算秒數＋嘗試送出完整天；平時每 5 分鐘結算＋送（跨日時順便送出昨天）
+window.addEventListener('pagehide', () => { statsSettle(); statsFlush(true); });
+setInterval(() => { statsSettle(); statsFlush(false); }, 5 * 60 * 1000);
+setTimeout(() => { statsFlush(false); }, 45000); // 開機 45s 後送一次積壓（避開開機下載尖峰）
+
 async function loadLobby(name) {
   if (exporting) return;
   stopPreview();   // 切 lobby：停掉單句試播（音訊＋氣泡＋busy 一併收）
@@ -5639,6 +5742,7 @@ async function loadLobby(name) {
     app.stage.addChild(spine);
     currentLobby = name;
     try { localStorage.setItem('ba_lastLobby', name); } catch {}
+    statsEnterLobby(name);
   } catch (e) {
     showErr(t('msg.loadFail', { name, err: e.message }));
     loadingEl.classList.remove('show');
@@ -6770,6 +6874,36 @@ async function onSpaceVerify() {
   if (setJpOnlyCk) setJpOnlyCk.addEventListener('change', () => {
     try { localStorage.setItem('ba_jpOnly', setJpOnlyCk.checked ? '1' : '0'); } catch {}
     if (sidePanel.classList.contains('open')) renderSidebar();
+  });
+  if (setStatsCk) setStatsCk.addEventListener('change', () => {
+    const on = setStatsCk.checked;
+    try {
+      if (on) {
+        localStorage.setItem('ba_stats_optin', '1');
+        statsInstallId(true);
+        // 從現在開始計，不補算 views（避免打開開關那一下灌水）
+        _statsLobby = (typeof currentLobby === 'string' && currentLobby) || null;
+        _statsLobbySince = Date.now();
+      } else {
+        localStorage.setItem('ba_stats_optin', '0');
+        try { localStorage.removeItem('ba_stats_pending'); } catch {}
+        _statsLobby = null;
+      }
+    } catch {}
+  });
+  document.getElementById('setStatsReset')?.addEventListener('click', () => {
+    try {
+      localStorage.removeItem('ba_stats_pending');
+      localStorage.setItem('ba_install_id',
+        (crypto?.randomUUID ? crypto.randomUUID() : 'id-' + Date.now().toString(36)));
+    } catch {}
+    _statsLobby = null;
+    _statsLobbySince = Date.now();
+    const done = document.getElementById('setStatsResetDone');
+    if (done) {
+      done.textContent = t('set.statsResetDone');
+      setTimeout(() => { if (done.textContent) done.textContent = ''; }, 3000);
+    }
   });
   setModeSegs.addEventListener('click', async (e) => {
     const b = e.target.closest('button');
