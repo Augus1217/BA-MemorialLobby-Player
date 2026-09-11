@@ -30,7 +30,8 @@ try { _sbSort = localStorage.getItem('ba_sbSort') === 'top' ? 'top' : 'name'; } 
 function syncSbSort() {
   if (!sbSort) return;
   const top = _sbSort === 'top';
-  sbSort.textContent = top ? '🔥' : 'A↓';
+  if (top) sbSort.innerHTML = ICO.flame;
+  else sbSort.textContent = 'A↓';
   sbSort.title = t(top ? 'sidebar.sortTop' : 'sidebar.sortName');
 }
 function groupBestRank(g) {
@@ -3537,7 +3538,7 @@ function renderSettingsAssets() {
   }
   const local = info.localVersion;
   const verRow = t('set.statusVersion', { remote: info.remoteVersion, local: local || t('dl.localNone') });
-  let html = `${info.needsDownload ? '<span class="warn">⚠</span>' : '<span class="ok">✓</span> '}${verRow}`;
+  let html = `${info.needsDownload ? `<span class="warn">${ICO.warn}</span>` : '<span class="ok">✓</span> '}${verRow}`;
   if (info.needsDownload && Array.isArray(info.needsDownloadPacks) && info.needsDownloadPacks.length) {
     const packs = info.packages || {};
     let bytes = 0;
@@ -3580,7 +3581,7 @@ async function ensureStorageForFull() {
     persisted = await navigator.storage?.persisted?.() ?? true;
   } catch { persisted = true; }
   if (!persisted) {
-    setAssetsStatus.innerHTML += `<br><span class="warn">⚠ ${t('set.persistWarn')}</span>`;
+    setAssetsStatus.innerHTML += `<br><span class="warn">${ICO.warn} ${t('set.persistWarn')}</span>`;
   }
   let quota = { usage: 0, quota: 0 };
   try { quota = await window.ba?.quotaInfo?.() || quota; } catch {}
@@ -3588,7 +3589,7 @@ async function ensureStorageForFull() {
   const need = pendingBytes(info);
   const free = (quota.quota || 0) - (quota.usage || 0);
   if (quota.quota > 0 && need > free) {
-    setAssetsStatus.innerHTML += `<br><span class="warn">⚠ ${t('set.quotaLow', { need: fmtBytes(need), free: fmtBytes(Math.max(0, free)) })}</span>`;
+    setAssetsStatus.innerHTML += `<br><span class="warn">${ICO.warn} ${t('set.quotaLow', { need: fmtBytes(need), free: fmtBytes(Math.max(0, free)) })}</span>`;
     return false;
   }
   return true;
@@ -3683,7 +3684,7 @@ function startSettingsDownload() {
   }).catch((e) => {
     _dlRunning = false;
     _dlPromise = null;
-    setProgressText.textContent = `⚠ ${e?.message || e}`;
+    setProgressText.innerHTML = `${ICO.warn} ${escapeHtml(e?.message || e)}`;
   });
 }
 
@@ -3883,12 +3884,12 @@ async function renderRankList(force = false) {
   if (summary) summary.textContent = t('set.rankSummary', { days: _rankDays, n: rows.length, m: parts });
   list.innerHTML = rows.map(r => {
     const medal = r.rank <= 3
-      ? ['🥇', '🥈', '🥉'][r.rank - 1]
+      ? ICO.medal(['#ffd76b', '#cfd6ff', '#e8a06b'][r.rank - 1], r.rank)
       : `<span class="rankNo">${r.rank}</span>`;
     return `<div class="spaceRow"><div class="spaceMain">${medal}`
       + `<span class="spaceName">${escapeHtml(spaceLobbyDisplay(r.lobby))}</span>`
       + `<span class="spaceKey">${escapeHtml(r.lobby)}</span>`
-      + `<span class="spaceMeta">👁 ${r.views} · ⏱ ${fmtDur(r.seconds)} · 👥 ${r.installs}</span>`
+      + `<span class="spaceMeta">${ICO.eye} ${r.views} · ${ICO.timer} ${fmtDur(r.seconds)} · ${ICO.users} ${r.installs}</span>`
       + `</div></div>`;
   }).join('');
 }
@@ -3911,9 +3912,9 @@ function renderSpaceList() {
     const dn = spacePackName(p);
     const delBtn = p.deletable
       ? `<button class="spaceDel" data-key="${p.key}" data-i18n-title="set.space.delete" title="刪除">✕</button>`
-      : `<span class="spaceLock" data-i18n-title="set.space.locked" title="必要資源">🔒</span>`;
+      : `<span class="spaceLock" data-i18n-title="set.space.locked" title="必要資源">${ICO.lock}</span>`;
     const broken = _spaceBroken[p.key]
-      ? `<span class="spaceBroken">⚠ ${t('set.space.broken')}</span>` : '';
+      ? `<span class="spaceBroken">${ICO.warn} ${t('set.space.broken')}</span>` : '';
     const meta = [
       typeof p.files === 'number' ? t('set.space.files', { n: p.files }) : null,
       (usedBy[p.key]?.size > 1) ? t('set.space.usedBy', { n: usedBy[p.key].size }) : null,
@@ -3925,7 +3926,7 @@ function renderSpaceList() {
         ${broken}
         ${dn.sub ? `<span class="spaceKey">${escapeHtml(dn.sub)}</span>` : ''}
         ${meta ? `<span class="spaceMeta">${escapeHtml(meta)}</span>` : ''}
-        ${p.present ? '' : `<span class="warn" style="font-size:11px;">⚠</span>`}
+        ${p.present ? '' : `<span class="warn" style="font-size:11px;">${ICO.warn}</span>`}
       </div>
       <span class="spaceSize">${fmtBytes(p.size)}</span>
       ${delBtn}
@@ -5140,6 +5141,18 @@ function groupMatches(g, q) {
 const PIN_SVG_OUTLINE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 10.2C19 15 12 21 12 21S5 15 5 10.2a7 7 0 0 1 14 0z"/><circle cx="12" cy="10.2" r="2.6"/></svg>';
 const PIN_SVG_FILLED  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 10.2C19 15 12 21 12 21S5 15 5 10.2a7 7 0 0 1 14 0z" fill="currentColor" stroke="none"/><circle cx="12" cy="10.2" r="2.6"/></svg>';
 
+// ---- 手繪 SVG 小圖示（取代彩色 emoji，跨平台一致；同 PIN_SVG 筆觸） ----
+const SVG_OPEN = '<svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+const ICO = {
+  flame: SVG_OPEN + '<path d="M12 21.5c-4.2 0-7.2-2.9-7.2-6.8 0-2.6 1.5-4.9 3.1-6.6.5 1.5 1.1 2.6 2.1 3.4-.4-2.5.5-5.3 2.5-7.2 2.7 2.1 4.7 5 4.7 8.4 0 3.9-3 8.8-5.2 8.8z"/><path d="M12 21.5c-1.9 0-3.4-1.4-3.4-3.1 0-1.2.7-2.2 1.4-3 .2.7.5 1.2 1 1.6-.2-1.2.2-2.5 1-3.4 1.3 1 2.4 2.4 2.4 4.2 0 1.9-1.2 3.7-2.4 3.7z"/></svg>',
+  eye: SVG_OPEN + '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></svg>',
+  timer: SVG_OPEN + '<circle cx="12" cy="13.5" r="6.5"/><path d="M12 10.2v3.6l2.3 1.4M9.5 2.5h5M12 2.5V7"/></svg>',
+  users: SVG_OPEN + '<circle cx="9" cy="8.5" r="3"/><path d="M3.5 19.5c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="16.8" cy="9.5" r="2.4"/><path d="M16.6 14.7c2.1.3 3.6 1.8 4 4.3"/></svg>',
+  lock: SVG_OPEN + '<rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V7.8a3.5 3.5 0 0 1 7 0v2.7"/></svg>',
+  warn: SVG_OPEN + '<path d="M12 3.5 22 20H2z"/><path d="M12 9.5v4.5"/><circle cx="12" cy="17" r=".6" fill="currentColor" stroke="none"/></svg>',
+  medal: (color, n) => '<svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="' + color + '" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="14" r="5"/><path d="M8.6 10.2 6 3.5h3.8L12 7.6l2.2-4.1H18l-2.6 6.7"/><text x="12" y="17" text-anchor="middle" font-size="7" fill="' + color + '" stroke="none">' + n + '</text></svg>',
+};
+
 const PIN_KEY = 'ba_pinned';
 function readPins() {
   try { return new Set(JSON.parse(localStorage.getItem(PIN_KEY) || '[]')); } catch { return new Set(); }
@@ -5197,7 +5210,7 @@ function renderSidebar() {
       if (rk && rk.rank <= 10 && _statsTop) {
         const hot = document.createElement('span');
         hot.className = 'sb-hot';
-        hot.textContent = `🔥${rk.rank}`;
+        hot.innerHTML = ICO.flame + '<span>' + rk.rank + '</span>';
         hot.title = t('sidebar.hotTitle', { days: _statsTop.days, rank: rk.rank, views: rk.views });
         b.appendChild(hot);
       }
@@ -6613,7 +6626,7 @@ async function showAssetDownload(assetInfo) {
         } else if (p.status === 'done') {
           status.textContent = t('dl.packDone', { pkg: p.package });
         } else if (p.status === 'error') {
-          detail.textContent = `⚠ ${p.error}`;
+          detail.innerHTML = `${ICO.warn} ${escapeHtml(p.error)}`;
         }
       });
 
@@ -7105,7 +7118,7 @@ async function onSpaceVerify() {
         }
       } else if (p.status === 'error') {
         setAssetsProgress.style.display = 'block';
-        setProgressText.textContent = `⚠ ${p.error}`;
+        setProgressText.innerHTML = `${ICO.warn} ${escapeHtml(p.error)}`;
       }
     });
   } catch {}
