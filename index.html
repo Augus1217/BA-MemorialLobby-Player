@@ -211,7 +211,7 @@
       padding: 12px 4px 4px; display: flex; align-items: baseline; gap: 8px;
     }
     .sb-group-head:first-child { padding-top: 6px; }
-    .sb-group-head .cnt { color: rgba(200,210,255,.4); font-size: 11px; font-weight: 400; }
+    .sb-group-head .cnt { color: rgba(200,210,255,.65); font-size: 11px; font-weight: 400; }
     .sb-item {
       display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent;
       border: none; color: #dfe4ff; font-size: 13px; padding: 6px 10px;
@@ -220,7 +220,7 @@
     .sb-ico { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex: none; background: rgba(20,25,60,.6); }
     .sb-item:hover { background: rgba(60,70,140,.35); }
     .sb-item.cur { background: rgba(80,95,180,.45); color: #fff; }
-    .sb-empty { color: rgba(210,220,255,.5); font-size: 13px; padding: 22px 8px; text-align: center; }
+    .sb-empty { color: rgba(210,220,255,.75); font-size: 13px; padding: 22px 8px; text-align: center; }
 
     /* 手繪 SVG 圖示（取代原 HUD 的 Unicode 符號字） */
     .ctl-btn .ico svg, #btnSkip svg {
@@ -233,7 +233,7 @@
 
     /* 側欄釘選（sb-pin）：名字截斷 + 圖釘開關 */
     .sb-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sb-hot { font-size: 10px; flex: none; color: #ffcf6b; white-space: nowrap; }
+    .sb-hot { font-size: 11px; flex: none; color: #ffcf6b; white-space: nowrap; }
     .sb-pin {
       flex: none; width: 26px; height: 24px; margin: -4px -6px -4px 2px;
       display: flex; align-items: center; justify-content: center;
@@ -334,11 +334,11 @@
     .spaceRow:hover { background: rgba(255,255,255,.06); }
     .spaceMain { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
     .spaceName { color: #e8ecff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .spaceKind { font-size: 10px; color: #7f8ac0; flex-shrink: 0; }
-    .spaceKey { font-size: 10px; color: #5b6494; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
-    .spaceMeta { font-size: 10px; color: #7f8ac0; flex-shrink: 0; }
-    .spaceBroken { font-size: 10px; color: #e8c268; flex-shrink: 0; }
-    .rankNo { font-size: 11px; color: #7f8ac0; width: 22px; flex: none; text-align: center; font-variant-numeric: tabular-nums; }
+    .spaceKind { font-size: 11px; color: #9aa4e0; flex-shrink: 0; }
+    .spaceKey { font-size: 11px; color: #8f99c8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
+    .spaceMeta { font-size: 11px; color: #9aa4e0; flex-shrink: 0; }
+    .spaceBroken { font-size: 11px; color: #e8c268; flex-shrink: 0; }
+    .rankNo { font-size: 11px; color: #9aa4e0; width: 22px; flex: none; text-align: center; font-variant-numeric: tabular-nums; }
     .spaceSize { color: #9aa4e0; font-variant-numeric: tabular-nums; flex-shrink: 0; }
     .spaceDel {
       width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(255,120,120,.35);
@@ -950,7 +950,7 @@
       </div>
       <div id="setRankSummary" style="font-size:13px; color:#c6d2f5; margin:6px 0;"></div>
       <div id="setRankList" style="margin-top:4px; max-height:46vh; overflow-y:auto;"></div>
-      <div style="margin-top:8px; font-size:12px; color:#7f8ac0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+      <div style="margin-top:8px; font-size:12px; color:#9aa4e0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <span data-i18n="set.rankFoot">開啟使用統計來參與排行，讓榜單更準。</span>
         <button id="setRankJoin" class="btnTxt" data-i18n="set.rankJoin">去開啟</button>
       </div>
@@ -1014,7 +1014,7 @@
       </div>
       <label id="bootStatsRow" style="display:none; gap:8px; align-items:flex-start; text-align:left; margin:4px auto 0; max-width:340px; font-size:12px; color:#c6d2f5; cursor:pointer;">
         <input type="checkbox" id="bootStatsCk" style="margin-top:2px; accent-color:#7f8ac0;">
-        <span><span data-i18n="set.stats">分享匿名使用統計</span><br><small data-i18n="set.statsDesc" style="color:#7f8ac0;">只回報看過哪些大廳與停留秒數，用於人氣排行。預設關閉；關閉會刪除未送出的本地記錄。</small></span>
+        <span><span data-i18n="set.stats">分享匿名使用統計</span><br><small data-i18n="set.statsDesc" style="color:#9aa4e0;">只回報看過哪些大廳與停留秒數，用於人氣排行。預設關閉；關閉會刪除未送出的本地記錄。</small></span>
       </label>
       <button id="assetBtn" class="btnTxt primary" style="display:none" data-i18n="dl.start">開始下載</button>
       <button id="assetBtnCancel" class="btnTxt" style="display:none; margin-top:8px;" data-i18n="dl.cancel">取消</button>

@@ -3840,7 +3840,7 @@ function renderSpaceMissing() {
       + `<span class="spaceKey">${escapeHtml(k)}</span></div>`
       + `<button class="btnTxt spaceDl" data-key="${escapeHtml(k)}"${busy ? ' disabled' : ''}>`
       + `${busy ? t('set.space.downloading') : t('set.space.download')}</button></div>`;
-  }).join('') || `<div style="font-size:12px;color:#7f8ac0;padding:8px;">${t('set.space.empty')}</div>`;
+  }).join('') || `<div style="font-size:12px;color:#9aa4e0;padding:8px;">${t('set.space.empty')}</div>`;
   for (const btn of box.querySelectorAll('.spaceDl')) {
     btn.addEventListener('click', async () => {
       const key = btn.dataset.key;
@@ -3866,16 +3866,16 @@ async function renderRankList(force = false) {
   for (const b of document.querySelectorAll('#setRankSegs button')) {
     b.classList.toggle('on', String(_rankDays) === b.dataset.d);
   }
-  list.innerHTML = `<div style="font-size:12px;color:#7f8ac0;padding:8px;">${t('loading.loading')}</div>`;
+  list.innerHTML = `<div style="font-size:12px;color:#9aa4e0;padding:8px;">${t('loading.loading')}</div>`;
   if (summary) summary.textContent = '';
   let top = null;
   try { top = await statsFetchTop(_rankDays, force); }
-  catch { list.innerHTML = `<div style="font-size:12px;color:#7f8ac0;padding:8px;">${t('set.statusOffline')}</div>`; return; }
+  catch { list.innerHTML = `<div style="font-size:12px;color:#9aa4e0;padding:8px;">${t('set.statusOffline')}</div>`; return; }
   const rows = Object.entries(top.byLobby || {})
     .map(([lobby, v]) => ({ lobby, ...v }))
     .sort((a, b) => a.rank - b.rank);
   if (!rows.length) {
-    list.innerHTML = `<div style="font-size:12px;color:#7f8ac0;padding:8px;">${t('set.rankEmpty')}</div>`;
+    list.innerHTML = `<div style="font-size:12px;color:#9aa4e0;padding:8px;">${t('set.rankEmpty')}</div>`;
     return;
   }
   // 參與人數取各間去重數的最大值（不同間有重疊，這是下界，誠實不灌水）
@@ -3925,13 +3925,13 @@ function renderSpaceList() {
         ${broken}
         ${dn.sub ? `<span class="spaceKey">${escapeHtml(dn.sub)}</span>` : ''}
         ${meta ? `<span class="spaceMeta">${escapeHtml(meta)}</span>` : ''}
-        ${p.present ? '' : `<span class="warn" style="font-size:10px;">⚠</span>`}
+        ${p.present ? '' : `<span class="warn" style="font-size:11px;">⚠</span>`}
       </div>
       <span class="spaceSize">${fmtBytes(p.size)}</span>
       ${delBtn}
     </div>`;
   }
-  setSpaceList.innerHTML = html || `<div style="font-size:12px;color:#7f8ac0;padding:8px;">${t('set.space.empty')}</div>`;
+  setSpaceList.innerHTML = html || `<div style="font-size:12px;color:#9aa4e0;padding:8px;">${t('set.space.empty')}</div>`;
   renderSpaceMissing();
   for (const btn of setSpaceList.querySelectorAll('.spaceDel')) {
     btn.addEventListener('click', async () => {
