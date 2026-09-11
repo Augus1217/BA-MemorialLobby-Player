@@ -4353,6 +4353,11 @@ async function startAnimExport() {
       app.renderer.resize(w, h);
       await nextFrame();
       fitScene();
+      // resize 會清空已合成幀；手動步進迴圈的 render 不保證 present，
+      // 先呈一幀避免錄製中預覽全黑（與迴圈內每 15 幀的 present 呼應）。
+      app.render();
+      await nextFrame();
+      await nextFrame();
     } catch (e) {
       console.warn('[anim] resize 失敗，改用視窗解析度', e);
       await restoreRendererState();
@@ -4451,7 +4456,9 @@ async function startAnimExport() {
     }
     recTime.textContent = fmtClock(T);
     recDur.textContent = `${i + 1}/${total}`;
-    if (i % 15 === 0) await nextFrame();
+    // 錄製中預覽：重繪當前步進態＋留兩個 rAF 給合成器 present，
+    // 否則手動 render 不呈幀、預覽全黑（迴圈本來就會 render，這裡只補 present）。
+    if (i % 15 === 0) { app.render(); await nextFrame(); await nextFrame(); }
   }
 
   let res = null;
