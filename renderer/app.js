@@ -24,6 +24,23 @@ const sidePanel = document.getElementById('sidePanel');
 const sbSearch = document.getElementById('sbSearch');
 const sbList = document.getElementById('sbList');
 const sbClose = document.getElementById('sbClose');
+const sbSort = document.getElementById('sbSort');
+let _sbSort = 'name';
+try { _sbSort = localStorage.getItem('ba_sbSort') === 'top' ? 'top' : 'name'; } catch {}
+function syncSbSort() {
+  if (!sbSort) return;
+  const top = _sbSort === 'top';
+  sbSort.textContent = top ? '🔥' : 'A↓';
+  sbSort.title = t(top ? 'sidebar.sortTop' : 'sidebar.sortName');
+}
+function groupBestRank(g) {
+  let best = Infinity;
+  for (const c of (g.children || [])) {
+    const r = statsRankOf(c.key);
+    if (r && r.rank < best) best = r.rank;
+  }
+  return best;
+}
 const btnCtlBgm = document.getElementById('btnCtlBgm');
 const btnCtlFull = document.getElementById('btnCtlFull');
 const btnCtlFocus = document.getElementById('btnCtlFocus');
@@ -3841,6 +3858,41 @@ function renderSpaceMissing() {
   }
 }
 
+let _rankDays = 30;
+async function renderRankList(force = false) {
+  const list = document.getElementById('setRankList');
+  const summary = document.getElementById('setRankSummary');
+  if (!list) return;
+  for (const b of document.querySelectorAll('#setRankSegs button')) {
+    b.classList.toggle('on', String(_rankDays) === b.dataset.d);
+  }
+  list.innerHTML = `<div style="font-size:12px;color:#7f8ac0;padding:8px;">${t('loading.loading')}</div>`;
+  if (summary) summary.textContent = '';
+  let top = null;
+  try { top = await statsFetchTop(_rankDays, force); }
+  catch { list.innerHTML = `<div style="font-size:12px;color:#7f8ac0;padding:8px;">${t('set.statusOffline')}</div>`; return; }
+  const rows = Object.entries(top.byLobby || {})
+    .map(([lobby, v]) => ({ lobby, ...v }))
+    .sort((a, b) => a.rank - b.rank);
+  if (!rows.length) {
+    list.innerHTML = `<div style="font-size:12px;color:#7f8ac0;padding:8px;">${t('set.rankEmpty')}</div>`;
+    return;
+  }
+  // 參與人數取各間去重數的最大值（不同間有重疊，這是下界，誠實不灌水）
+  const parts = Math.max(0, ...rows.map(r => r.installs || 0));
+  if (summary) summary.textContent = t('set.rankSummary', { days: _rankDays, n: rows.length, m: parts });
+  list.innerHTML = rows.map(r => {
+    const medal = r.rank <= 3
+      ? ['🥇', '🥈', '🥉'][r.rank - 1]
+      : `<span class="rankNo">${r.rank}</span>`;
+    return `<div class="spaceRow"><div class="spaceMain">${medal}`
+      + `<span class="spaceName">${escapeHtml(spaceLobbyDisplay(r.lobby))}</span>`
+      + `<span class="spaceKey">${escapeHtml(r.lobby)}</span>`
+      + `<span class="spaceMeta">👁 ${r.views} · ⏱ ${fmtDur(r.seconds)} · 👥 ${r.installs}</span>`
+      + `</div></div>`;
+  }).join('');
+}
+
 function renderSpaceList() {
   if (!setSpaceList || !_spaceInfo) return;
   const usedBy = spaceUsedBy();
@@ -3944,12 +3996,13 @@ function syncRotateHint() {
 }
 // ---- 設定／關於／管理空間分頁（共用視窗）----
 function switchSettingsTab(tab) {
-  for (const k of ['Main', 'Space', 'About']) {
+  for (const k of ['Main', 'Space', 'Rank', 'About']) {
     document.getElementById('setTab' + k).style.display = tab === k.toLowerCase() ? '' : 'none';
     document.getElementById('setTabBtn' + k)?.classList.toggle('on', tab === k.toLowerCase());
   }
   if (tab === 'about') { syncAboutSection(); fitSteamWidget(); }
   if (tab === 'space') refreshSpaceManager();
+  if (tab === 'rank') renderRankList();
 }
 // ---- Steam widget 自動縮放（原生 646px，窄視窗等比縮）----
 function fitSteamWidget() {
@@ -5140,6 +5193,14 @@ function renderSidebar() {
       name.className = 'name';
       name.textContent = variantText(g, c);
       b.appendChild(name);
+      const rk = statsRankOf(c.key);
+      if (rk && rk.rank <= 10 && _statsTop) {
+        const hot = document.createElement('span');
+        hot.className = 'sb-hot';
+        hot.textContent = `🔥${rk.rank}`;
+        hot.title = t('sidebar.hotTitle', { days: _statsTop.days, rank: rk.rank, views: rk.views });
+        b.appendChild(hot);
+      }
       const isPin = pinned.has(g.core);
       const pin = document.createElement('span');
       pin.className = 'sb-pin' + (isPin ? ' is-pin' : '');
@@ -5165,6 +5226,13 @@ function renderSidebar() {
   }
   const pinnedGroups = groups.filter(g => pinned.has(g.core));
   const restGroups = groups.filter(g => !pinned.has(g.core));
+  if (_sbSort === 'top') {
+    // 人氣排序：組內最佳名次小的在前；無排行壓底（維持名稱序）
+    const cmp = (a, b) => (groupBestRank(a) - groupBestRank(b))
+      || a.display.localeCompare(b.display, 'zh-Hant');
+    pinnedGroups.sort(cmp);
+    restGroups.sort(cmp);
+  }
 
   if (pinnedGroups.length) {
     const h = document.createElement('div');
@@ -5633,6 +5701,50 @@ async function statsFlush(useBeacon = false) {
 window.addEventListener('pagehide', () => { statsSettle(); statsFlush(true); });
 setInterval(() => { statsSettle(); statsFlush(false); }, 5 * 60 * 1000);
 setTimeout(() => { statsFlush(false); }, 45000); // 開機 45s 後送一次積壓（避開開機下載尖峰）
+
+// ---- 人氣排行讀取（公開 top API；看榜不需要 opt-in） ----
+let _statsTop = null; // { days, at, byLobby: {lobby: {rank, views, seconds, installs}} }
+async function statsFetchTop(days = 30, force = false) {
+  days = (days === 7) ? 7 : 30;
+  const ck = 'ba_stats_top_' + days;
+  if (!force) {
+    if (_statsTop && _statsTop.days === days && Date.now() - _statsTop.at < 24 * 3600e3) return _statsTop;
+    try {
+      const c = JSON.parse(localStorage.getItem(ck) || 'null');
+      if (c && c.days === days && Date.now() - (c.at || 0) < 24 * 3600e3 && c.byLobby) {
+        if (!_statsTop || _statsTop.days !== days) _statsTop = c;
+        return c;
+      }
+    } catch {}
+  }
+  const r = await fetch(STATS_URL + '/top?days=' + days + '&limit=200');
+  if (!r.ok) throw new Error('top ' + r.status);
+  const j = await r.json();
+  const byLobby = {};
+  (j.top || []).forEach((row, i) => {
+    if (row && row.lobby) byLobby[row.lobby] = {
+      rank: i + 1, views: row.views || 0, seconds: row.seconds || 0, installs: row.installs || 0,
+    };
+  });
+  _statsTop = { days, at: Date.now(), byLobby };
+  try { localStorage.setItem(ck, JSON.stringify(_statsTop)); } catch {}
+  return _statsTop;
+}
+function statsRankOf(lobbyKey) {
+  return (_statsTop && _statsTop.byLobby && _statsTop.byLobby[lobbyKey]) || null;
+}
+function fmtDur(s) {
+  s = Math.max(0, Math.floor(s || 0));
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  return (s / 3600).toFixed(1) + 'h';
+}
+// 開機 60s 後抓一次 30 天榜（避開開機下載尖峰）；失敗靜默，下次開設定/側欄再說
+setTimeout(() => {
+  statsFetchTop(30).then(() => {
+    try { if (sidePanel?.classList.contains('open')) renderSidebar(); } catch {}
+  }).catch(() => {});
+}, 60000);
 
 async function loadLobby(name) {
   if (exporting) return;
@@ -6787,6 +6899,15 @@ async function init() {
   settingsBackdrop?.addEventListener('click', () => toggleSettingsPanel(false));
   document.getElementById('setTabBtnMain')?.addEventListener('click', () => switchSettingsTab('main'));
   document.getElementById('setTabBtnSpace')?.addEventListener('click', () => switchSettingsTab('space'));
+  document.getElementById('setTabBtnRank')?.addEventListener('click', () => switchSettingsTab('rank'));
+  document.getElementById('setRankSegs')?.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    _rankDays = b.dataset.d === '7' ? 7 : 30;
+    renderRankList();
+  });
+  document.getElementById('setRankRefresh')?.addEventListener('click', () => renderRankList(true));
+  document.getElementById('setRankJoin')?.addEventListener('click', () => switchSettingsTab('main'));
   document.getElementById('setTabBtnAbout')?.addEventListener('click', () => switchSettingsTab('about'));
   // 管理空間工具列（靜態元素，只綁一次）
   document.getElementById('setSpaceSearch')?.addEventListener('input', (e) => {
@@ -6842,6 +6963,13 @@ async function onSpaceVerify() {
 
   btnStudents.addEventListener('click', () => toggleSidebar());
   sbClose.addEventListener('click', () => toggleSidebar(false));
+  if (sbSort) sbSort.addEventListener('click', () => {
+    _sbSort = _sbSort === 'top' ? 'name' : 'top';
+    try { localStorage.setItem('ba_sbSort', _sbSort); } catch {}
+    syncSbSort();
+    renderSidebar();
+  });
+  syncSbSort();
   sbSearch.addEventListener('input', () => renderSidebar());
   sbList.addEventListener('click', (e) => {
     const item = e.target.closest('.sb-item');

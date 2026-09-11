@@ -233,6 +233,7 @@
 
     /* 側欄釘選（sb-pin）：名字截斷 + 圖釘開關 */
     .sb-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sb-hot { font-size: 10px; flex: none; color: #ffcf6b; white-space: nowrap; }
     .sb-pin {
       flex: none; width: 26px; height: 24px; margin: -4px -6px -4px 2px;
       display: flex; align-items: center; justify-content: center;
@@ -337,6 +338,7 @@
     .spaceKey { font-size: 10px; color: #5b6494; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
     .spaceMeta { font-size: 10px; color: #7f8ac0; flex-shrink: 0; }
     .spaceBroken { font-size: 10px; color: #e8c268; flex-shrink: 0; }
+    .rankNo { font-size: 11px; color: #7f8ac0; width: 22px; flex: none; text-align: center; font-variant-numeric: tabular-nums; }
     .spaceSize { color: #9aa4e0; font-variant-numeric: tabular-nums; flex-shrink: 0; }
     .spaceDel {
       width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(255,120,120,.35);
@@ -747,6 +749,7 @@
   <div id="sidePanel">
     <div class="sb-head">
       <input id="sbSearch" type="text" data-i18n-ph="sidebar.searchPh" placeholder="搜尋學生 / 名稱 / ID…" />
+      <button id="sbSort" class="btn" data-i18n-title="sidebar.sortName" title="名稱排序" style="width:34px; height:34px; border-radius:6px; flex:none;">A↓</button>
       <button id="sbClose" class="btn" data-i18n-title="sidebar.close" title="收合">×</button>
     </div>
     <div id="sbList"></div>
@@ -845,6 +848,7 @@
     <div class="set-tabs">
       <button id="setTabBtnMain" class="on" data-i18n="set.title">設定</button>
       <button id="setTabBtnSpace" data-i18n="set.space.title">管理空間</button>
+      <button id="setTabBtnRank" data-i18n="set.rankTitle">人氣排行</button>
       <button id="setTabBtnAbout" data-i18n="set.about">關於</button>
     </div>
 
@@ -934,6 +938,22 @@
         <summary id="setSpaceMissingHead" style="font-size:12px; color:#9aa4e0; cursor:pointer;"></summary>
         <div id="setSpaceMissing" style="margin-top:4px; max-height:30vh; overflow-y:auto;"></div>
       </details>
+    </div>
+
+    <div id="setTabRank" style="display:none;">
+      <div class="spaceToolbar">
+        <div class="segs" id="setRankSegs">
+          <button data-d="7" data-i18n="set.rank7d">7 天</button>
+          <button data-d="30" class="on" data-i18n="set.rank30d">30 天</button>
+        </div>
+        <button id="setRankRefresh" class="btnTxt" data-i18n="set.rankRefresh">重新整理</button>
+      </div>
+      <div id="setRankSummary" style="font-size:13px; color:#c6d2f5; margin:6px 0;"></div>
+      <div id="setRankList" style="margin-top:4px; max-height:46vh; overflow-y:auto;"></div>
+      <div style="margin-top:8px; font-size:12px; color:#7f8ac0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span data-i18n="set.rankFoot">開啟使用統計來參與排行，讓榜單更準。</span>
+        <button id="setRankJoin" class="btnTxt" data-i18n="set.rankJoin">去開啟</button>
+      </div>
     </div>
 
     <div id="setTabAbout" style="display:none;">
