@@ -4057,10 +4057,19 @@ async function resolveExportSize() {
 // 匯出尺寸：視窗原生 backing store = innerWidth×devicePixelRatio。
 // （舊註解曾寫 kivo fill vw/3000——已證偽：kivo 檢視器根本沒有尺寸公式，
 // 3000 是前人拍腦袋的數；真機實測可見寬約 2300，見 charScale。）
+// kivo 適應＝最佳觀賞 4:3：以目前渲染寬為基準（人物大小不變），高度補到
+// 4:3——可視世界高回到 2175 單位、零黑邊（橫屏結論；見版面量測）。
+// 上限與自訂一致（寬 ≤7680、高 ≤4320），超過等比縮。
 async function kivoFitSize() {
   try {
-    const dpr = window.devicePixelRatio || 1;
-    return { w: Math.round(window.innerWidth * dpr), h: Math.round(window.innerHeight * dpr) };
+    let w = Math.round(app.renderer.width || window.innerWidth || 1600);
+    let h = Math.round((w * 3) / 4);
+    if (w > 7680 || h > 4320) {
+      const k = Math.min(7680 / w, 4320 / h);
+      w = Math.round(w * k);
+      h = Math.round(h * k);
+    }
+    return { w: Math.max(64, w), h: Math.max(64, h) };
   } catch (e) { return null; }
 }
 
