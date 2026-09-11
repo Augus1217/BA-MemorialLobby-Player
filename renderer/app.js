@@ -5608,6 +5608,28 @@ const setStatsCk = document.getElementById('setStatsCk');
 function statsEnabled() {
   try { return localStorage.getItem('ba_stats_optin') === '1'; } catch { return false; }
 }
+// 邀請只問一次（開機面板 / 首次進大廳共用此旗標）
+function statsAsked() {
+  try { return localStorage.getItem('ba_stats_asked') === '1'; } catch { return true; }
+}
+function markStatsAsked() {
+  try { localStorage.setItem('ba_stats_asked', '1'); } catch {}
+}
+function statsSetOptIn(on) {
+  try {
+    if (on) {
+      localStorage.setItem('ba_stats_optin', '1');
+      statsInstallId(true);
+      // 從現在開始計，不補算 views（避免打開那一下灌水）
+      _statsLobby = (typeof currentLobby === 'string' && currentLobby) || null;
+      _statsLobbySince = Date.now();
+    } else {
+      localStorage.setItem('ba_stats_optin', '0');
+      try { localStorage.removeItem('ba_stats_pending'); } catch {}
+      _statsLobby = null;
+    }
+  } catch {}
+}
 function statsInstallId(create = true) {
   try {
     let id = localStorage.getItem('ba_install_id');
@@ -5855,6 +5877,15 @@ async function loadLobby(name) {
     currentLobby = name;
     try { localStorage.setItem('ba_lastLobby', name); } catch {}
     statsEnterLobby(name);
+    // 首次進大廳邀請一次（自動化流程跳過，避免 confirm 擋住 PROBE）
+    try {
+      const auto = /autostart=1|PROBE=1/.test(location.search + location.hash);
+      if (!auto && !statsAsked()) {
+        markStatsAsked();
+        if (window.confirm(t('set.statsInvite'))) statsSetOptIn(true);
+        if (setStatsCk) setStatsCk.checked = statsEnabled();
+      }
+    } catch {}
   } catch (e) {
     showErr(t('msg.loadFail', { name, err: e.message }));
     loadingEl.classList.remove('show');
@@ -6483,6 +6514,8 @@ async function showAssetDownload(assetInfo) {
   const choiceRow = document.getElementById('bootChoiceRow');
   const btnFull = document.getElementById('assetBtnFull');
   const btnQuick = document.getElementById('assetBtnQuick');
+  const bootStatsRow = document.getElementById('bootStatsRow');
+  const bootStatsCk = document.getElementById('bootStatsCk');
 
   downloadPanel.style.display = 'block';
   progress.style.display = 'none';
@@ -6533,6 +6566,9 @@ async function showAssetDownload(assetInfo) {
   if (btnQuick) btnQuick.textContent = t('dl.quickStart', { size: fmtBytes(quickBytes) });
   if (choiceRow) choiceRow.style.display = 'flex';
   btn.style.display = 'none';
+  // 首次啟動才顯示統計邀請（預設不勾）
+  if (bootStatsRow) bootStatsRow.style.display = statsAsked() ? 'none' : 'flex';
+  if (bootStatsCk) bootStatsCk.checked = false;
 
   return new Promise((resolve) => {
     const cancelBtn = document.getElementById('assetBtnCancel');
@@ -6542,6 +6578,7 @@ async function showAssetDownload(assetInfo) {
       btn.style.display = 'none';
       progress.style.display = 'none';
       if (cancelBtn) cancelBtn.style.display = 'none';
+      if (bootStatsRow) bootStatsRow.style.display = 'none';
       status.textContent = '';
       detail.textContent = '';
     };
@@ -6555,6 +6592,10 @@ async function showAssetDownload(assetInfo) {
       btn.style.display = 'none';
       progress.style.display = 'block';
       userCancelled = false;
+      // 邀請只問這一次；勾了就直接 opt-in（不等進設定）
+      markStatsAsked();
+      if (bootStatsRow) bootStatsRow.style.display = 'none';
+      if (bootStatsCk?.checked) statsSetOptIn(true);
       if (cancelBtn) { cancelBtn.style.display = 'inline-block'; cancelBtn.disabled = false; }
       fill.style.width = '0%';
       pctText.textContent = '0%';
@@ -7004,20 +7045,7 @@ async function onSpaceVerify() {
     if (sidePanel.classList.contains('open')) renderSidebar();
   });
   if (setStatsCk) setStatsCk.addEventListener('change', () => {
-    const on = setStatsCk.checked;
-    try {
-      if (on) {
-        localStorage.setItem('ba_stats_optin', '1');
-        statsInstallId(true);
-        // 從現在開始計，不補算 views（避免打開開關那一下灌水）
-        _statsLobby = (typeof currentLobby === 'string' && currentLobby) || null;
-        _statsLobbySince = Date.now();
-      } else {
-        localStorage.setItem('ba_stats_optin', '0');
-        try { localStorage.removeItem('ba_stats_pending'); } catch {}
-        _statsLobby = null;
-      }
-    } catch {}
+    statsSetOptIn(setStatsCk.checked);
   });
   document.getElementById('setStatsReset')?.addEventListener('click', () => {
     try {
