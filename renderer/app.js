@@ -5658,6 +5658,7 @@ const STATS_URL = 'https://ba-assets.imlindora.workers.dev/api/stats';
 const STATS_URLS = [
   STATS_URL,
   'https://ba-assets.linaugus499.workers.dev/api/stats',
+  'https://ba-assets.cihaolin.workers.dev/api/stats',
 ];
 function statsShardUrl(key) {
   const urls = (STATS_URLS && STATS_URLS.length ? STATS_URLS : [STATS_URL]).filter(Boolean);
