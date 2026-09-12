@@ -4014,6 +4014,10 @@ async function spaceDeleteKeys(keys) {
 function toggleSettingsPanel(force) {
   // force 可能是 addEventListener 傳入的 Event 物件（truthy）——只接受真正的 boolean。
   const open = typeof force === 'boolean' ? force : !settingsPanel.classList.contains('open');
+  // LAYOUT=1 自開追蹤：記錄是誰打開設定面板（查 Tap 後自開用）
+  if (open && /LAYOUT=1/.test(location.search + location.hash)) {
+    try { console.warn('[trace] settings opened', new Error('trace').stack.split('\n').slice(1, 6).join(' <- ')); } catch {}
+  }
   if (open) {
     exportPanel.classList.remove('open');
     sidePanel.classList.remove('open');
