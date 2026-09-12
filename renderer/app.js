@@ -5655,7 +5655,10 @@ const STATS_URL = 'https://ba-assets.imlindora.workers.dev/api/stats';
 // 爆紅擴充：再開 Cloudflare 帳號、把 Worker+D1 同樣 deploy 一份後，加進這個陣列即可。
 // 寫入按 installId 分片（一台裝置永遠打同一個，榜單不重複計）；讀榜全查再合併。
 // 目前只有一組，上線行為與單 URL 完全一致。
-const STATS_URLS = [STATS_URL];
+const STATS_URLS = [
+  STATS_URL,
+  'https://ba-assets.linaugus499.workers.dev/api/stats',
+];
 function statsShardUrl(key) {
   const urls = (STATS_URLS && STATS_URLS.length ? STATS_URLS : [STATS_URL]).filter(Boolean);
   if (urls.length === 1) return urls[0];
