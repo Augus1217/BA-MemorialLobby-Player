@@ -4016,7 +4016,11 @@ function toggleSettingsPanel(force) {
   const open = typeof force === 'boolean' ? force : !settingsPanel.classList.contains('open');
   // LAYOUT=1 自開追蹤：記錄是誰打開設定面板（查 Tap 後自開用）
   if (open && /LAYOUT=1/.test(location.search + location.hash)) {
-    try { console.warn('[trace] settings opened', new Error('trace').stack.split('\n').slice(1, 6).join(' <- ')); } catch {}
+    try {
+      const stk = new Error('trace').stack.split('\n').slice(1, 6).join(' <- ');
+      window.__lastSettingsStack = { at: Date.now(), force: String(force), stack: stk };
+      console.warn('[trace] settings opened', stk);
+    } catch {}
   }
   if (open) {
     exportPanel.classList.remove('open');
@@ -4051,6 +4055,7 @@ function switchSettingsTab(tab) {
     document.getElementById('setTab' + k).style.display = tab === k.toLowerCase() ? '' : 'none';
     document.getElementById('setTabBtn' + k)?.classList.toggle('on', tab === k.toLowerCase());
   }
+  settingsPanel.scrollTop = 0;   // 分頁共用同一捲動容器，切頁回頂部
   if (tab === 'about') { syncAboutSection(); fitSteamWidget(); }
   if (tab === 'space') refreshSpaceManager();
   if (tab === 'rank') renderRankList();
@@ -4839,10 +4844,14 @@ function infoProfileLang(profile) {
   return null;
 }
 
+// 面板重繪時記住是在哪個大廳捲動，避免切換後沿用舊捲動把第一行切掉
+let infoScrollLobby = null;
 function renderInfoPanel() {
   if (!infoPanel) return;
   const name = currentLobby;
   if (!name) return;
+  const scrollReset = infoScrollLobby !== name;
+  infoScrollLobby = name;
   const rec = studentForLobby(name);
   const displayName = (rec && rec[langField(langMode)]) || prettyName(name);
   infoName.textContent = displayName;
@@ -4939,11 +4948,15 @@ function renderInfoPanel() {
     markPreviewLine();   // 面板重繪時恢復試播中的行（進度條不斷）
     if (!preview) markTalkLine();   // 否則恢復點按說話播出中的行
   }
+  if (scrollReset) infoBody.scrollTop = 0;   // 換大廳後從頂部看起
 }
 
 function toggleInfoPanel(force) {
   const on = force !== undefined ? force : !infoPanel.classList.contains('open');
-  if (on) renderInfoPanel();
+  if (on) {
+    infoScrollLobby = null;   // 重新開啟一律回頂部
+    renderInfoPanel();
+  }
   infoPanel.classList.toggle('open', on);
 }
 
