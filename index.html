@@ -28,7 +28,9 @@
     #lbBottom { bottom: 0; left: 0; right: 0; }
     #lbLeft { top: 0; bottom: 0; left: 0; }
     #lbRight { top: 0; bottom: 0; right: 0; }
-    #app canvas { touch-action: none; cursor: inherit; }
+    #app canvas { touch-action: none; cursor: inherit; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+    /* 長按手勢（摸頭 420ms）不被系統選單/放大鏡搶走；按鈕同理 */
+    .ctl-btn, .btn { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
 
     /* cinematic vignette + soft top shading (non-interactive) */
     #fx {
@@ -88,7 +90,7 @@
       border-radius: 50%; width: 40px; height: 40px; font-size: 17px; line-height: 1;
       cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; display: flex; align-items: center; justify-content: center;
       transition: background .25s, border-color .25s, opacity .25s;
-      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
     }
     .btn:hover { background: rgba(40,48,96,.6); border-color: rgba(255,255,255,.35); }
     .btn.off { opacity: .4; }
@@ -106,7 +108,7 @@
     #skipConfirm {
       position: fixed; inset: 0; z-index: 60; display: none;
       align-items: center; justify-content: center;
-      background: rgba(0,0,0,.55); backdrop-filter: blur(2px);
+      background: rgba(0,0,0,.55); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
     }
     #skipConfirm.show { display: flex; }
     #skipConfirmBox {
@@ -155,7 +157,7 @@
     #sidePanel {
       position: fixed; left: 0; top: 0; bottom: 0; width: min(320px, 86vw); z-index: 20;
       background: rgba(8,10,22,.92); border-right: 1px solid rgba(255,255,255,.12);
-      backdrop-filter: blur(10px); display: flex; flex-direction: column;
+      -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); display: flex; flex-direction: column;
       transform: translateX(-100%); transition: transform .3s ease;
     }
     #sidePanel.open { transform: translateX(0); }
@@ -526,7 +528,7 @@
     #infoPanel {
       position: fixed; right: 0; top: 0; bottom: 0; width: min(420px, 92vw); z-index: 30;
       background: rgba(8,10,22,.94); border-left: 1px solid rgba(255,255,255,.12);
-      backdrop-filter: blur(12px); display: flex; flex-direction: column;
+      -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); display: flex; flex-direction: column;
       transform: translateX(102%); transition: transform .32s ease;
       color: #e8ecff;
     }

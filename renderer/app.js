@@ -4324,6 +4324,8 @@ function drawExportBalloon(c2, vw, vh, line) {  if (!balloonImg || !balloonImg2)
 // ---- 逐幀動畫匯出主流程 ----
 async function startAnimExport() {
   if (!spine || animActive || exporting) return;
+  // 網頁版無 ffmpeg 後端：shim 回 false，之前會靜悄悄什麼都不發生
+  if (!IS_ELECTRON) { closeExportPanel(); showErr(t('exp.webOnly')); return; }
   const clipType = exportClipType();
   const fps = expFpsSet(expFpsN ? expFpsN.value : 30);
   const fmt = segVal('expFmt') || 'mp4';
@@ -6961,13 +6963,27 @@ async function init() {
   buildLangSegs();
   applyI18n();
 
+  // iOS Safari 不吃 .ogg（語音＋BGM 同格式）：先探測，不支援就提示一次
+  try {
+    const oggProbe = new Audio();
+    if (oggProbe.canPlayType && !oggProbe.canPlayType('audio/ogg; codecs="vorbis"')) {
+      setTimeout(() => { try { showToast(t('msg.noOgg')); } catch {} }, 4000);
+    }
+  } catch {}
+
   // Stage 2：ensureReady — 下載 core（唯一的 gate）
   await ensureReady();
 
   // Stage 3：補救 boot 素材（若首屏失敗）
   applyBootAssets();
 
-  // Stage 4：Pixi 初始化
+  // Stage 4：Pixi 初始化（Pixi v8 需 WebGL2：先驗，不過就直說不讓它炸在深處）
+  try {
+    if (!document.createElement('canvas').getContext('webgl2')) {
+      showErr(t('msg.noWebGL2'));
+      return;
+    }
+  } catch { showErr(t('msg.noWebGL2')); return; }
   await app.init({ resizeTo: window, antialias: true, backgroundColor: 0x05060d, autoDensity: true });
   const canvas = app.canvas;
   document.getElementById('app').appendChild(canvas);
