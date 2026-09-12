@@ -330,7 +330,6 @@
     .spaceRow { display: contents; }
     .spaceGrid { display: grid; column-gap: 10px; row-gap: 3px; align-items: center; }
     .sg-spaces { grid-template-columns: minmax(90px, 1.4fr) auto minmax(0, 2fr) auto 22px; }
-    .sg-missing { grid-template-columns: minmax(90px, 1.4fr) auto minmax(0, 2fr) auto auto; }
     .sg-rank { grid-template-columns: 32px minmax(100px, 1.5fr) minmax(0, 1fr) auto auto auto; }
     .sg-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sg-num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; color: #9aa4e0; font-size: 14px; }
@@ -935,10 +934,6 @@
         <button id="setSpaceCleanOrphans" class="btnTxt" data-i18n="set.space.cleanOrphans">清除</button>
       </div>
       <div id="setSpaceList" class="spaceGrid sg-spaces" style="margin-top:8px; max-height:46vh; overflow-y:auto;"></div>
-      <details id="setSpaceMissingWrap" style="margin-top:8px; display:none;">
-        <summary id="setSpaceMissingHead" style="font-size: 14px; color:#9aa4e0; cursor:pointer;"></summary>
-        <div id="setSpaceMissing" class="spaceGrid sg-missing" style="margin-top:4px; max-height:30vh; overflow-y:auto;"></div>
-      </details>
     </div>
 
     <div id="setTabRank" style="display:none;">

@@ -3760,17 +3760,16 @@ function setSpaceMessage(text, warn) {
 
 function renderSpaceSummary() {
   if (!setSpaceSummary) return;
-  if (!_spaceInfo || !_spaceInfo.packs?.length) {
-    setSpaceSummary.textContent = t('set.space.empty');
-    if (setSpaceList) setSpaceList.innerHTML = '';
-    renderSpaceMissing();
-    const or = document.getElementById('setSpaceOrphanRow');
-    if (or) or.style.display = 'none';
-    return;
-  }
-  const n = _spaceInfo.packs.length;
-  setSpaceSummary.textContent = `${t('set.space.summary', { n, size: fmtBytes(_spaceInfo.totalSize) })} · v${_spaceInfo.version || '?'}`;
-  const orphans = _spaceInfo.orphans || 0;
+  const n = _spaceInfo?.packs?.length || 0;
+  let summary = n
+    ? `${t('set.space.summary', { n, size: fmtBytes(_spaceInfo.totalSize) })} · v${_spaceInfo.version || '?'}`
+    : t('set.space.empty');
+  try {
+    const m = spaceMissingLobbies().length;
+    if (m > 0) summary += ` · ${t('set.space.notDownloaded', { n: m })}`;
+  } catch {}
+  setSpaceSummary.textContent = summary;
+  const orphans = _spaceInfo?.orphans || 0;
   const or = document.getElementById('setSpaceOrphanRow');
   const ot = document.getElementById('setSpaceOrphans');
   if (or) or.style.display = orphans > 0 ? '' : 'none';
@@ -3833,46 +3832,40 @@ function spaceLobbyDisplay(key) {
   const v = (info && info.labels.length) ? `（${info.labels.join('・')}）` : '';
   return base + v;
 }
-function renderSpaceMissing() {
-  const wrap = document.getElementById('setSpaceMissingWrap');
-  const head = document.getElementById('setSpaceMissingHead');
-  const box = document.getElementById('setSpaceMissing');
-  if (!wrap || !head || !box) return;
-  const all = spaceMissingLobbies();
-  const q = (_spaceQuery || '').toLowerCase();
-  const miss = all
-    .filter(m => !q || m.key.toLowerCase().includes(q) || spaceLobbyDisplay(m.key).toLowerCase().includes(q))
-    .sort((a, b) => spaceLobbyDisplay(a.key).localeCompare(spaceLobbyDisplay(b.key), undefined, { sensitivity: 'base' }));
-  if (!all.length) { wrap.style.display = 'none'; box.innerHTML = ''; return; }
-  wrap.style.display = '';
-  head.textContent = t('set.space.notDownloaded', { n: all.length });
-  // 欄位與上表一致：名稱｜種類｜資訊｜大小｜操作
-  box.innerHTML = miss.map(m => {
-    const k = m.key;
-    const busy = _spaceDownloading.has(k);
-    return `<div class="spaceRow">`
-      + `<span class="spaceName sg-cell">${escapeHtml(spaceLobbyDisplay(k))}</span>`
-      + `<span class="spaceKind sg-cell">${spaceKindLabel('lobby')}</span>`
-      + `<span class="sg-cell sg-info"><span class="spaceKey">${escapeHtml(k)}</span></span>`
-      + `<span class="spaceSize sg-num">${m.bytes > 0 ? fmtBytes(m.bytes) : '—'}</span>`
-      + `<span class="sg-act"><button class="btnTxt spaceDl" data-key="${escapeHtml(k)}"${busy ? ' disabled' : ''}>`
-      + `${busy ? t('set.space.downloading') : t('set.space.download')}</button></span></div>`;
-  }).join('') || `<div style="font-size: 14px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('set.space.empty')}</div>`;
-  for (const btn of box.querySelectorAll('.spaceDl')) {
-    btn.addEventListener('click', async () => {
-      const key = btn.dataset.key;
-      if (!key || _spaceDownloading.has(key)) return;
-      _spaceDownloading.add(key);
-      renderSpaceMissing();
-      try { await ensureLobbyAssets(key); }
-      catch (e) { console.warn('[space] 下載大廳失敗', key, e?.message); }
-      finally { _spaceDownloading.delete(key); }
-      _spaceBroken = {};
-      setSpaceMessage('');
-      await refreshSpaceManager();
-      await refreshSettingsAssets();
-    });
-  }
+// 單表混排：系統包置頂＋大廳（已裝/待裝同一格式，操作欄按狀態顯示 ✕/下載）
+function spaceInstalledRow(p, usedBy) {
+  const dn = spacePackName(p);
+  const delBtn = p.deletable
+    ? `<button class="spaceDel" data-key="${p.key}" data-i18n-title="set.space.delete" title="刪除">✕</button>`
+    : `<span class="spaceLock" data-i18n-title="set.space.locked" title="必要資源">${ICO.lock}</span>`;
+  const broken = _spaceBroken[p.key]
+    ? `<span class="spaceBroken">${ICO.warn} ${t('set.space.broken')}</span>` : '';
+  const meta = [
+    typeof p.files === 'number' ? t('set.space.files', { n: p.files }) : null,
+    (usedBy[p.key]?.size > 1) ? t('set.space.usedBy', { n: usedBy[p.key].size }) : null,
+  ].filter(Boolean).join(' · ');
+  return `<div class="spaceRow">`
+    + `<span class="spaceName sg-cell">${escapeHtml(dn.title)}</span>`
+    + `<span class="spaceKind sg-cell">${spaceKindLabel(p.kind)}</span>`
+    + `<span class="sg-cell sg-info">${broken}`
+    + (dn.sub ? `<span class="spaceKey">${escapeHtml(dn.sub)}</span> ` : '')
+    + (meta ? `<span class="spaceMeta">${escapeHtml(meta)}</span>` : '')
+    + (p.present ? '' : ` <span class="warn" style="font-size: 14px;">${ICO.warn}</span>`)
+    + `</span>`
+    + `<span class="spaceSize sg-num">${fmtBytes(p.size)}</span>`
+    + `<span class="sg-act">${delBtn}</span>`
+    + `</div>`;
+}
+function spaceMissingRow(m) {
+  const k = m.key;
+  const busy = _spaceDownloading.has(k);
+  return `<div class="spaceRow">`
+    + `<span class="spaceName sg-cell">${escapeHtml(spaceLobbyDisplay(k))}</span>`
+    + `<span class="spaceKind sg-cell">${spaceKindLabel('lobby')}</span>`
+    + `<span class="sg-cell sg-info"><span class="spaceKey">${escapeHtml(k)}</span></span>`
+    + `<span class="spaceSize sg-num">${m.bytes > 0 ? fmtBytes(m.bytes) : '—'}</span>`
+    + `<span class="sg-act"><button class="btnTxt spaceDl" data-key="${escapeHtml(k)}"${busy ? ' disabled' : ''}>`
+    + `${busy ? t('set.space.downloading') : t('set.space.download')}</button></span></div>`;
 }
 
 let _rankDays = 30;
@@ -3914,44 +3907,64 @@ async function renderRankList(force = false) {
 }
 
 function renderSpaceList() {
-  if (!setSpaceList || !_spaceInfo) return;
+  if (!setSpaceList) return;
   const usedBy = spaceUsedBy();
   const q = (_spaceQuery || '').toLowerCase();
-  let packs = (_spaceInfo.packs || []).filter((p) => {
+  const packs = _spaceInfo?.packs || [];
+  const byKey = new Map(packs.map(p => [p.key, p]));
+  const matchPack = (p) => {
     if (!q) return true;
     const dn = spacePackName(p);
     return p.key.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)
         || dn.title.toLowerCase().includes(q);
-  });
-  packs = [...packs].sort((a, b) => _spaceSort === 'name'
-    ? spacePackName(a).title.localeCompare(spacePackName(b).title, undefined, { sensitivity: 'base' })
+  };
+  const matchMiss = (m) => !q || m.key.toLowerCase().includes(q)
+    || spaceLobbyDisplay(m.key).toLowerCase().includes(q);
+  const sortName = (ta, tb) => ta.localeCompare(tb, undefined, { sensitivity: 'base' });
+  // 系統包（core/intro/voice）置頂
+  let sys = packs.filter(p => p.kind !== 'lobby' && matchPack(p));
+  sys = [...sys].sort((a, b) => _spaceSort === 'name'
+    ? sortName(spacePackName(a).title, spacePackName(b).title)
     : (b.size - a.size) || a.key.localeCompare(b.key));
-  let html = '';
-  for (const p of packs) {
-    const dn = spacePackName(p);
-    const delBtn = p.deletable
-      ? `<button class="spaceDel" data-key="${p.key}" data-i18n-title="set.space.delete" title="刪除">✕</button>`
-      : `<span class="spaceLock" data-i18n-title="set.space.locked" title="必要資源">${ICO.lock}</span>`;
-    const broken = _spaceBroken[p.key]
-      ? `<span class="spaceBroken">${ICO.warn} ${t('set.space.broken')}</span>` : '';
-    const meta = [
-      typeof p.files === 'number' ? t('set.space.files', { n: p.files }) : null,
-      (usedBy[p.key]?.size > 1) ? t('set.space.usedBy', { n: usedBy[p.key].size }) : null,
-    ].filter(Boolean).join(' · ');
-    html += `<div class="spaceRow">`
-      + `<span class="spaceName sg-cell">${escapeHtml(dn.title)}</span>`
-      + `<span class="spaceKind sg-cell">${spaceKindLabel(p.kind)}</span>`
-      + `<span class="sg-cell sg-info">${broken}`
-      + (dn.sub ? `<span class="spaceKey">${escapeHtml(dn.sub)}</span> ` : '')
-      + (meta ? `<span class="spaceMeta">${escapeHtml(meta)}</span>` : '')
-      + (p.present ? '' : ` <span class="warn" style="font-size: 14px;">${ICO.warn}</span>`)
-      + `</span>`
-      + `<span class="spaceSize sg-num">${fmtBytes(p.size)}</span>`
-      + `<span class="sg-act">${delBtn}</span>`
-      + `</div>`;
-  }
+  // 大廳混排：已裝走 pack 資料、待裝走 manifest，同一列格式
+  let lob = [];
+  let missByKey = new Map();
+  try {
+    for (const m of spaceMissingLobbies()) missByKey.set(m.key, m);
+  } catch {}
+  try {
+    const seen = new Set();
+    for (const key of (ORDER || [])) {
+      try { if (lobbyGroupInfo(key).isDup) continue; } catch { continue; }
+      seen.add(key);
+      const p = byKey.get('lobby/' + key);
+      const m = missByKey.get(key);
+      // lobby 包在本地 → 已裝列；lobby 包缺席 → 待裝列（含一起補語音）
+      if (p && matchPack(p)) lob.push({ t: 'in', p });
+      else if (!p && m && matchMiss(m)) lob.push({ t: 'out', m });
+    }
+    for (const m of missByKey.values()) {
+      if (seen.has(m.key) || !matchMiss(m)) continue;
+      lob.push({ t: 'out', m });
+    }
+    // manifest 沒列但本地有的 lobby 包（資源複本等）也顯示，避免刪不掉
+    for (const p of packs) {
+      if (p.kind !== 'lobby' || !matchPack(p)) continue;
+      const lk = p.key.replace(/^lobby\//, '');
+      if (!seen.has(lk) && !lob.some(r => r.t === 'in' && r.p === p)) lob.push({ t: 'in', p });
+    }
+  } catch {}
+  lob = lob.sort((a, b) => {
+    const na = a.t === 'in' ? spacePackName(a.p).title : spaceLobbyDisplay(a.m.key);
+    const nb = b.t === 'in' ? spacePackName(b.p).title : spaceLobbyDisplay(b.m.key);
+    if (_spaceSort === 'name') return sortName(na, nb);
+    const sa = a.t === 'in' ? a.p.size : a.m.bytes;
+    const sb = b.t === 'in' ? b.p.size : b.m.bytes;
+    return (sb - sa) || sortName(na, nb);
+  });
+  let html = sys.map(p => spaceInstalledRow(p, usedBy)).join('')
+    + lob.map(r => r.t === 'in' ? spaceInstalledRow(r.p, usedBy) : spaceMissingRow(r.m)).join('');
   setSpaceList.innerHTML = html || `<div style="font-size: 14px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('set.space.empty')}</div>`;
-  renderSpaceMissing();
   for (const btn of setSpaceList.querySelectorAll('.spaceDel')) {
     btn.addEventListener('click', async () => {
       const key = btn.dataset.key;
@@ -3966,6 +3979,21 @@ function renderSpaceList() {
       } finally {
         btn.disabled = false;
       }
+    });
+  }
+  for (const btn of setSpaceList.querySelectorAll('.spaceDl')) {
+    btn.addEventListener('click', async () => {
+      const key = btn.dataset.key;
+      if (!key || _spaceDownloading.has(key)) return;
+      _spaceDownloading.add(key);
+      renderSpaceList();
+      try { await ensureLobbyAssets(key); }
+      catch (e) { console.warn('[space] 下載大廳失敗', key, e?.message); }
+      finally { _spaceDownloading.delete(key); }
+      _spaceBroken = {};
+      setSpaceMessage('');
+      await refreshSpaceManager();
+      await refreshSettingsAssets();
     });
   }
 }
