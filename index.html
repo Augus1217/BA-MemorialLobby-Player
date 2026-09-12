@@ -351,8 +351,16 @@
     .spaceDel:hover { background: rgba(255,90,90,.35); }
     .spaceDel:disabled { opacity: .4; cursor: wait; }
 
-    /* settings panel */
-    #settingsPanel { width: min(920px, 84vw); max-height: 84vh; overflow-y: auto; }
+    /* settings panel：固定尺寸（不隨分頁內容伸縮） */
+    #settingsPanel {
+      width: min(1020px, 92vw); height: min(800px, 90vh);
+      overflow-y: auto;
+      display: flex; flex-direction: column;
+    }
+    #settingsPanel > div[id^="setTab"] { flex: 1; min-height: 0; }
+    #setTabSpace, #setTabRank { display: flex; flex-direction: column; }
+    #setTabSpace[style*="none"], #setTabRank[style*="none"] { display: none; }
+    #setSpaceList, #setRankList { flex: 1; min-height: 120px; }
     #settingsPanel::-webkit-scrollbar { width: 8px; }
     /* 設定視窗放大＋文字提亮（蓋住約八成版面，底襯不透光避免被大廳洗掉） */
     #settingsPanel {
@@ -933,7 +941,7 @@
         <span id="setSpaceOrphans" style="font-size: 14px; color:#c6d2f5;"></span>
         <button id="setSpaceCleanOrphans" class="btnTxt" data-i18n="set.space.cleanOrphans">清除</button>
       </div>
-      <div id="setSpaceList" class="spaceGrid sg-spaces" style="margin-top:8px; max-height:46vh; overflow-y:auto;"></div>
+      <div id="setSpaceList" class="spaceGrid sg-spaces" style="margin-top:8px; overflow-y:auto;"></div>
     </div>
 
     <div id="setTabRank" style="display:none;">
@@ -945,7 +953,7 @@
         <button id="setRankRefresh" class="btnTxt" data-i18n="set.rankRefresh">重新整理</button>
       </div>
       <div id="setRankSummary" style="font-size: 14px; color:#c6d2f5; margin:6px 0;"></div>
-      <div id="setRankList" class="spaceGrid sg-rank" style="margin-top:4px; max-height:46vh; overflow-y:auto;"></div>
+      <div id="setRankList" class="spaceGrid sg-rank" style="margin-top:4px; overflow-y:auto;"></div>
       <div style="margin-top:8px; font-size: 14px; color:#9aa4e0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <span data-i18n="set.rankFoot">開啟使用統計來參與排行，讓榜單更準。</span>
         <button id="setRankJoin" class="btnTxt" data-i18n="set.rankJoin">去開啟</button>
