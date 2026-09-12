@@ -7094,7 +7094,7 @@ async function init() {
     toggleSettingsPanel(true);
     switchSettingsTab('rank');
   });
-  setClose.addEventListener('click', toggleSettingsPanel);
+  setClose.addEventListener('click', () => toggleSettingsPanel(false));
   settingsBackdrop?.addEventListener('click', () => toggleSettingsPanel(false));
   document.getElementById('setTabBtnMain')?.addEventListener('click', () => switchSettingsTab('main'));
   document.getElementById('setTabBtnSpace')?.addEventListener('click', () => switchSettingsTab('space'));
