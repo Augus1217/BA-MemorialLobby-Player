@@ -5652,6 +5652,36 @@ function unloadLobbyAssets(lobbyName) {
 // 只記「lobby 看幾次、共幾秒」，每日彙總一次 POST 到 Worker D1；
 // installId 是本地隨機 UUID（可重置），server 只存其 pepper 雜湊，不存 IP/UA。
 const STATS_URL = 'https://ba-assets.imlindora.workers.dev/api/stats';
+// 爆紅擴充：再開 Cloudflare 帳號、把 Worker+D1 同樣 deploy 一份後，加進這個陣列即可。
+// 寫入按 installId 分片（一台裝置永遠打同一個，榜單不重複計）；讀榜全查再合併。
+// 目前只有一組，上線行為與單 URL 完全一致。
+const STATS_URLS = [STATS_URL];
+function statsShardUrl(key) {
+  const urls = (STATS_URLS && STATS_URLS.length ? STATS_URLS : [STATS_URL]).filter(Boolean);
+  if (urls.length === 1) return urls[0];
+  let h = 2166136261; // FNV-1a（分片只要穩定散開，不用加密強度）
+  const s = String(key || '');
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return urls[(h >>> 0) % urls.length];
+}
+// 純函數：合併多庫 top（views/seconds 相加、installs 取 max 當下界、重排 rank）
+function statsMergeTops(lists) {
+  const merged = {};
+  for (const top of (lists || [])) {
+    for (const row of (top || [])) {
+      if (!row || !row.lobby) continue;
+      const m = merged[row.lobby] || (merged[row.lobby] = { views: 0, seconds: 0, installs: 0 });
+      m.views += row.views || 0;
+      m.seconds += row.seconds || 0;
+      m.installs = Math.max(m.installs, row.installs || 0);
+    }
+  }
+  const byLobby = {};
+  Object.entries(merged)
+    .sort((a, b) => b[1].views - a[1].views)
+    .forEach(([lobby, v], i) => { byLobby[lobby] = { rank: i + 1, views: v.views, seconds: v.seconds, installs: v.installs }; });
+  return byLobby;
+}
 const setStatsCk = document.getElementById('setStatsCk');
 function statsEnabled() {
   try { return localStorage.getItem('ba_stats_optin') === '1'; } catch { return false; }
@@ -5750,18 +5780,23 @@ async function statsFlush(useBeacon = false) {
       .map(([lobby, v]) => ({ lobby, views: v.views || 0, seconds: v.seconds || 0 }));
     if (!entries.length) { delete p.dates[day]; continue; }
     const payload = JSON.stringify({ installId: id, date: day, entries });
+    // 分片寫入；beacon 只能發射不管（回來也讀不到），fetch 才逐個 failover
+    const shard = statsShardUrl(id);
+    const order = [shard, ...((STATS_URLS && STATS_URLS.length ? STATS_URLS : [STATS_URL]).filter((u) => u && u !== shard))];
     let ok = false;
-    try {
-      if (useBeacon && navigator.sendBeacon) {
-        ok = navigator.sendBeacon(STATS_URL, new Blob([payload], { type: 'application/json' }));
-      } else {
-        const r = await fetch(STATS_URL, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: payload, keepalive: true,
-        });
-        ok = r.ok;
+    if (useBeacon && navigator.sendBeacon) {
+      try { ok = navigator.sendBeacon(shard, new Blob([payload], { type: 'application/json' })); } catch { ok = false; }
+    } else {
+      for (const u of order) {
+        try {
+          const r = await fetch(u, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: payload, keepalive: true,
+          });
+          if (r.ok) { ok = true; break; }
+        } catch { /* 下一個 */ }
       }
-    } catch { ok = false; }
+    }
     if (ok) delete p.dates[day];
     else break; // 網路不行就留著下次送
   }
@@ -5787,15 +5822,24 @@ async function statsFetchTop(days = 30, force = false) {
       }
     } catch {}
   }
-  const r = await fetch(STATS_URL + '/top?days=' + days + '&limit=200');
-  if (!r.ok) throw new Error('top ' + r.status);
-  const j = await r.json();
-  const byLobby = {};
-  (j.top || []).forEach((row, i) => {
-    if (row && row.lobby) byLobby[row.lobby] = {
-      rank: i + 1, views: row.views || 0, seconds: row.seconds || 0, installs: row.installs || 0,
-    };
-  });
+  // 讀榜：全部 endpoint 都查再合併（單 URL 時就是一次請求，行為不變）
+  const urls = (STATS_URLS && STATS_URLS.length ? STATS_URLS : [STATS_URL]).filter(Boolean);
+  let lists;
+  if (urls.length === 1) {
+    const r = await fetch(urls[0] + '/top?days=' + days + '&limit=200');
+    if (!r.ok) throw new Error('top ' + r.status);
+    const j = await r.json();
+    lists = [j.top || []];
+  } else {
+    const settled = await Promise.allSettled(urls.map(async (u) => {
+      const r = await fetch(u + '/top?days=' + days + '&limit=200');
+      if (!r.ok) throw new Error('top ' + r.status);
+      return (await r.json()).top || [];
+    }));
+    lists = settled.filter((s) => s.status === 'fulfilled').map((s) => s.value);
+    if (!lists.length) throw new Error('top all failed');
+  }
+  const byLobby = statsMergeTops(lists);
   _statsTop = { days, at: Date.now(), byLobby };
   try { localStorage.setItem(ck, JSON.stringify(_statsTop)); } catch {}
   return _statsTop;
