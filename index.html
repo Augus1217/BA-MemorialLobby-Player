@@ -58,7 +58,7 @@
     #loading {
       position: fixed; inset: 0; z-index: 40; display: none;
       align-items: center; justify-content: center; color: #cfd6ff;
-      font-size: 13px; letter-spacing: .2em; background: rgba(5,6,13,.72);
+      font-size: 14px; letter-spacing: .2em; background: rgba(5,6,13,.72);
     }
     #loading.show { display: flex; }
     #loading .spin {
@@ -98,13 +98,13 @@
       text-shadow: 0 2px 14px rgba(0,0,0,.8);
     }
     #subName {
-      color: rgba(210,220,255,.66); font-size: 11px; letter-spacing: .34em; margin-top: 4px;
+      color: rgba(210,220,255,.66); font-size: 14px; letter-spacing: .34em; margin-top: 4px;
       text-shadow: 0 1px 8px rgba(0,0,0,.8);
     }
 
     #err { position: fixed; bottom: 14px; left: 14px; right: 14px; z-index: 50;
       background: rgba(150,30,30,.9); color: #fff; padding: 10px 14px; border-radius: 8px;
-      font-size: 13px; white-space: pre-wrap; display: none; }
+      font-size: 14px; white-space: pre-wrap; display: none; }
 
     /* skip confirm popup (game UIPopup_System style: dark overlay, centered box) */
     #skipConfirm {
@@ -136,8 +136,8 @@
     @media (pointer: coarse) {
       #btnStudents { width: 46px; height: 46px; }
       #sbClose { width: 42px; height: 42px; }
-      .segs button { padding: 9px 15px; font-size: 13px; }
-      .ctl-btn { padding: 12px; font-size: 13.5px; }
+      .segs button { padding: 9px 15px; font-size: 14px; }
+      .ctl-btn { padding: 12px; font-size: 14px; }
       .btnTxt { padding: 11px 20px; font-size: 14px; }
       .set-tabs button { padding: 10px 26px; }
     }
@@ -146,7 +146,7 @@
       position: fixed; left: 50%; bottom: 86px; transform: translateX(-50%);
       z-index: 55; display: none; max-width: 86vw; text-align: center;
       background: rgba(10,14,34,.92); border: 1px solid rgba(140,180,255,.4);
-      border-radius: 10px; padding: 10px 18px; font-size: 13px; color: #e8ecff;
+      border-radius: 10px; padding: 10px 18px; font-size: 14px; color: #e8ecff;
       letter-spacing: .06em;
     }
     #rotateHint.open { display: block; animation: panelIn .25s ease-out; }
@@ -170,7 +170,7 @@
     #sbSearch {
       flex: 1; background: rgba(255,255,255,.06); color: #e8ecff;
       border: 1px solid rgba(255,255,255,.14); border-radius: 6px;
-      padding: 8px 10px; font-size: 13px; outline: none; min-width: 0;
+      padding: 8px 10px; font-size: 14px; outline: none; min-width: 0;
     }
     #sbSearch:focus { border-color: rgba(169,182,255,.6); }
     #sbSearch::placeholder { color: rgba(210,220,255,.45); }
@@ -189,7 +189,7 @@
       display: flex; align-items: center; gap: 8px; width: 100%;
       background: rgba(255,255,255,.07); color: #dfe4ff;
       border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
-      padding: 9px 10px; font-size: 12.5px; line-height: 1;
+      padding: 9px 10px; font-size: 14px; line-height: 1;
       cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer;
       transition: background .2s, border-color .2s, opacity .2s;
     }
@@ -204,23 +204,23 @@
     }
     .ctl-sep { height: 1px; background: rgba(255,255,255,.08); margin: 2px 0; }
     .ctl-row { display: flex; align-items: center; gap: 8px; }
-    .ctl-row .lbl { font-size: 12px; color: #9aa4e0; letter-spacing: .08em; flex: 1; }
-    #ctlVoiceSegs button { min-width: 44px; font-size: 12px; }
+    .ctl-row .lbl { font-size: 14px; color: #9aa4e0; letter-spacing: .08em; flex: 1; }
+    #ctlVoiceSegs button { min-width: 54px; font-size: 14px; }
     .sb-group-head {
-      color: #9aa4e0; font-size: 12px; letter-spacing: .08em; font-weight: 600;
+      color: #9aa4e0; font-size: 14px; letter-spacing: .08em; font-weight: 600;
       padding: 12px 4px 4px; display: flex; align-items: baseline; gap: 8px;
     }
     .sb-group-head:first-child { padding-top: 6px; }
-    .sb-group-head .cnt { color: rgba(200,210,255,.65); font-size: 11px; font-weight: 400; }
+    .sb-group-head .cnt { color: rgba(200,210,255,.65); font-size: 14px; font-weight: 400; }
     .sb-item {
       display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent;
-      border: none; color: #dfe4ff; font-size: 13px; padding: 6px 10px;
+      border: none; color: #dfe4ff; font-size: 14px; padding: 6px 10px;
       border-radius: 6px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer;
     }
     .sb-ico { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex: none; background: rgba(20,25,60,.6); }
     .sb-item:hover { background: rgba(60,70,140,.35); }
     .sb-item.cur { background: rgba(80,95,180,.45); color: #fff; }
-    .sb-empty { color: rgba(210,220,255,.75); font-size: 13px; padding: 22px 8px; text-align: center; }
+    .sb-empty { color: rgba(210,220,255,.75); font-size: 14px; padding: 22px 8px; text-align: center; }
 
     /* 手繪 SVG 圖示（取代原 HUD 的 Unicode 符號字） */
     .ctl-btn .ico svg, #btnSkip svg {
@@ -233,7 +233,7 @@
 
     /* 側欄釘選（sb-pin）：名字截斷 + 圖釘開關 */
     .sb-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sb-hot { font-size: 11px; flex: none; color: #ffcf6b; white-space: nowrap; }
+    .sb-hot { font-size: 14px; flex: none; color: #ffcf6b; white-space: nowrap; }
     .svg-ico { width: 13px; height: 13px; vertical-align: -2px; flex: none; }
     .spaceMeta .svg-ico, .sb-hot .svg-ico { width: 12px; height: 12px; vertical-align: -1px; }
     #sbSort .svg-ico { width: 16px; height: 16px; vertical-align: middle; }
@@ -275,13 +275,13 @@
     }
     .panel-title::before { width: 22px; }
     .panel-title::after { flex: 1; opacity: .45; }
-    #expChar { font-size: 12px; color: #9aa4e0; letter-spacing: .04em; margin-left: auto; }
+    #expChar { font-size: 14px; color: #9aa4e0; letter-spacing: .04em; margin-left: auto; }
     .panel-row { display: flex; align-items: center; justify-content: space-between; margin: 11px 0; }
-    .panel-row .lbl { font-size: 12px; color: #9aa4e0; letter-spacing: .08em; }
+    .panel-row .lbl { font-size: 14px; color: #9aa4e0; letter-spacing: .08em; }
     .segs { display: flex; gap: 4px; }
     .segs button {
       background: rgba(255,255,255,.07); color: #cfd6ff; border: 1px solid rgba(255,255,255,.12);
-      border-radius: 6px; padding: 5px 11px; font-size: 12px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; transition: background .2s;
+      border-radius: 6px; padding: 5px 11px; font-size: 14px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; transition: background .2s;
     }
     .segs button:hover { background: rgba(255,255,255,.13); }
     .segs button.on {
@@ -292,22 +292,22 @@
     .segs button.dis { opacity: .35; pointer-events: none; }
     #expTalkSel {
       background: rgba(255,255,255,.07); color: #e8ecff; border: 1px solid rgba(255,255,255,.14);
-      border-radius: 6px; padding: 5px 10px; font-size: 12px; max-width: 220px;
+      border-radius: 6px; padding: 5px 10px; font-size: 14px; max-width: 220px;
       cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer;
     }
     #expTalkSel:disabled { opacity: .35; }
     #expCustomRow input {
       width: 84px; background: rgba(255,255,255,.07); color: #e8ecff;
-      border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 5px 8px; font-size: 12px;
+      border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 5px 8px; font-size: 14px;
     }
     #expCustomRow input::-webkit-outer-spin-button, #expCustomRow input::-webkit-inner-spin-button { -webkit-appearance: none; }
-    .ck { font-size: 12px; color: #cfd6ff; display: flex; align-items: center; gap: 6px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; }
+    .ck { font-size: 14px; color: #cfd6ff; display: flex; align-items: center; gap: 6px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; }
     .ck input { accent-color: #4c8dff; }
     .ck.dis { opacity: .35; pointer-events: none; }
     .panel-btns { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
     .btnTxt {
       background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); color: #e8ecff;
-      border-radius: 8px; padding: 8px 16px; font-size: 13px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; transition: background .2s;
+      border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; transition: background .2s;
     }
     .btnTxt:hover { background: rgba(255,255,255,.15); border-color: rgba(169,182,255,.45); }
     .btnTxt.primary {
@@ -323,34 +323,34 @@
     .spaceToolbar input[type="search"], .spaceToolbar select {
       background: rgba(255,255,255,.06); color: #e8ecff;
       border: 1px solid rgba(255,255,255,.14); border-radius: 6px;
-      padding: 7px 10px; font-size: 12px; outline: none;
+      padding: 7px 10px; font-size: 14px; outline: none;
     }
     .spaceToolbar input[type="search"] { flex: 1; min-width: 140px; }
     .spaceToolbar input[type="search"]::placeholder { color: rgba(210,220,255,.45); }
     .spaceToolbar select option { background: #141a38; }
-    .spaceToolbar .btnTxt { padding: 7px 14px; font-size: 12px; }
-    #setSpaceMsg { font-size: 12px; color: #8fd49c; margin: 4px 0; min-height: 0; }
+    .spaceToolbar .btnTxt { padding: 7px 14px; font-size: 14px; }
+    #setSpaceMsg { font-size: 14px; color: #8fd49c; margin: 4px 0; min-height: 0; }
     #setSpaceMsg.warn { color: #e8c268; }
     .spaceRow { display: contents; }
     .spaceGrid { display: grid; column-gap: 10px; row-gap: 3px; align-items: center; }
     .sg-spaces { grid-template-columns: minmax(90px, 1.4fr) auto minmax(0, 2fr) auto 22px; }
     .sg-missing { grid-template-columns: minmax(90px, 1.4fr) auto minmax(0, 2fr) auto auto; }
-    .sg-rank { grid-template-columns: 26px minmax(100px, 1.5fr) minmax(0, 1fr) auto auto auto; }
+    .sg-rank { grid-template-columns: 32px minmax(100px, 1.5fr) minmax(0, 1fr) auto auto auto; }
     .sg-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sg-num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; color: #9aa4e0; font-size: 11px; }
+    .sg-num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; color: #9aa4e0; font-size: 14px; }
     .sg-act { display: flex; align-items: center; justify-content: center; }
     .sg-empty { grid-column: 1 / -1; }
     .spaceMain { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
     .spaceName { color: #e8ecff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .spaceKind { font-size: 11px; color: #9aa4e0; flex-shrink: 0; }
-    .spaceKey { font-size: 11px; color: #8f99c8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
-    .spaceMeta { font-size: 11px; color: #9aa4e0; flex-shrink: 0; }
-    .spaceBroken { font-size: 11px; color: #e8c268; flex-shrink: 0; }
-    .rankNo { font-size: 11px; color: #9aa4e0; width: 22px; flex: none; text-align: center; font-variant-numeric: tabular-nums; }
+    .spaceKind { font-size: 14px; color: #9aa4e0; flex-shrink: 0; }
+    .spaceKey { font-size: 14px; color: #8f99c8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
+    .spaceMeta { font-size: 14px; color: #9aa4e0; flex-shrink: 0; }
+    .spaceBroken { font-size: 14px; color: #e8c268; flex-shrink: 0; }
+    .rankNo { font-size: 14px; color: #9aa4e0; width: 30px; flex: none; text-align: center; font-variant-numeric: tabular-nums; }
     .spaceSize { color: #9aa4e0; font-variant-numeric: tabular-nums; flex-shrink: 0; }
     .spaceDel {
       width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(255,120,120,.35);
-      background: rgba(255,80,80,.12); color: #ffb3b3; font-size: 11px; line-height: 1;
+      background: rgba(255,80,80,.12); color: #ffb3b3; font-size: 14px; line-height: 1;
       cursor: pointer; flex-shrink: 0; transition: background .2s;
     }
     .spaceDel:hover { background: rgba(255,90,90,.35); }
@@ -366,8 +366,8 @@
         linear-gradient(165deg, rgba(24,36,76,1) 0%, rgba(12,17,40,1) 55%, rgba(8,11,28,1) 100%);
       font-size: 14px;
     }
-    #settingsPanel .lbl { color: #d5dfff; font-size: 13px; }
-    #settingsPanel .set-head { color: #a9c4ff; font-size: 13px; }
+    #settingsPanel .lbl { color: #d5dfff; font-size: 14px; }
+    #settingsPanel .set-head { color: #a9c4ff; font-size: 14px; }
     #settingsPanel .panel-title { font-size: 16px; }
     #settingsBackdrop {
       position: fixed; inset: 0; z-index: 59; display: none;
@@ -377,7 +377,7 @@
     .set-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
     .set-tabs button {
       background: rgba(255,255,255,.06); color: #cfd6ff; border: 1px solid rgba(255,255,255,.14);
-      border-radius: 8px; padding: 7px 22px; font-size: 13px; letter-spacing: .2em; text-indent: .2em;
+      border-radius: 8px; padding: 7px 22px; font-size: 14px; letter-spacing: .2em; text-indent: .2em;
       cursor: pointer;
     }
     .set-tabs button.on {
@@ -389,7 +389,7 @@
     .set-section { border-top: 1px solid rgba(130,160,255,.14); padding-top: 12px; margin-top: 14px; }
     .set-section:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
     .set-head {
-      font-size: 12px; color: #8fb4ff; letter-spacing: .16em; font-weight: 600; margin-bottom: 9px;
+      font-size: 14px; color: #8fb4ff; letter-spacing: .16em; font-weight: 600; margin-bottom: 9px;
       display: flex; align-items: center; gap: 7px;
     }
     .set-head::before {
@@ -399,8 +399,8 @@
     }
     #setLangSegs button { min-width: 52px; }
     #setStreamingRow { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    #setStreamingDesc { font-size: 12px; color: #c6d2f5; line-height: 1.6; margin-top: 6px; }
-    #setAssetsStatus { font-size: 12px; color: #cfd6ff; line-height: 1.7; }
+    #setStreamingDesc { font-size: 14px; color: #c6d2f5; line-height: 1.6; margin-top: 6px; }
+    #setAssetsStatus { font-size: 14px; color: #cfd6ff; line-height: 1.7; }
     #setAssetsStatus .ok { color: #8fd49c; }
     #setAssetsStatus .warn { color: #e8c268; }
     #setDownloadBtn { width: 100%; margin-top: 10px; }
@@ -409,7 +409,7 @@
     #recBadge {
       position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 70;
       display: none; align-items: center; gap: 9px; background: rgba(120,20,25,.88); color: #fff;
-      border-radius: 20px; padding: 7px 14px; font-size: 13px; letter-spacing: .12em;
+      border-radius: 20px; padding: 7px 14px; font-size: 14px; letter-spacing: .12em;
       box-shadow: 0 4px 20px rgba(0,0,0,.5);
     }
     #recBadge.show { display: flex; }
@@ -418,7 +418,7 @@
     .rec-sep { color: rgba(255,255,255,.5); }
     #recBadge button {
       background: rgba(255,255,255,.18); border: none; color: #fff; border-radius: 6px;
-      width: 24px; height: 24px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; font-size: 12px; line-height: 1;
+      width: 24px; height: 24px; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer; font-size: 14px; line-height: 1;
     }
     #recBadge button:hover { background: rgba(255,255,255,.3); }
 
@@ -426,7 +426,7 @@
     #toast {
       position: fixed; bottom: 74px; left: 50%; transform: translateX(-50%); z-index: 60;
       background: rgba(18,72,38,.94); color: #eafff0; padding: 10px 18px; border-radius: 8px;
-      font-size: 13px; letter-spacing: .06em; opacity: 0; pointer-events: none; transition: opacity .3s;
+      font-size: 14px; letter-spacing: .06em; opacity: 0; pointer-events: none; transition: opacity .3s;
     }
     #toast.show { opacity: 1; }
     #err.ok { background: rgba(18,72,38,.94); }
@@ -538,11 +538,11 @@
       flex: none;
     }
     #infoName { font-size: 18px; font-weight: 700; letter-spacing: .02em; }
-    #infoSub { font-size: 11px; opacity: .55; letter-spacing: .18em; margin-top: 2px; }
+    #infoSub { font-size: 14px; opacity: .55; letter-spacing: .18em; margin-top: 2px; }
     #infoPanel .info-head .btn { margin-left: auto; }
     #infoBody { overflow-y: auto; padding: 14px 16px 24px; flex: 1; }
     .info-status {
-      font-size: 13px; line-height: 1.6; padding: 10px 12px; margin-bottom: 12px;
+      font-size: 14px; line-height: 1.6; padding: 10px 12px; margin-bottom: 12px;
       background: rgba(255,255,255,.05); border-left: 3px solid rgba(169,182,255,.55);
       border-radius: 6px; color: #dfe5ff; white-space: pre-line;
     }
@@ -551,13 +551,13 @@
       display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin-bottom: 14px;
     }
     .info-meta:empty { display: none; }
-    .info-meta .row { font-size: 12.5px; line-height: 1.5; }
-    .info-meta .k { opacity: .5; margin-right: 6px; font-size: 11.5px; }
+    .info-meta .row { font-size: 14px; line-height: 1.5; }
+    .info-meta .k { opacity: .5; margin-right: 6px; font-size: 14px; }
     .info-sec {
-      font-size: 11px; letter-spacing: .22em; opacity: .5; margin: 16px 0 8px;
+      font-size: 14px; letter-spacing: .22em; opacity: .5; margin: 16px 0 8px;
       text-transform: uppercase;
     }
-    .info-intro { font-size: 13.5px; line-height: 1.85; white-space: pre-line; color: #eef1ff; }
+    .info-intro { font-size: 14px; line-height: 1.85; white-space: pre-line; color: #eef1ff; }
     .info-intro:empty { display: none; }
     .info-lines { display: flex; flex-direction: column; gap: 8px; }
     .info-lines .gsep {
@@ -567,11 +567,11 @@
     .info-lines .line {
       position: relative;
       display: flex; align-items: center; gap: 8px;
-      font-size: 13px; line-height: 1.7; padding: 9px 12px 13px;
+      font-size: 14px; line-height: 1.7; padding: 9px 12px 13px;
       background: rgba(255,255,255,.045); border-radius: 8px;
       border: 1px solid rgba(255,255,255,.06); color: #e6eaff;
     }
-    .info-lines .line .no { opacity: .4; font-size: 11px; flex: none; }
+    .info-lines .line .no { opacity: .4; font-size: 14px; flex: none; }
     .info-lines .line .txt { flex: 1; min-width: 0; }
     .info-lines .line .play {
       flex: none; width: 26px; height: 26px; padding: 0; margin-left: auto;
@@ -595,7 +595,7 @@
       display: block; height: 100%; width: 0;
       background: linear-gradient(90deg, #8fb4ff, #cdd8ff); border-radius: 2px;
     }
-    .info-empty { font-size: 12.5px; opacity: .45; padding: 8px 0; }
+    .info-empty { font-size: 14px; opacity: .45; padding: 8px 0; }
 
     /* Loading screen: intro + spinner + 確認中です…… */
     #loadingScreen {
@@ -656,11 +656,11 @@
       margin-bottom: 6px; color: #fff;
     }
     #assetSubtitle {
-      font-size: 13px; color: rgba(210,220,255,.6); letter-spacing: .08em;
+      font-size: 14px; color: rgba(210,220,255,.6); letter-spacing: .08em;
       margin-bottom: 28px;
     }
     #assetStatus {
-      font-size: 13px; color: #9aa4e0; letter-spacing: .06em;
+      font-size: 14px; color: #9aa4e0; letter-spacing: .06em;
       margin-bottom: 14px; min-height: 20px;
     }
     #assetProgress { margin-bottom: 10px; }
@@ -673,10 +673,10 @@
       border-radius: 3px; transition: width .3s ease;
     }
     #assetProgressText {
-      font-size: 12px; color: rgba(210,220,255,.5); margin-top: 6px;
+      font-size: 14px; color: rgba(210,220,255,.5); margin-top: 6px;
     }
     #assetDetail {
-      font-size: 12px; color: rgba(210,220,255,.4); margin-bottom: 20px;
+      font-size: 14px; color: rgba(210,220,255,.4); margin-bottom: 20px;
       min-height: 18px;
     }
 
@@ -891,17 +891,17 @@
     <div class="set-section">
       <div class="set-head" data-i18n="set.statsTitle">使用統計</div>
       <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setStatsCk"> <span data-i18n="set.stats">分享匿名使用統計</span></label>
-      <div style="font-size:12px; color:#c6d2f5; margin-top:2px; line-height:1.7;" data-i18n="set.statsDesc">只回報看過哪些大廳與停留秒數，用於人氣排行。預設關閉；關閉會刪除未送出的本地記錄。</div>
+      <div style="font-size: 14px; color:#c6d2f5; margin-top:2px; line-height:1.7;" data-i18n="set.statsDesc">只回報看過哪些大廳與停留秒數，用於人氣排行。預設關閉；關閉會刪除未送出的本地記錄。</div>
       <div style="margin-top:6px; display:flex; align-items:center; gap:8px;">
         <button id="setStatsReset" class="btnTxt" data-i18n="set.statsReset">重置識別碼</button>
-        <span id="setStatsResetDone" style="font-size:12px; color:#9aa4e0;"></span>
+        <span id="setStatsResetDone" style="font-size: 14px; color:#9aa4e0;"></span>
       </div>
     </div>
 
     <div class="set-section">
       <div class="set-head" data-i18n="set.list">角色列表</div>
       <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setJpOnlyCk" checked> <span data-i18n="set.jpOnly">顯示日服限定角色</span></label>
-      <div style="font-size:12px; color:#c6d2f5; margin-top:2px; line-height:1.7;" data-i18n="set.jpOnlyDesc">日服限定角色只有日文語音（沒有韓文語音）。</div>
+      <div style="font-size: 14px; color:#c6d2f5; margin-top:2px; line-height:1.7;" data-i18n="set.jpOnlyDesc">日服限定角色只有日文語音（沒有韓文語音）。</div>
     </div>
 
     <div class="set-section">
@@ -912,18 +912,18 @@
         <div style="background:rgba(255,255,255,.08); border-radius:6px; height:14px; overflow:hidden;">
           <div id="setProgressFill" style="height:100%; width:0%; background:rgba(120,140,255,.55); transition:width .3s;"></div>
         </div>
-        <div id="setProgressText" style="font-size:12px; color:#c6d2f5; margin-top:5px;">0%</div>
+        <div id="setProgressText" style="font-size: 14px; color:#c6d2f5; margin-top:5px;">0%</div>
         <div style="background:rgba(255,255,255,.08); border-radius:6px; height:10px; overflow:hidden; margin-top:6px;">
           <div id="setProgressFillTotal" style="height:100%; width:0%; background:rgba(120,200,160,.55); transition:width .3s;"></div>
         </div>
-        <div id="setProgressTextTotal" style="font-size:12px; color:#c6d2f5; margin-top:5px;"></div>
+        <div id="setProgressTextTotal" style="font-size: 14px; color:#c6d2f5; margin-top:5px;"></div>
       </div>
     </div>
 
     </div><!-- /setTabMain -->
 
     <div id="setTabSpace" style="display:none;">
-      <div id="setSpaceSummary" style="font-size:13px; color:#c6d2f5; margin-bottom:4px;"></div>
+      <div id="setSpaceSummary" style="font-size: 14px; color:#c6d2f5; margin-bottom:4px;"></div>
       <div id="setSpaceMsg"></div>
       <div class="spaceToolbar">
         <input type="search" id="setSpaceSearch" data-i18n-ph="set.space.search" placeholder="搜尋資源包…">
@@ -938,12 +938,12 @@
         <button id="setSpaceDelOtherVoice" class="btnTxt" data-i18n="set.space.delOtherVoice">刪另一語言語音</button>
       </div>
       <div class="spaceToolbar" id="setSpaceOrphanRow" style="display:none">
-        <span id="setSpaceOrphans" style="font-size:12px; color:#c6d2f5;"></span>
+        <span id="setSpaceOrphans" style="font-size: 14px; color:#c6d2f5;"></span>
         <button id="setSpaceCleanOrphans" class="btnTxt" data-i18n="set.space.cleanOrphans">清除</button>
       </div>
       <div id="setSpaceList" class="spaceGrid sg-spaces" style="margin-top:8px; max-height:46vh; overflow-y:auto;"></div>
       <details id="setSpaceMissingWrap" style="margin-top:8px; display:none;">
-        <summary id="setSpaceMissingHead" style="font-size:12px; color:#9aa4e0; cursor:pointer;"></summary>
+        <summary id="setSpaceMissingHead" style="font-size: 14px; color:#9aa4e0; cursor:pointer;"></summary>
         <div id="setSpaceMissing" class="spaceGrid sg-missing" style="margin-top:4px; max-height:30vh; overflow-y:auto;"></div>
       </details>
     </div>
@@ -956,17 +956,17 @@
         </div>
         <button id="setRankRefresh" class="btnTxt" data-i18n="set.rankRefresh">重新整理</button>
       </div>
-      <div id="setRankSummary" style="font-size:13px; color:#c6d2f5; margin:6px 0;"></div>
+      <div id="setRankSummary" style="font-size: 14px; color:#c6d2f5; margin:6px 0;"></div>
       <div id="setRankList" class="spaceGrid sg-rank" style="margin-top:4px; max-height:46vh; overflow-y:auto;"></div>
-      <div style="margin-top:8px; font-size:12px; color:#9aa4e0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+      <div style="margin-top:8px; font-size: 14px; color:#9aa4e0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <span data-i18n="set.rankFoot">開啟使用統計來參與排行，讓榜單更準。</span>
         <button id="setRankJoin" class="btnTxt" data-i18n="set.rankJoin">去開啟</button>
       </div>
     </div>
 
     <div id="setTabAbout" style="display:none;">
-      <div style="font-size:13px; color:#dbe4ff; line-height:2;" data-i18n="set.aboutDesc">BA Memorial Lobby 回憶大廳播放器。</div>
-      <div style="margin-top:10px; font-size:13px; color:#dbe4ff;">
+      <div style="font-size: 14px; color:#dbe4ff; line-height:2;" data-i18n="set.aboutDesc">BA Memorial Lobby 回憶大廳播放器。</div>
+      <div style="margin-top:10px; font-size: 14px; color:#dbe4ff;">
         <span data-i18n="set.officialDl">官方遊戲下載：</span>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:8px;">
           <a href="https://play.google.com/store/apps/details?id=com.nexon.bluearchive" target="_blank" rel="noopener"><img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" height="64"></a>
@@ -977,7 +977,7 @@
         </div>
       </div>
       <div id="setDesktopDlRow" style="display:none; margin-top:10px;">
-        <a id="setDesktopDl" href="https://github.com/Augus1217/BA-MemorialLobby-Player/releases" target="_blank" rel="noopener" style="font-size:13px; color:#a9c4ff;" data-i18n="set.desktopDl">下載桌面版</a>
+        <a id="setDesktopDl" href="https://github.com/Augus1217/BA-MemorialLobby-Player/releases" target="_blank" rel="noopener" style="font-size: 14px; color:#a9c4ff;" data-i18n="set.desktopDl">下載桌面版</a>
       </div>
     </div>
 
@@ -1020,7 +1020,7 @@
         <button id="assetBtnFull" class="btnTxt primary" data-i18n="dl.fullInstall">完整安裝</button>
         <button id="assetBtnQuick" class="btnTxt" data-i18n="dl.quickStart">先進大廳</button>
       </div>
-      <label id="bootStatsRow" style="display:none; gap:8px; align-items:flex-start; text-align:left; margin:4px auto 0; max-width:340px; font-size:12px; color:#c6d2f5; cursor:pointer;">
+      <label id="bootStatsRow" style="display:none; gap:8px; align-items:flex-start; text-align:left; margin:4px auto 0; max-width:340px; font-size: 14px; color:#c6d2f5; cursor:pointer;">
         <input type="checkbox" id="bootStatsCk" style="margin-top:2px; accent-color:#7f8ac0;">
         <span><span data-i18n="set.stats">分享匿名使用統計</span><br><small data-i18n="set.statsDesc" style="color:#9aa4e0;">只回報看過哪些大廳與停留秒數，用於人氣排行。預設關閉；關閉會刪除未送出的本地記錄。</small></span>
       </label>

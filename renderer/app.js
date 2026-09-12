@@ -3607,7 +3607,7 @@ function renderStorageLine(quota) {
   if (!el) {
     el = document.createElement('div');
     el.id = 'setStorageLine';
-    el.style.cssText = 'font-size:12px; color:#c6d2f5; margin-top:6px;';
+    el.style.cssText = 'font-size: 14px; color:#c6d2f5; margin-top:6px;';
     setAssetsStatus.after(el);
   }
   if (quota?.quota > 0) {
@@ -3859,7 +3859,7 @@ function renderSpaceMissing() {
       + `<span class="spaceSize sg-num">${m.bytes > 0 ? fmtBytes(m.bytes) : '—'}</span>`
       + `<span class="sg-act"><button class="btnTxt spaceDl" data-key="${escapeHtml(k)}"${busy ? ' disabled' : ''}>`
       + `${busy ? t('set.space.downloading') : t('set.space.download')}</button></span></div>`;
-  }).join('') || `<div style="font-size:12px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('set.space.empty')}</div>`;
+  }).join('') || `<div style="font-size: 14px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('set.space.empty')}</div>`;
   for (const btn of box.querySelectorAll('.spaceDl')) {
     btn.addEventListener('click', async () => {
       const key = btn.dataset.key;
@@ -3885,16 +3885,16 @@ async function renderRankList(force = false) {
   for (const b of document.querySelectorAll('#setRankSegs button')) {
     b.classList.toggle('on', String(_rankDays) === b.dataset.d);
   }
-  list.innerHTML = `<div style="font-size:12px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('loading.loading')}</div>`;
+  list.innerHTML = `<div style="font-size: 14px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('loading.loading')}</div>`;
   if (summary) summary.textContent = '';
   let top = null;
   try { top = await statsFetchTop(_rankDays, force); }
-  catch { list.innerHTML = `<div style="font-size:12px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('set.statusOffline')}</div>`; return; }
+  catch { list.innerHTML = `<div style="font-size: 14px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('set.statusOffline')}</div>`; return; }
   const rows = Object.entries(top.byLobby || {})
     .map(([lobby, v]) => ({ lobby, ...v }))
     .sort((a, b) => a.rank - b.rank);
   if (!rows.length) {
-    list.innerHTML = `<div style="font-size:12px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('set.rankEmpty')}</div>`;
+    list.innerHTML = `<div style="font-size: 14px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('set.rankEmpty')}</div>`;
     return;
   }
   // 參與人數取各間去重數的最大值（不同間有重疊，這是下界，誠實不灌水）
@@ -3946,13 +3946,13 @@ function renderSpaceList() {
       + `<span class="sg-cell sg-info">${broken}`
       + (dn.sub ? `<span class="spaceKey">${escapeHtml(dn.sub)}</span> ` : '')
       + (meta ? `<span class="spaceMeta">${escapeHtml(meta)}</span>` : '')
-      + (p.present ? '' : ` <span class="warn" style="font-size:11px;">${ICO.warn}</span>`)
+      + (p.present ? '' : ` <span class="warn" style="font-size: 14px;">${ICO.warn}</span>`)
       + `</span>`
       + `<span class="spaceSize sg-num">${fmtBytes(p.size)}</span>`
       + `<span class="sg-act">${delBtn}</span>`
       + `</div>`;
   }
-  setSpaceList.innerHTML = html || `<div style="font-size:12px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('set.space.empty')}</div>`;
+  setSpaceList.innerHTML = html || `<div style="font-size: 14px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('set.space.empty')}</div>`;
   renderSpaceMissing();
   for (const btn of setSpaceList.querySelectorAll('.spaceDel')) {
     btn.addEventListener('click', async () => {
