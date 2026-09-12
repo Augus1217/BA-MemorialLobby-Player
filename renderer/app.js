@@ -11,7 +11,6 @@ const app = new Application();
 // ---- minimal HUD refs ----
 const hud = document.getElementById('hud');
 const charNameEl = document.getElementById('charName');
-const subNameEl = document.getElementById('subName');
 const loadingEl = document.getElementById('loading');
 const loadingText = document.getElementById('loadingText');
 
@@ -81,7 +80,6 @@ const infoPanel = document.getElementById('infoPanel');
 const infoClose = document.getElementById('infoClose');
 const infoIcon = document.getElementById('infoIcon');
 const infoName = document.getElementById('infoName');
-const infoSub = document.getElementById('infoSub');
 const infoStatus = document.getElementById('infoStatus');
 const infoMeta = document.getElementById('infoMeta');
 const infoIntro = document.getElementById('infoIntro');
@@ -4814,7 +4812,6 @@ function renderInfoPanel() {
   const rec = studentForLobby(name);
   const displayName = (rec && rec[langField(langMode)]) || prettyName(name);
   infoName.textContent = displayName;
-  infoSub.textContent = 'MEMORIAL LOBBY';
   // 頭貼（與側欄同源：icon_index.json → assets/students/）
   const core = (SCHEDULE?.lobbies?.[name]?.characterId
              ?? SCHEDULE?.[name]?.characterId)?.toLowerCase();
@@ -6025,7 +6022,6 @@ async function loadLobby(name) {
   setBgm(bgmForLobby(name));
   renderStudentName(name);
   if (infoPanel?.classList.contains('open')) renderInfoPanel();
-  subNameEl.textContent = 'MEMORIAL LOBBY';
   scheduleAutonomy();
   loadingEl.classList.remove('show');
   fadeOut();

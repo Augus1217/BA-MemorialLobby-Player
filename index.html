@@ -97,10 +97,6 @@
       color: #f2f4ff; font-size: 20px; letter-spacing: .18em; font-weight: 600;
       text-shadow: 0 2px 14px rgba(0,0,0,.8);
     }
-    #subName {
-      color: rgba(210,220,255,.66); font-size: 14px; letter-spacing: .34em; margin-top: 4px;
-      text-shadow: 0 1px 8px rgba(0,0,0,.8);
-    }
 
     #err { position: fixed; bottom: 14px; left: 14px; right: 14px; z-index: 50;
       background: rgba(150,30,30,.9); color: #fff; padding: 10px 14px; border-radius: 8px;
@@ -538,7 +534,6 @@
       flex: none;
     }
     #infoName { font-size: 18px; font-weight: 700; letter-spacing: .02em; }
-    #infoSub { font-size: 14px; opacity: .55; letter-spacing: .18em; margin-top: 2px; }
     #infoPanel .info-head .btn { margin-left: auto; }
     #infoBody { overflow-y: auto; padding: 14px 16px 24px; flex: 1; }
     .info-status {
@@ -727,7 +722,6 @@
     <div id="hudTop" class="hudbar">
       <div id="titleBlock">
         <div id="charName"></div>
-        <div id="subName">MEMORIAL LOBBY</div>
       </div>
       <button id="btnInfo" class="btn" data-i18n-title="hud.info" title="角色介紹"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.6"/><path d="M12 11v5.2"/><circle cx="12" cy="7.8" r=".9" fill="currentColor" stroke="none"/></svg></button>
       <button id="btnSkip" class="btn" data-i18n-title="hud.skip" title="跳過開始動畫"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 6l6.5 6-6.5 6z"/><path d="M13.5 6l6.5 6-6.5 6z"/></svg></button>
@@ -739,7 +733,6 @@
       <img id="infoIcon" alt="" />
       <div>
         <div id="infoName"></div>
-        <div id="infoSub">MEMORIAL LOBBY</div>
       </div>
       <button id="infoClose" class="btn" data-i18n-title="info.close" title="關閉">×</button>
     </div>
