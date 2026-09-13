@@ -318,6 +318,10 @@ const log = (s) => console.log('[lobby]', s);
   // → 動畫名 → { Track, PlayMode, FinishMode, Loop, NextClip, Sync, ... }。
   // 進階手勢沿用真實遊戲的 Track / FM=PlayNext(_01 → _02 循環) / End 命名。
   let CLIP_GRAPH = {};
+  // per-skeleton mix 資料（assets/data/spine_mix.json，由各骨架的 SkeletonData
+  // 資產萃取）：key = skel 檔基名小寫（如 hoshino_home）→ { mix?, custom? }。
+  // 沒收錄＝遊戲也沒給（dump 缺件），退回多數值 0.2（259/270 具皆是）。
+  let SPINE_MIX = null;
   // Title 開場喊聲索引（assets/data/title_voices.json）：
   // { "JP_Aru": ["Aru_Title.ogg"], ... } → assets/voice_title/<folder>/<file>
   let TITLE_VOICES = null;
@@ -1417,6 +1421,7 @@ async function playExtraSkeleton(skelName, clips, vis) {
       obj = Spine.from({ skeleton: skelUrl, atlas: atlasUrl });
       fixAdditiveSlots(obj);
       obj.skelName = skelNorm(skRaw);
+      applySkeletonMix(obj, skRaw);
       extras.push(obj);
       // 圖層：Control 可見窗的互補層（CH0184_00）在本體「上方」（動作時蓋住本體，
       // 窗外隱藏）；一般額外骨架（Shigure 小配件）在本體下方。本體未載入時退回置頂。
@@ -1456,14 +1461,14 @@ async function playExtraSkeleton(skelName, clips, vis) {
       first = false;
     } else {
       const gap = Math.max(0, clip.start - prevStart);
-      obj.state.addAnimation(0, clip.anim, isIdle || false, gap);
+      addObjAnim(obj, 0, clip.anim, isIdle || false, gap);
     }
     prevStart = clip.start;
     if (isIdle) { queuedIdle = true; break; }
   }
   if (!queuedIdle && available.size) {
     const idleName = resolveIdleClipFor(obj);
-    if (available.has(idleName)) obj.state.addAnimation(0, idleName, true, 0);
+    if (available.has(idleName)) addObjAnim(obj, 0, idleName, true, 0);
   }
 }
 function resolveIdleClipFor(obj) {
@@ -1524,11 +1529,11 @@ function restTracks() {
 function setAnimationWithClipMix(track, animName, loop, delay = 0) {
   const entry = spine.state.setAnimation(track, animName, loop);
   if (delay > 0) entry.delay = delay;
+  // 只有 UseDefault=0 才覆寫；否則保留 runtime 的 getMix 結果
+  //（defaultMix 或 setMix 自定義，兩者都對）。
   const cfg = CLIP_CONFIGS[animName];
   if (cfg && !cfg.UseDefaultIntroMix) {
     entry.mixDuration = cfg.IntroMix;
-  } else {
-    entry.mixDuration = spine.state.data.defaultMix;
   }
   return entry;
 }
@@ -1538,9 +1543,44 @@ function addAnimationWithClipMix(track, animName, loop, delay = 0) {
   const cfg = CLIP_CONFIGS[animName];
   if (cfg && !cfg.UseDefaultIntroMix) {
     entry.mixDuration = cfg.IntroMix;
-  } else {
-    entry.mixDuration = spine.state.data.defaultMix;
   }
+  return entry;
+}
+
+// ---- per-skeleton mix（spine_mix.json；本體/bg/scene/extras 全都要設）----
+// skel 路徑（entry.skel / res.skel / skRaw，大小寫不定）→ 檔基名小寫。
+function skelBaseOf(p) {
+  try {
+    return String(p || '').split('/').pop().replace(/^\.\//, '').replace(/\.(skel|json)$/i, '').toLowerCase();
+  } catch { return ''; }
+}
+// 單一真相：某具 spine 該用什麼 defaultMix＋自定義過渡。raw 的 set/addAnimation
+// 也會經 getMix 吃到 defaultMix，所以 bg 鯨魚這類 raw 路徑同樣受此表驅動——
+// 而 UseDefault=0 的 clip（如鯨魚 IntroMix 0.0）必須走下面的 obj wrapper。
+function applySkeletonMix(obj, skelBase) {
+  if (!obj || !obj.state || !obj.state.data) return;
+  const m = (SPINE_MIX || {})[skelBaseOf(skelBase)] || {};
+  try { obj.state.data.defaultMix = (typeof m.mix === 'number') ? m.mix : 0.2; } catch {}
+  for (const [from, to, dur] of (m.custom || [])) {
+    try { obj.state.data.setMix(from, to, dur); } catch {}
+  }
+}
+function mixForObj(obj, animName) {
+  const cfg = CLIP_CONFIGS[animName];
+  if (cfg && !cfg.UseDefaultIntroMix) return cfg.IntroMix;
+  return null;   // null＝不覆寫，沿用 runtime getMix（defaultMix／setMix 自定義）
+}
+function setObjAnim(obj, track, animName, loop, delay = 0) {
+  const entry = obj.state.setAnimation(track, animName, loop);
+  if (delay > 0) entry.delay = delay;
+  const m = mixForObj(obj, animName);
+  if (m !== null) entry.mixDuration = m;
+  return entry;
+}
+function addObjAnim(obj, track, animName, loop, delay = 0) {
+  const entry = obj.state.addAnimation(track, animName, loop, delay);
+  const m = mixForObj(obj, animName);
+  if (m !== null) entry.mixDuration = m;
   return entry;
 }
 
@@ -2124,7 +2164,7 @@ function playStart() {
           first = false;
         } else {
           const gap = Math.max(0, clip.start - prevStart);
-          spine.state.addAnimation(0, clip.anim, isIdle, gap);
+          addAnimationWithClipMix(0, clip.anim, isIdle, gap);
         }
         prevStart = clip.start;
         if (isIdle) { queuedIdle = true; break; }
@@ -5647,6 +5687,7 @@ async function loadScene(entry) {
       const obj = Spine.from({ skeleton: skel, atlas });
       fixAdditiveSlots(obj);
       obj.skelName = (res.skel.startsWith('./') ? res.skel.slice(2) : res.skel).replace(/\.(skel|json)$/i, '').toLowerCase();
+      applySkeletonMix(obj, obj.skelName);
       // 不在此自動播放——由 startBgSequence 依 BA 時間軸統一驅動（避免搶在
       // intro 之前就跑 idle 迴圈，導致 startBgSequence 的冪等判斷誤判而跳過開場）。
       return obj;
@@ -6077,7 +6118,7 @@ async function loadLobby(name) {
     for (const m of sch?.missingMedia || []) voiceSkip.add(m);
     validVoices = new Set((VOICE_INDEX[sch?.characterId] || []).map(f => f.toLowerCase().replace(/\.ogg$/, '')));
     spine.state.addListener({ event: onAnimationEvent, complete: onTrackComplete });
-    spine.state.data.defaultMix = 0.2;
+    applySkeletonMix(spine, entry.skel);
     setupLipHook(spine);
     setupEyes();
     setupInteraction();
@@ -6214,24 +6255,22 @@ function startBgSequence({ skip = false } = {}) {
           (whaleIntro || cur.loop)) return;
       if (whaleIntro) {
         // track0：水族館常駐 idle 立即循環（遊戲 IsTrackMainIdle 行為）
-        bg.state.setAnimation(0, 'Idle_01', true);
+        setObjAnim(bg, 0, 'Idle_01', true);
         // track1：鯨魚進場事件——RandomTimingIntroDelayMode=Random(1), 3~4s
         const delay = 3 + Math.random();
-        const wEntry = bg.state.setAnimation(1, 'Start_WhaleMove_01_R', false);
-        wEntry.delay = delay;
-        // FinishType=PlayNext(3)：接 WhaleMove_01_R loop
-        bg.state.addAnimation(1, 'WhaleMove_01_R', true, 0);
+        setObjAnim(bg, 1, 'Start_WhaleMove_01_R', false, delay);
+        // FinishType=PlayNext(3)：接 WhaleMove_01_R loop（IntroMix 0.0＝硬切，照數據）
+        addObjAnim(bg, 1, 'WhaleMove_01_R', true, 0);
         log(`bg: Idle_01@0 + 鯨魚序列 track1 (+${delay.toFixed(2)}s)`);
       } else {
         // 一般 lobby：Start_X 延遲 timelineBodyStart() 後播一次 → X 迴圈
         const bgIntro = bgAnims.find(n => n.startsWith('Start_') && bgAnims.includes(n.slice(6)));
         const bgLoop = bgIntro ? bgIntro.slice(6) : bgLoopMain;
         if (bgIntro) {
-          const bgEntry = bg.state.setAnimation(0, bgIntro, false);
-          bgEntry.delay = timelineBodyStart();
-          bg.state.addAnimation(0, bgLoop, true, 0);
+          setObjAnim(bg, 0, bgIntro, false, timelineBodyStart());
+          addObjAnim(bg, 0, bgLoop, true, 0);
         } else {
-          bg.state.setAnimation(0, bgLoop, true);
+          setObjAnim(bg, 0, bgLoop, true);
         }
       }
     } else {
@@ -6961,7 +7000,7 @@ async function loadBootData() {
   };
 
   const [camera, idx, transforms, icons, chat, touch, zones, schedule, voiceIdx,
-         timelines, clipMix, clipGraph, titleVoices, flash,
+         timelines, clipMix, clipGraph, spineMix, titleVoices, flash,
          bgmCsv, studentsCsv, subtitles, dialogTypes, postConfig, charProfiles] = await Promise.all([
     settle(json('assets/data/lobby_camera_config.json')),
     settle(json('assets/data/lobby_index.json').catch(() => json('assets/lobby_index.json'))),
@@ -6975,6 +7014,7 @@ async function loadBootData() {
     settle(json('assets/data/lobby_timelines.json')),
     settle(json('assets/data/clip_intro_mix.json')),
     settle(json('assets/data/clip_graph.json')),
+    settle(json('assets/data/spine_mix.json')),
     settle(json('assets/data/title_voices.json')),
     settle(json('assets/data/flash_curves.json')),
     settle(txt('assets/data/lobby_bgm_mapping.csv')),
@@ -6998,6 +7038,7 @@ async function loadBootData() {
   TIMELINES = timelines;
   CLIP_CONFIGS = clipMix || {};
   CLIP_GRAPH = clipGraph || {};
+  SPINE_MIX = spineMix || {};
   TITLE_VOICES = titleVoices;
   FLASH_TABLE = flash ? normalizeFlashTable(flash) : null;
   SUBTITLES = subtitles || {};
