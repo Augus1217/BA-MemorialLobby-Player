@@ -257,7 +257,7 @@
         0 0 0 1px rgba(76,167,255,.08);
       display: none; color: #e8ecff;
     }
-    #exportPanel.open, #settingsPanel.open { display: block; animation: panelIn .22s ease-out; }
+    #exportPanel.open { display: block; animation: panelIn .22s ease-out; }
     @keyframes panelIn {
       from { opacity: 0; transform: translate(-50%, -48%) scale(.96); }
       to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
@@ -353,12 +353,14 @@
     .spaceDel:hover { background: rgba(255,90,90,.35); }
     .spaceDel:disabled { opacity: .4; cursor: wait; }
 
-    /* settings panel：固定尺寸（不隨分頁內容伸縮） */
+    /* settings panel：固定尺寸（不隨分頁內容伸縮）。
+       display 只能在 .open 時給 flex——寫在基底會蓋掉上面的 display:none，
+       造成面板永遠可見、關不掉（幽靈面板）。 */
     #settingsPanel {
       width: min(1020px, 92vw); height: min(800px, 90vh);
       overflow-y: auto;
-      display: flex; flex-direction: column;
     }
+    #settingsPanel.open { display: flex; flex-direction: column; animation: panelIn .22s ease-out; }
     #settingsPanel > div[id^="setTab"] { flex: 1; min-height: 0; }
     #setTabSpace, #setTabRank { display: flex; flex-direction: column; }
     #setTabSpace[style*="none"], #setTabRank[style*="none"] { display: none; }
