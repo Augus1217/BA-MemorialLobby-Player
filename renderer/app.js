@@ -1439,12 +1439,13 @@ async function playExtraSkeleton(skelName, clips, vis) {
     // 已載入過（不應發生：每 lobby 一次）——仍登記可見窗
     extraVisibility.push({ obj, showAt: vis.showAt, hideAt: vis.hideAt });
   }
-  // 依 start 排 delay 鏈（與本體相同的絕對 start 差邏輯），額外骨架一般是播一次即停
-  // （如 CH0184_00 的 Start_Idle_01），不額外補 idle loop。
+  // 依 start 排 delay 鏈（與本體相同的起點錨邏輯：delay 是相對前一段起點的
+  // 絕對 start 差），額外骨架一般是播一次即停（如 CH0184_00 的 Start_Idle_01），
+  // 不額外補 idle loop。
   const available = new Set(obj.state.data.skeletonData.animations.map(a => a.name));
   const playable = clips.filter(c => available.has(c.anim));
   if (!playable.length) return;
-  let schedEnd = 0;
+  let prevStart = 0;
   let first = true;
   let queuedIdle = false;
   for (const clip of playable) {
@@ -1454,10 +1455,10 @@ async function playExtraSkeleton(skelName, clips, vis) {
       if (clip.start > 0) { const e = obj.state.getCurrent(0); if (e) e.delay = clip.start; }
       first = false;
     } else {
-      const gap = Math.max(0, clip.start - schedEnd);
+      const gap = Math.max(0, clip.start - prevStart);
       obj.state.addAnimation(0, clip.anim, isIdle || false, gap);
     }
-    schedEnd = clip.start + (isIdle ? 1e9 : clip.duration);
+    prevStart = clip.start;
     if (isIdle) { queuedIdle = true; break; }
   }
   if (!queuedIdle && available.size) {
@@ -2109,8 +2110,11 @@ function playStart() {
       state.introBlock = true;
       startIntroClock();
       // 排隊鏈：第一個 clip setAnimation（delay=首 clip.start），後續 addAnimation
-      // （delay 相對前一個的「排程結束點」，用絕對 start 差計算）。
-      let schedEnd = 0;   // 前一個 clip 的排程絕對結束時間
+      // 的 delay 是「相對前一段起點」的絕對 start 差——spine 在
+      // current.trackLast >= next.delay 時切換（trackLast 從前一段成為 current
+      // 起算，不含它自己的 delay），所以錨點是前一段起點而非終點。
+      // （曾誤用終點錨，CH0184 的 home Start_Idle_02 被提前到 4s，和 00 重疊。）
+      let prevStart = 0;   // 前一個 clip 的絕對 start（資料時間）
       let first = true;
       let queuedIdle = false;
       for (const clip of bodyClips) {
@@ -2119,10 +2123,10 @@ function playStart() {
           setAnimationWithClipMix(0, clip.anim, isIdle, Math.max(0, clip.start));
           first = false;
         } else {
-          const gap = Math.max(0, clip.start - schedEnd);
+          const gap = Math.max(0, clip.start - prevStart);
           spine.state.addAnimation(0, clip.anim, isIdle, gap);
         }
-        schedEnd = clip.start + (isIdle ? 1e9 : clip.duration);   // Idle 無限循環
+        prevStart = clip.start;
         if (isIdle) { queuedIdle = true; break; }
       }
       if (!queuedIdle) spine.state.addAnimation(0, idleClip, true, 0);
