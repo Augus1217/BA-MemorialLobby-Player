@@ -5963,8 +5963,13 @@ setTimeout(() => {
   }).catch(() => {});
 }, 60000);
 
+let loadGen = 0;   // loadLobby 世代計數（見 loadLobby 內 alive 守衛）
 async function loadLobby(name) {
   if (exporting) return;
+  // 世代守衛：快速連切（或開機與側欄點擊撞期）時，只有最新一次能跑完；
+  // 被超車的舊流程在每個 await 檢查點安靜出局，避免回頭拆掉新大廳的資源。
+  const gen = ++loadGen;
+  const alive = () => gen === loadGen && !exporting;
   stopPreview();   // 切 lobby：停掉單句試播（音訊＋氣泡＋busy 一併收）
   clearTimeout(sceneStabTimer);
   const oldLobby = currentLobby;
@@ -6045,9 +6050,11 @@ async function loadLobby(name) {
   if (!_assetInfo && window.ba?.checkAssets) {
     // 首訪/硬重載後 checkAssets 可能尚未完成；deep-link 直接進大廳時在此補跑一次
     try { _assetInfo = await window.ba.checkAssets(); } catch {}
+    if (!alive()) return;
   }
   if (_assetInfo?.lobbies?.[name]) {
     try { await ensureLobbyAssets(name); retryBgmIfSilent(); } catch (e) { console.warn('[lobby] 串流下載失敗', e.message); }
+    if (!alive()) return;
   }
   loadIdleClip(entry);
   loadingEl.classList.add('show');
@@ -6057,6 +6064,7 @@ async function loadLobby(name) {
       ? [assetUrl(`assets/spine/${name}/${entry.skel}`), assetUrl(`assets/spine/${name}/${entry.atlas}`)]
       : [];
     await Promise.all(charAssets.map(a => Assets.load(a)));
+    if (!alive()) return;   // 被超車：不可再建 spine，否則蓋掉新大廳
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
     fixAdditiveSlots(spine);
     const sch = SCHEDULE?.lobbies?.[name];
@@ -6089,6 +6097,7 @@ async function loadLobby(name) {
   }
 
   await loadScene(entry);
+  if (!alive()) return;
   // Akari 為三獨立 spine（spine=本體 / bg=背景 / scene=特寫）：本體無 Start_Idle_03，
   // 故 sceneIndependent=true，由 fitScene/applyCamera 對獨立 scene 物件個別定位。
   const animNames2 = spine?.state?.data?.skeletonData?.animations?.map(a => a.name) || [];
@@ -6115,12 +6124,14 @@ async function loadLobby(name) {
   const waitFit = () => {
     if (++frames < 3) requestAnimationFrame(waitFit);
     else {
+      if (!alive()) return;
       fitScene();
       playStart();
       log(`[layout] ${name}: scene=${!!scene} charScale=${charScale.toFixed(3)} cameraTargetY=${cameraTargetY.toFixed(0)}`);
     }
   };
   requestAnimationFrame(waitFit);
+  if (!alive()) return;   // 被超車：BGM/名稱/自動演出/fade 都留給最新一次
   setBgm(bgmForLobby(name));
   renderStudentName(name);
   if (infoPanel?.classList.contains('open')) renderInfoPanel();
@@ -6128,6 +6139,7 @@ async function loadLobby(name) {
   loadingEl.classList.remove('show');
   fadeOut();
   try { await loadPostConfig(); } catch (e) {}
+  if (!alive()) return;
   applyPostGrade(name);
   log(`${name} 載入完成 — ${prettyName(name)}`);
 }
