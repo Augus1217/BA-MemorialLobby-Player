@@ -635,10 +635,19 @@ async function probeVoiceLength(name) {
         return ab.duration;
       }
     } catch (e) {
+      // 換格式重試一次（過渡期舊包缺 m4a；解碼不支援也算失敗）
+      try {
+        const alt = altAudioExt(url);
+        if (alt !== url) {
+          const buf = await fetchRetry(alt).then((r) => r.arrayBuffer());
+          const ab = await ensureAudio().decodeAudioData(buf);
+          return ab.duration;
+        }
+      } catch {}
       // KR 缺檔 → 退回 JP 檔的長度（JP 一定存在；保持 CoDialog 節奏正確）
       if (voiceLang === 'kr') {
         try {
-          const jpUrl = `assets/voice/${currentLobbyVoiceFolder}/${lower}.ogg`;
+          const jpUrl = withAudioExt(`assets/voice/${currentLobbyVoiceFolder}/${lower}.ogg`);
           const buf = await fetchRetry(jpUrl).then((r) => r.arrayBuffer());
           const ab = await ensureAudio().decodeAudioData(buf);
           return ab.duration;
@@ -975,7 +984,43 @@ let voiceLang = (() => {
 })();
 function voiceUrl(folder, name) {
   const f = (voiceLang === 'kr') ? folder.replace(/^JP_/, 'KR_') : folder;
-  return assetUrl(`assets/voice/${f}/${name}.ogg`);
+  return assetUrl(`assets/voice/${f}/${name}.${audioExt}`);
+}
+// 音訊格式選擇（iOS WebKit 不播 ogg）：ogg 優先（現有行為不變），
+// 不支援才用包內同名 m4a；兩者皆無才提示。swap 集中在此一處。
+let audioExt = 'ogg';
+function probeAudioFormat() {
+  try {
+    const a = new Audio();
+    if (!a.canPlayType) return 'ogg';
+    if (a.canPlayType('audio/ogg; codecs="vorbis"')) return 'ogg';
+    if (a.canPlayType('audio/mp4; codecs="mp4a.40.2"') || a.canPlayType('audio/x-m4a') || a.canPlayType('audio/aac')) return 'm4a';
+  } catch {}
+  return 'ogg';
+}
+function withAudioExt(url) {
+  if (audioExt === 'm4a') return String(url).replace(/\.ogg$/i, '.m4a');
+  return url;
+}
+// 另一個格式的同名檔（fallback 用；相同即回傳原值）
+function altAudioExt(url) {
+  const u = String(url);
+  if (/\.m4a$/i.test(u)) return u.replace(/\.m4a$/i, '.ogg');
+  if (/\.ogg$/i.test(u)) return u.replace(/\.ogg$/i, '.m4a');
+  return u;
+}
+// 單次換格式重試（過渡期舊包缺 m4a、或檔案損壞時）：同 element 換 src 再播一次。
+function armAudioFallback(audio, url) {
+  try {
+    audio.addEventListener('error', () => {
+      if (audio.dataset.extFb) return;
+      audio.dataset.extFb = '1';
+      const alt = altAudioExt(url);
+      if (alt === url) return;
+      audio.dataset.extSwapped = '1';
+      try { audio.src = alt; audio.play().catch(() => {}); } catch {}
+    });
+  } catch {}
 }
 let voiceCalls = 0;
 // 逐字稿查詢（lobby_subtitle.json：voiceId -> { jp, tw, en } 或字串）。
@@ -1146,9 +1191,10 @@ function speakerCharacterId() {
 function playVoice(voiceId) {
   voiceCalls++;
   const name = voiceId.toLowerCase();
-  const jpBase = `assets/voice/${currentLobbyVoiceFolder}/${name}.ogg`;
+  const jpBase = withAudioExt(`assets/voice/${currentLobbyVoiceFolder}/${name}.ogg`);
   const base = voiceUrl(currentLobbyVoiceFolder, name);
   const audio = new Audio(base);
+  armAudioFallback(audio, base);
   lastVoiceAudio = audio;   // 單句試播用：中斷暫停＋進度條
   const ctx = ensureAudio();
   if (ctx) {
@@ -1195,6 +1241,10 @@ function playVoice(voiceId) {
   audio.addEventListener('ended', () => onTalkVoiceEnd(voiceId));
   audio.addEventListener('error', () => onTalkVoiceEnd(voiceId));
   audio.onerror = () => {    // KR 模式缺檔 → 靜默退回 JP 語音（換 src 重播一次）
+    if (audio.dataset.extSwapped && !audio.dataset.extPlayed) {
+      audio.dataset.extPlayed = '1';   // 換格式重播中，等它的 ended/error 再結
+      return;
+    }
     if (voiceLang === 'kr' && !audio.dataset.jpFallback) {
       audio.dataset.jpFallback = '1';
       audio.src = jpBase;
@@ -1272,15 +1322,24 @@ function setBgm(filename) {
   // 標題 BGM 接手時停掉 intro PV 音軌，避免兩首同時響
   if (_introAudio) { _introAudio.pause(); _introAudio = null; }
   if (!bgmOn || !filename) return;
-  const audio = new Audio(assetUrl(`assets/bgm/${filename}`));
+  const bgmUrl = withAudioExt(assetUrl(`assets/bgm/${filename}`));
+  const audio = new Audio(bgmUrl);
   audio.loop = true;
   audio.volume = 0.42;
   // 串流模式首次進大廳：pack 下載中 SW cache 尚無此檔 → network 404。
   // 標記失敗，等 ensureLobbyAssets 完成後由 retryBgm() 再播一次。
+  // 換格式重試一次（過渡期舊包缺 m4a）：成功就不算失敗。
   audio.addEventListener('error', () => {
+    if (!audio.dataset.extFb) {
+      audio.dataset.extFb = '1';
+      const alt = altAudioExt(bgmUrl);
+      if (alt !== bgmUrl) {
+        try { audio.src = alt; audio.play().catch(() => {}); return; } catch {}
+      }
+    }
     if (bgmAudio === audio) bgmAudio = null;
     console.warn(`[bgm] ${filename} 無法載入（串流包未含或尚在下載）`);
-  }, { once: true });
+  });
   audio.play().catch(() => {});
   bgmAudio = audio;
 }
@@ -2836,6 +2895,10 @@ window.ba_debug = {
     blurOn: () => flashBlurOn,
     blurStrength: () => flashBlur.strength,
     defaultMix: () => (spine ? spine.state.data.defaultMix : null),
+    audioFmt: (v) => {   // 音訊格式診斷/測試鉤：無參讀取，'ogg'/'m4a' 強制切換
+      if (v === 'ogg' || v === 'm4a') { try { audioExt = v; } catch {} }
+      try { return audioExt; } catch { return null; }
+    },
     lobbyCurves: () => (flashCurves() || null),
     tableLoaded: () => !!FLASH_TABLE,
   },
@@ -6625,7 +6688,8 @@ function tryStartIntroAudio() {
   try {
     return Promise.resolve(window.ba?.introMedia?.()).then((media) => {
       if (!media?.audio || _introAudio) return false;
-      const a = new Audio(media.audio);
+      const a = new Audio(withAudioExt(media.audio));
+      armAudioFallback(a, a.src);
       a.loop = true;
       _introAudio = a;
       // Web 自動播放政策：無手勢時 play() 會被拒（rejected）——呼叫端在
@@ -6691,7 +6755,8 @@ function showTapToStart() {
         const files = TITLE_VOICES[folder] || [];
         const file = files[Math.floor(Math.random() * files.length)];
         if (folder && file) {
-          const shout = new Audio(assetUrl(`assets/voice_title/${folder}/${file}`));
+          const shout = new Audio(withAudioExt(assetUrl(`assets/voice_title/${folder}/${file}`)));
+          armAudioFallback(shout, shout.src);
           shout.volume = 1.0;
           shout.play().catch(() => {});
         }
@@ -7089,10 +7154,14 @@ async function init() {
   buildLangSegs();
   applyI18n();
 
-  // iOS Safari 不吃 .ogg（語音＋BGM 同格式）：先探測，不支援就提示一次
+  // 音訊格式探測（iOS WebKit 不吃 .ogg）：ogg 優先，不行就用包內同名 .m4a；
+  // 兩者皆無才提示一次。audioExt 必須在任何語音/BGM 建出來之前決定。
   try {
-    const oggProbe = new Audio();
-    if (oggProbe.canPlayType && !oggProbe.canPlayType('audio/ogg; codecs="vorbis"')) {
+    audioExt = probeAudioFormat();
+    const a = new Audio();
+    const oggOk = !!a.canPlayType?.('audio/ogg; codecs="vorbis"');
+    const aacOk = !!(a.canPlayType?.('audio/mp4; codecs="mp4a.40.2"') || a.canPlayType?.('audio/x-m4a'));
+    if (!oggOk && !aacOk) {
       setTimeout(() => { try { showToast(t('msg.noOgg')); } catch {} }, 4000);
     }
   } catch {}
