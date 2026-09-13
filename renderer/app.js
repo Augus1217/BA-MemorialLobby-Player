@@ -352,6 +352,16 @@ let downPos = null;
 let longPressTimer = null;
 let patting = false;
 let userActiveAt = 0;
+let idleTimer = null;
+// HUD idle 的正確語義：任何輸入都是活躍（立刻清除 idle＋刷新時間＋重起計時），
+// 只有真正安靜 2.6 秒才進 idle。舊寫法在事件裡拿過期時間戳判斷，導致第一次
+// 移動反而關掉 HUD 點擊（且 pointermove 從不刷新，觸控拖曳後 HUD 會卡死）。
+function markUserActive() {
+  userActiveAt = performance.now();
+  hud.classList.remove('idle');
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => hud.classList.add('idle'), 2600);
+}
 
 // ---- eyes follow cursor (drives the same bones Look_01_M animates) ----
 let mouse = { x: -9999, y: -9999, active: false };
@@ -6443,7 +6453,7 @@ function ikSetupLookFallback() {
 function onPointerDown(e) {
   if (exporting) return;
   ensureAudio();
-  userActiveAt = performance.now();
+  markUserActive();
   if (bgmOn && !bgmAudio) setBgm(bgmForLobby(currentLobby));
   if (e.pointerType === 'touch') e.preventDefault();
   downTime = performance.now();
@@ -6479,6 +6489,7 @@ function onPointerMove(e) {
   mouse.x = e.clientX;
   mouse.y = e.clientY;
   mouse.active = true;
+  markUserActive();
   // Press-and-drag gesture — legacy path only. (Game path: the trigger timer
   // is never cancelled by movement; the drag only steers the bone.)
   if (pressSess) return;
@@ -6498,7 +6509,6 @@ function onPointerMove(e) {
       }
     }
   }
-  hud.classList.toggle('idle', performance.now() - userActiveAt > 2600);
 }
 
 function onPointerUp(e) {
@@ -7074,8 +7084,7 @@ async function init() {
     mouse.x = e.clientX;
     mouse.y = e.clientY;
     mouse.active = true;
-    hud.classList.toggle('idle', performance.now() - userActiveAt > 2600);
-    userActiveAt = performance.now();
+    markUserActive();
   });
   document.addEventListener('mouseleave', () => { mouse.active = false; });
   window.addEventListener('blur', () => { mouse.active = false; });
