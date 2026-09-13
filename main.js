@@ -769,28 +769,6 @@ ipcMain.handle('assets-manage-delete', async (event, keys) => {
   return { removed, errors };
 });
 
-// 同一份 app 只允許單一實例：macOS 上誤開第二份（舊副本＋新副本、或 dev
-// 重複 `electron .`）會留下兩個完全重疊的視窗，點擊落在另一實例的面板上
-// （「關一個又跑出一個」）。唯一放行：帶 --remote-debugging-port 的 CDP
-// 自動化測試（需並列開多個 dev 實例）。
-const hasDebugPort = (() => {
-  try {
-    if (app.commandLine?.hasSwitch('remote-debugging-port')) return true;
-  } catch {}
-  return process.argv.some(a => String(a).includes('remote-debugging-port'));
-})();
-const gotSingleInstance = hasDebugPort || app.requestSingleInstanceLock();
-if (!gotSingleInstance) {
-  app.quit();
-} else {
-  app.on('second-instance', () => {
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.focus();
-    }
-  });
-}
-
 app.whenReady().then(async () => {
   // Register app:// protocol for serving assets in production
   if (!isDev) {
