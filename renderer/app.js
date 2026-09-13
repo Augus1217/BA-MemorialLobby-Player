@@ -4048,6 +4048,14 @@ function toggleSettingsPanel(force) {
   settingsPanel.classList.toggle('open', open);
   settingsBackdrop?.classList.toggle('open', open);
   if (open) switchSettingsTab('main');   // 開啟預設回設定頁
+  // 焦點衛生：關閉時若焦點還在面板內（或開面板的鈕上），收回 body；
+  // 否則之後按 Space/Enter 會重新觸發隱藏按鈕（Esc 關閉後最常見）。
+  if (!open) {
+    try {
+      const ae = document.activeElement;
+      if (ae && ae !== document.body && (settingsPanel.contains(ae) || ae === btnCtlSettings || ae === btnCtlRank)) ae.blur();
+    } catch {}
+  }
 }
 
 // ---- 直向小螢幕：提示橫向使用 ----
@@ -4971,6 +4979,13 @@ function toggleInfoPanel(force) {
     renderInfoPanel();
   }
   infoPanel.classList.toggle('open', on);
+  // 焦點衛生（同設定面板）：關閉時收回焦點，避免 Space/Enter 觸發隱藏按鈕重開
+  if (!on) {
+    try {
+      const ae = document.activeElement;
+      if (ae && ae !== document.body && (infoPanel.contains(ae) || ae === btnInfo)) ae.blur();
+    } catch {}
+  }
 }
 
 // ---- 整組試播（介紹面板：每組第一句才有播放鈕）----
@@ -5366,6 +5381,13 @@ function toggleSidebar(force) {
   sidePanel.classList.toggle('open', open);
   btnStudents.textContent = open ? '✕' : '☰';
   if (open) renderSidebar();
+  // 焦點衛生（同設定面板）：關閉時收回焦點，避免 Space/Enter 觸發隱藏按鈕重開
+  if (!open) {
+    try {
+      const ae = document.activeElement;
+      if (ae && ae !== document.body && (sidePanel.contains(ae) || ae === btnStudents)) ae.blur();
+    } catch {}
+  }
 }
 
 // ==================== BA 後製色調還原（各 lobby 的 Volume 資料復刻） ====================
@@ -7189,6 +7211,9 @@ async function onSpaceVerify() {
   });
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && sidePanel.classList.contains('open')) toggleSidebar(false);
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && infoPanel?.classList.contains('open')) toggleInfoPanel(false);
   });
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && settingsPanel.classList.contains('open')) toggleSettingsPanel(false);
