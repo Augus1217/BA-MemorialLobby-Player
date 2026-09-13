@@ -4022,6 +4022,13 @@ function toggleSettingsPanel(force) {
       console.warn('[trace] settings opened', stk);
     } catch {}
   }
+  // 常駐診斷（排查設定面板幽靈自開）：每次開啟都覆寫 localStorage 單鍵；
+  // 重現後讀 ba_lastSettingsOpen 即可定案開啟者，無需掛 flag 或盯 console。
+  if (open) {
+    try {
+      localStorage.setItem('ba_lastSettingsOpen', JSON.stringify({ at: Date.now(), force: String(force), stack: new Error('trace').stack.split('\n').slice(1, 7).join(' <- ') }));
+    } catch {}
+  }
   if (open) {
     exportPanel.classList.remove('open');
     sidePanel.classList.remove('open');
