@@ -2145,6 +2145,7 @@ function playStart() {
       }
       startBgSequence();
       log(`[timeline] ${currentLobby}: ${bodyClips.length} body clips, ${bySkel.size - 1} extra skeleton(s), total ${tl.duration}s`);
+      syncSkipBtn();
       return;
     }
   }
@@ -2168,6 +2169,7 @@ function playStart() {
     setAnimationWithClipMix(0, idleClip, true);
     startBgSequence();
   }
+  syncSkipBtn();
 }
 
 // ---- MemoryLobbySkip (reversed UILobbySpineController.MemoryLobbySkip) ----
@@ -2190,6 +2192,26 @@ function memoryLobbySkip() {
   setAnimationWithClipMix(0, idleClip || 'Idle_01', true);
   startBgSequence({ skip: true });
   log('skip to idle');
+  syncSkipBtn();
+}
+
+// ---- 跳過按鈕可用性：Start_Idle 播完就不開放 ----
+// 可按 ⟺ 正在播開場（introBlock）且 track 0 還沒交棒給循環 idle。
+// 多段開場（Start_Idle_01 → 02 → Idle_01）靠 track 0 當前 entry 的 loop 旗標
+// 精確判斷交棒點；spine 未就緒時沿用 introBlock，避免誤鎖。
+function skipAvailable() {
+  try {
+    if (!spine || exporting || !state.introBlock) return false;
+    const cur = spine.state.getCurrent(0);
+    if (!cur || !cur.animation) return true;
+    return !cur.loop;
+  } catch { return false; }
+}
+function syncSkipBtn() {
+  if (!btnSkip) return;
+  const on = skipAvailable();
+  btnSkip.classList.toggle('off', !on);
+  try { btnSkip.disabled = !on; } catch {}
 }
 
 // ---- debug surface for the reversed state ----
@@ -5982,6 +6004,7 @@ async function loadLobby(name) {
   state.blockList = [];
   state.introBlock = false;
   introVirtual = false;
+  syncSkipBtn();
   introWindowEnd = 0;
   patting = false;
   headAnchorBone = null;
@@ -6144,6 +6167,7 @@ function onTrackComplete(entry) {
     if (state.busy === 'talk') return; // handled by timer
     restTracks();
   }
+  syncSkipBtn();
 }
 
 // Background + closeup sequence. Akari_home 為三個獨立物件：spine=角色本體、
@@ -7081,7 +7105,7 @@ async function init() {
   const skipConfirmEl = document.getElementById('skipConfirm');
   const openSkipConfirm = () => skipConfirmEl && skipConfirmEl.classList.add('show');
   const closeSkipConfirm = () => skipConfirmEl && skipConfirmEl.classList.remove('show');
-  btnSkip.addEventListener('click', openSkipConfirm);
+  btnSkip.addEventListener('click', () => { if (skipAvailable()) openSkipConfirm(); });
   // ---- 角色介紹面板（ⓘ）----
   btnInfo?.addEventListener('click', () => toggleInfoPanel());
   infoClose?.addEventListener('click', () => toggleInfoPanel(false));
