@@ -502,27 +502,31 @@ ipcMain.handle('cancel-download-assets', async () => {
   return true;
 });
 
-ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, voice }) => {
+ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, voice, audioFmt }) => {
   const assetsDir = getAssetsDir();
   const installed = readInstalled();
   const remotePackages = packages || {};
+  const fmt = audioFmt === 'm4a' ? 'm4a' : 'ogg';
   // 設定頁暫停鈕用：包之間檢查旗標，進行中的包經 ctl abort
   dlCancel.cancelled = false;
   dlCancel.cancel = null;
   // 僅下載需要的包（增量）：sha 不同的才下；若呼叫端指定 onlyPacks 則限於該清單
   let pkgNames;
   if (onlyPacks && Array.isArray(onlyPacks)) {
-    pkgNames = onlyPacks.filter(k => remotePackages[k] && installed[k] !== remotePackages[k].sha256);
-    if (pkgNames.length === 0) pkgNames = onlyPacks.filter(k => remotePackages[k]); // 串流：即使 sha 相同但本地檔案遺失也補下
+    const mapped = onlyPacks.map(k => audioPackFor(k, fmt, remotePackages));
+    pkgNames = mapped.filter(k => remotePackages[k] && installed[k] !== remotePackages[k].sha256);
+    if (pkgNames.length === 0) pkgNames = mapped.filter(k => remotePackages[k]); // 串流：即使 sha 相同但本地檔案遺失也補下
   } else {
     pkgNames = Object.keys(remotePackages).filter(k => installed[k] !== remotePackages[k].sha256);
     // 舊版 schema 1 無 per-pack sha 回退為全量
     if (pkgNames.length === 0 && !Object.keys(installed).length) pkgNames = Object.keys(remotePackages);
+    // 格式過濾：只留所選格式（m4a 端無對應包的 ogg 保留作退路）
+    if (fmt === 'm4a') pkgNames = pkgNames.filter(k => !k.startsWith('voice/') || !remotePackages['voice-m4a/' + k.slice('voice/'.length)]);
+    else pkgNames = pkgNames.filter(k => !k.startsWith('voice-m4a/'));
   }
-  // 只下玩家選擇的語音語言（jp/kr）的語音包，不下另一種
+  // 只下玩家選擇的語音語言（jp/kr）的語音包，不下另一種（兩種前綴都認）
   const wantKr = voice === 'kr';
-  pkgNames = pkgNames.filter(k => !k.startsWith('voice/')
-    || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')));
+  pkgNames = pkgNames.filter(k => voiceLangKeep(k, wantKr));
   if (pkgNames.length === 0) {
     try { fs.writeFileSync(getAssetsVersionPath(), version); } catch {}
     return [];
@@ -573,7 +577,7 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, 
 });
 
 // 串流模式：確保某個 lobby 的資源已就緒（core + 該 lobby 需要的包）
-ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies, voice }) => {
+ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies, voice, audioFmt }) => {
   const assetsDir = getAssetsDir();
   const installed = readInstalled();
   // lobby 需要哪些包（由 assets_version.json 的 lobbies 表提供）
@@ -587,8 +591,10 @@ ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies
   // 只下玩家選擇的語音語言（jp/kr）的語音包，不下另一種；
   // 非語音包（lobby/spine/scene/bgm/core）全部保留。
   const wantKr = voice === 'kr';
-  packs = packs.filter((k) => !k.startsWith('voice/')
-    || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')));
+  const fmt = audioFmt === 'm4a' ? 'm4a' : 'ogg';
+  packs = packs.filter((k) => voiceLangKeep(k, wantKr));
+  // 音訊格式：ogg key 有 m4a 對端即改取 m4a（manifest 缺對端＝舊包，沿用 ogg）
+  packs = packs.map((k) => audioPackFor(k, fmt, packages));
   // core 必須先有
   if (packages?.['core'] && installed['core'] !== packages['core'].sha256) packs.unshift('core');
   packs = [...new Set(packs)];
@@ -599,7 +605,8 @@ ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies
     if (!p) return false;
     // 檢查代表性路徑是否存在
     if (k.startsWith('lobby/')) return !fs.existsSync(path.join(assetsDir, 'spine', k.split('/')[1]));
-    if (k.startsWith('voice/')) return !fs.existsSync(path.join(assetsDir, 'voice', k.split('/')[1]));
+    const vd = k.startsWith('voice-m4a/') ? k.slice('voice-m4a/'.length) : k.startsWith('voice/') ? k.slice('voice/'.length) : null;
+    if (vd) return !fs.existsSync(path.join(assetsDir, 'voice', vd));
     return false;
   });
   if (actuallyMissing.length === 0) return { ok: true, cached: true };
@@ -677,7 +684,24 @@ function packPaths(key) {
     return [path.join(assetsDir, 'spine', nm), path.join(assetsDir, 'scene', nm)];
   }
   if (key.startsWith('voice/')) return [path.join(assetsDir, 'voice', key.slice('voice/'.length))];
+  if (key.startsWith('voice-m4a/')) return [path.join(assetsDir, 'voice', key.slice('voice-m4a/'.length))];
   return [];
+}
+
+// 音訊格式分包：voice/<F>（ogg）與 voice-m4a/<F>（m4a）同目錄成對。
+// 瀏覽器按能力只取其一；m4a 端須在 manifest 存在才切換（過渡期舊包自動退回 ogg）。
+function audioPackFor(key, fmt, packages) {
+  if (fmt !== 'm4a' || typeof key !== 'string' || !key.startsWith('voice/')) return key;
+  const alt = 'voice-m4a/' + key.slice('voice/'.length);
+  if (packages && packages[alt]) return alt;
+  return key;
+}
+// 語音語言過濾（jp/kr）同時認 voice/ 與 voice-m4a/ 前綴
+function voiceLangKeep(key, wantKr) {
+  const f = key.startsWith('voice-m4a/') ? key.slice('voice-m4a/'.length)
+    : key.startsWith('voice/') ? key.slice('voice/'.length) : null;
+  if (f === null) return true;
+  return wantKr ? f.startsWith('KR_') : f.startsWith('JP_');
 }
 
 ipcMain.handle('assets-manage-list', async () => {
@@ -715,6 +739,7 @@ function packPrimaryPath(key) {
   if (key === 'assets-player') return path.join(assetsDir, 'bgm');
   if (key.startsWith('lobby/')) return path.join(assetsDir, 'spine', key.slice('lobby/'.length));
   if (key.startsWith('voice/')) return path.join(assetsDir, 'voice', key.slice('voice/'.length));
+  if (key.startsWith('voice-m4a/')) return path.join(assetsDir, 'voice', key.slice('voice-m4a/'.length));
   return null;
 }
 

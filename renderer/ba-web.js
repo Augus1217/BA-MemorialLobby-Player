@@ -427,13 +427,25 @@ const ba = {
     };
   },
 
-  async downloadAssets({ version, packages, onlyPacks, voice }, onProgress) {
+  async downloadAssets({ version, packages, onlyPacks, voice, audioFmt }, onProgress) {
     const meta = version && _versionMeta?.version === version
       ? _versionMeta : await fetchRemoteVersion();
     // 尊重呼叫端指定的包集合（過去直接忽略，開始下載永遠抓全部）。
     const wanted = onlyPacks?.filter((k) => meta.packages?.[k])
       ?? (packages ? Object.keys(packages).filter((k) => meta.packages?.[k]) : null)
       ?? Object.keys(meta.packages || {});
+    const fmt = audioFmt === 'm4a' ? 'm4a' : 'ogg';
+    const audioPackFor = (k) => {
+      if (fmt !== 'm4a' || !k.startsWith('voice/')) return k;
+      const alt = 'voice-m4a/' + k.slice('voice/'.length);
+      return meta.packages?.[alt] ? alt : k;
+    };
+    const voiceLangKeep = (k) => {
+      const f = k.startsWith('voice-m4a/') ? k.slice('voice-m4a/'.length)
+        : k.startsWith('voice/') ? k.slice('voice/'.length) : null;
+      if (f === null) return true;
+      return (voice === 'kr') ? f.startsWith('KR_') : f.startsWith('JP_');
+    };
     const sendProgress = (p) => {
       try { onProgress?.(p); } catch {}
       ba._emitProgress(p);
@@ -442,11 +454,12 @@ const ba = {
     const c = await activeCache();
     await migrateFromPreviousCache(meta, c);
     const installed = await readMeta(c);
-    const wantKr = voice === 'kr';
-    const toDownload = wanted.filter(
-      (k) => installed[k] !== meta.packages[k]?.sha256
-        && (!k.startsWith('voice/')
-          || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')))
+    // 格式選擇：ogg key 有 m4a 對端即改取（只留一邊，不重複下）；同 key 去重
+    const dlWanted = [...new Set(wanted.map(audioPackFor))];
+    const toDownload = dlWanted.filter(
+      (k) => installed[k] !== meta.packages[k]?.sha256 && voiceLangKeep(k)
+        && (fmt !== 'ogg' || !k.startsWith('voice-m4a/'))
+        && (fmt !== 'm4a' || !k.startsWith('voice/') || !meta.packages?.['voice-m4a/' + k.slice('voice/'.length)])
     );
     if (!toDownload.length) return { ok: true, version: meta.version };
     _dlCtl.cancelled = false;
@@ -486,7 +499,7 @@ const ba = {
     return { ok: results.every((r) => r.ok) && !_dlCtl.cancelled, cancelled: _dlCtl.cancelled, version: meta.version, results };
   },
 
-  async ensureLobby({ lobby, version, packages, lobbies, voice }) {
+  async ensureLobby({ lobby, version, packages, lobbies, voice, audioFmt }) {
     const meta = version && _versionMeta?.version === version
       ? _versionMeta : await fetchRemoteVersion();
     await openCache(meta.version);
@@ -500,11 +513,24 @@ const ba = {
       const k = 'lobby/' + lobby;
       if (packages?.[k]) packs = [k];
     }
-    // 只下玩家選擇的語音語言（jp/kr）的語音包，不下另一種；
+    // 只下玩家選擇的語音語言（jp/kr）的語音包，不下另一種（兩種前綴都認）；
     // 非語音包（lobby/spine/scene/bgm/core）全部保留。
     const wantKr = voice === 'kr';
-    packs = packs.filter((k) => !k.startsWith('voice/')
-      || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')));
+    const voiceLangKeep = (k) => {
+      const f = k.startsWith('voice-m4a/') ? k.slice('voice-m4a/'.length)
+        : k.startsWith('voice/') ? k.slice('voice/'.length) : null;
+      if (f === null) return true;
+      return wantKr ? f.startsWith('KR_') : f.startsWith('JP_');
+    };
+    packs = packs.filter(voiceLangKeep);
+    // 音訊格式：ogg key 有 m4a 對端即改取 m4a（manifest 缺對端＝舊包，沿用 ogg）
+    const fmt = audioFmt === 'm4a' ? 'm4a' : 'ogg';
+    const audioPackFor = (k) => {
+      if (fmt !== 'm4a' || !k.startsWith('voice/')) return k;
+      const alt = 'voice-m4a/' + k.slice('voice/'.length);
+      return meta.packages?.[alt] ? alt : k;
+    };
+    packs = packs.map(audioPackFor);
     if (meta.packages?.['core'] && installed['core'] !== meta.packages['core']?.sha256) {
       packs.unshift('core');
     }
@@ -611,6 +637,8 @@ const ba = {
             list = rels.filter((r) => r.startsWith('spine/' + dir + '/') || r.startsWith('scene/' + dir + '/'));
             const bgm = bgmByLobby?.[dir];
             if (bgm && inCache.has('bgm/' + bgm)) list = [...list, 'bgm/' + bgm];
+          } else if (k.startsWith('voice-m4a/')) {
+            list = rels.filter((r) => r.startsWith('voice/' + k.slice('voice-m4a/'.length) + '/'));
           } else if (k.startsWith('voice/')) {
             list = rels.filter((r) => r.startsWith(k + '/'));
           }

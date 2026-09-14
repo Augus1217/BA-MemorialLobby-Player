@@ -3816,7 +3816,7 @@ function startSettingsDownload() {
   const version = info.remoteVersion || '1.0.0';
   const pkgs = {};
   for (const k of info.needsDownloadPacks || []) pkgs[k] = info.packages[k];
-  _dlPromise = window.ba.downloadAssets({ version, packages: pkgs, voice: voiceLang }).then(async (res) => {
+  _dlPromise = window.ba.downloadAssets({ version, packages: pkgs, voice: voiceLang, audioFmt: audioExt }).then(async (res) => {
     _dlRunning = false;
     _dlPromise = null;
     const arr = Array.isArray(res) ? res : (res?.results || []);
@@ -3857,7 +3857,7 @@ let _spaceSort = 'size';
 let _spaceBroken = {};
 
 function spaceKindLabel(kind) {
-  const map = { core: t('set.space.kindCore'), intro: t('set.space.kindIntro'), lobby: t('set.space.kindLobby'), voice: t('set.space.kindVoice') };
+  const map = { core: t('set.space.kindCore'), intro: t('set.space.kindIntro'), lobby: t('set.space.kindLobby'), voice: t('set.space.kindVoice'), 'voice-m4a': t('set.space.kindVoiceM4a') };
   return map[kind] || kind;
 }
 
@@ -3952,7 +3952,10 @@ function spaceMissingLobbies() {
         return wantKr ? !pk.startsWith('voice/JP_') : !pk.startsWith('voice/KR_');
       });
       if (!need.length) continue;
-      const missing = need.filter(pk => !installed.has(pk));
+      // 任一格式已裝即視為齊全（ogg/m4a 成對，同目錄）
+      const audioAltKey = (k) => k.startsWith('voice/') ? 'voice-m4a/' + k.slice('voice/'.length)
+        : k.startsWith('voice-m4a/') ? 'voice/' + k.slice('voice-m4a/'.length) : null;
+      const missing = need.filter(pk => !installed.has(pk) && !(audioAltKey(pk) && installed.has(audioAltKey(pk))));
       if (!missing.length) continue;
       // 待下載量：manifest 標稱大小加總（與上表同欄位對齊用）
       const pkgs = _settingsAssetInfo?.packages || {};
@@ -6806,6 +6809,7 @@ async function ensureLobbyAssets(lobbyName) {
       packages: _assetInfo.packages,
       lobbies: _assetInfo.lobbies,
       voice: voiceLang,
+      audioFmt: audioExt,
     });
     if (res && !res.cached && res.results) {
       const failed = res.results.filter(r => !r.ok);
@@ -6940,7 +6944,7 @@ async function showAssetDownload(assetInfo) {
         : assetInfo.packages;
       let results = null;
       try {
-        results = await window.ba.downloadAssets({ version, packages: pkgs, voice: voiceLang });
+        results = await window.ba.downloadAssets({ version, packages: pkgs, voice: voiceLang, audioFmt: audioExt });
       } catch (e) {
         results = [{ name: '', ok: false, error: e?.message || String(e) }];
       }
@@ -7302,8 +7306,12 @@ async function init() {
   document.getElementById('setSpaceDelLobbies')?.addEventListener('click', () => spaceDeleteKeys(
     (_spaceInfo?.packs || []).filter((p) => p.kind === 'lobby').map((p) => p.key)));
   document.getElementById('setSpaceDelOtherVoice')?.addEventListener('click', () => {
-    const other = voiceLang === 'kr' ? 'voice/JP_' : 'voice/KR_';
-    spaceDeleteKeys((_spaceInfo?.packs || []).filter((p) => p.key.startsWith(other)).map((p) => p.key));
+    const other = voiceLang === 'kr' ? 'JP_' : 'KR_';
+    spaceDeleteKeys((_spaceInfo?.packs || []).filter((p) => {
+      const f = p.key.startsWith('voice-m4a/') ? p.key.slice('voice-m4a/'.length)
+        : p.key.startsWith('voice/') ? p.key.slice('voice/'.length) : null;
+      return f !== null && f.startsWith(other);
+    }).map((p) => p.key));
   });
   document.getElementById('setSpaceCleanOrphans')?.addEventListener('click', async () => {
     const r = await window.ba.cleanOrphans?.().catch(() => null) || { removed: 0 };
