@@ -100,7 +100,7 @@ async function migrateFromPreviousCache(meta, newCache, onProgress) {
   return stat;
 }
 
-// ---- version manifest ----
+// ---- version manifest（main＋voice-m4a companion 合併） ----
 async function fetchRemoteVersion() {
   if (_versionMeta) return _versionMeta;
   const r = await fetch(LATEST_VERSION_URL, { cache: 'no-store' });
@@ -108,12 +108,23 @@ async function fetchRemoteVersion() {
   const meta = await r.json();
   if (!meta?.version) throw new Error('assets_version.json invalid');
   meta._base = `${WORKER_BASE}/v${meta.version}`;
+  meta._m4aBase = `${WORKER_BASE}/v${meta.version}-m4a`;
+  // companion（1000 上限分流；404 容忍→退回純 ogg，下次重試）
+  try {
+    const r2 = await fetch(`${meta._m4aBase}/assets_version_m4a.json`, { cache: 'no-store' });
+    if (r2.ok) {
+      const m4a = await r2.json();
+      if (m4a?.packages) meta.packages = { ...meta.packages, ...m4a.packages };
+    }
+  } catch {}
   _versionMeta = meta;
   return meta;
 }
 
 function packUrl(meta, name) {
-  return `${meta._base}/assets-${name.replace(/\//g, '_')}-v${meta.version}.tar.gz`;
+  const base = (meta._m4aBase && typeof name === 'string' && name.startsWith('voice-m4a/'))
+    ? meta._m4aBase : meta._base;
+  return `${base}/assets-${name.replace(/\//g, '_')}-v${meta.version}.tar.gz`;
 }
 
 // ---- mini tar parser（ustar；strip:1） ----

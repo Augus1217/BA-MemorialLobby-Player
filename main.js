@@ -311,6 +311,9 @@ ipcMain.handle('screen-size', async () => {
 const ASSETS_WORKER_BASE = 'https://ba-assets.imlindora.workers.dev';
 const ASSETS_VERSION_URL = `${ASSETS_WORKER_BASE}/latest/assets_version.json`;
 const ASSETS_PACKAGES_URL = ASSETS_WORKER_BASE;
+// voice-m4a 包住在 companion release（tag=主版號+-m4a；1000 上限分流），其餘走主版
+const packTagFor = (name, version) =>
+  (typeof name === 'string' && name.startsWith('voice-m4a/')) ? `v${version}-m4a` : `v${version}`;
 
 function getAssetsVersionPath() {
   return path.join(getAssetsDir(), '.version');
@@ -442,6 +445,20 @@ ipcMain.handle('check-assets', async (event, { voice } = {}) => {
   } catch (e) {
     console.warn('[assets] 無法取得遠端版本:', e.message);
   }
+  // companion manifest（voice-m4a 分流 release，tag=主版號+-m4a；
+// GitHub 單 release 硬上限 1000 assets 故分流）。404/失敗容忍→退回純 ogg
+  //（audioPackFor 只在 manifest 有對端時才改取 m4a；下次啟動重試）。
+  if (remoteVersion?.version) {
+    try {
+      const m4aMeta = await fetchJSON(
+        `${ASSETS_WORKER_BASE}/v${remoteVersion.version}-m4a/assets_version_m4a.json`);
+      if (m4aMeta?.packages) {
+        remoteVersion.packages = { ...remoteVersion.packages, ...m4aMeta.packages };
+      }
+    } catch (e) {
+      console.warn('[assets] companion manifest 不可用，m4a 包暫時缺席:', e.message);
+    }
+  }
 
   // 計算需要下載的包（schema 2 增量；schema 1 回退為整版）
   // dev 模式（直接跑 repo）：assets/ 已在本地，installed.json 只是下載器記帳，
@@ -548,7 +565,7 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, 
     };
     try {
       sendProgress({ status: 'downloading', percent: 0 });
-      const url = `${ASSETS_PACKAGES_URL}/v${version}/${tarName}` || pkg.url;
+      const url = `${ASSETS_PACKAGES_URL}/${packTagFor(name, version)}/${tarName}` || pkg.url;
       await downloadFile(url, tarPath, (dl, total) => {
         sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total });
       }, dlCancel);
@@ -624,7 +641,7 @@ ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies
     };
     try {
       sendProgress({ status: 'downloading', percent: 0 });
-      const url = `${ASSETS_PACKAGES_URL}/v${version}/${tarName}` || pkg.url;
+      const url = `${ASSETS_PACKAGES_URL}/${packTagFor(name, version)}/${tarName}` || pkg.url;
       await downloadFile(url, tarPath, (dl, total) => {
         sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total });
       });
