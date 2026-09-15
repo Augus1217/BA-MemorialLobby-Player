@@ -120,6 +120,18 @@ const I18N_TAG_FALLBACK = 'zh-TW';
 let i18nDict = null;       // loaded dict (all langs)
 let uiLang = null;         // active LANG_MODES key ('tw'|'jp'|'cn'|'en'|'kr')
 
+// 唯一除錯開關（正式版預設全關）：PROBE=1（headless 自檢）／LAYOUT=1（版面量測）／
+// autostart=1（自動化跳過等待）。診斷程式一律走這裡，不在正常路徑散落正則。
+const BA_DEBUG = (() => {
+  const q = location.search + location.hash;
+  return {
+    probe: /PROBE=1/.test(q),
+    layout: /LAYOUT=1/.test(q),
+    auto: /autostart=1|PROBE=1/.test(q),
+    cursorOff: /cursorOff=1/.test(q),
+  };
+})();
+
 function i18nTag(mode) {
   return I18N_UI[mode] || I18N_TAG_FALLBACK;
 }
@@ -170,31 +182,11 @@ async function loadI18n() {
   }
 }
 
-// 本機備援字典：pack 的 ui_i18n.json（SW cache-first 優先）缺這些 key 時立即生效，
-// 避免選單顯示成原始 key（skip.title / set.space.*…）。pack 未來補 key 仍優先。
+// 本機備援字典：正常保持空白。正式字串一律進 assets/ui/ui_i18n.json（單一來源）。
+// 例外：SW 若快取到舊版 ui 檔、新 key 會短暫顯示原文——屬已知取捨（清快取即復原），
+// 不要為了它把翻譯複製一份回來（曾有 21 條雙份殘留，json 優先導致本機版永遠不生效，
+// 修了等於沒修；scripts/check_i18n.py 會擋下任何與 json 重複的 key）。
 const LOCAL_I18N = {
-  'skip.title':   { 'zh-TW': '紀念大廳的開始動畫', 'zh-CN': '纪念大厅的开幕动画', 'ja': '記念ホールのオープニング', 'en': 'Memorial lobby opening', 'ko': '메모리얼 로비 오프닝' },
-  'skip.confirm': { 'zh-TW': '是否跳過開場動畫？', 'zh-CN': '是否跳过开场动画？', 'ja': 'オープニングをスキップしますか？', 'en': 'Skip the opening?', 'ko': '오프닝을 건너뛸까요?' },
-  'skip.cancel':  { 'zh-TW': '取消', 'zh-CN': '取消', 'ja': 'キャンセル', 'en': 'Cancel', 'ko': '취소' },
-  'skip.ok':      { 'zh-TW': '確定', 'zh-CN': '确定', 'ja': 'OK', 'en': 'OK', 'ko': '확인' },
-  'set.list':        { 'zh-TW': '角色列表', 'zh-CN': '角色列表', 'ja': 'キャラクターリスト', 'en': 'Student list', 'ko': '캐릭터 목록' },
-  'set.jpOnly':      { 'zh-TW': '顯示日服限定角色', 'zh-CN': '显示日服限定角色', 'ja': '日服限定キャラを表示', 'en': 'Show JP-only students', 'ko': '일섭 한정 캐릭터 표시' },
-  'set.jpOnlyDesc':  { 'zh-TW': '日服限定角色只有日文語音（沒有韓文語音）。', 'zh-CN': '日服限定角色只有日文语音（没有韩文语音）。', 'ja': '日服限定キャラは日本語ボイスのみです（韓国語ボイスなし）。', 'en': 'JP-only students have Japanese voice only (no Korean voice).', 'ko': '일섭 한정 캐릭터는 일본어 보이스만 있습니다 (한국어 보이스 없음).' },
-  'sidebar.pinned':  { 'zh-TW': '已釘選', 'zh-CN': '已钉选', 'ja': 'ピン留め', 'en': 'Pinned', 'ko': '고정됨' },
-  'sidebar.others':  { 'zh-TW': '其他', 'zh-CN': '其他', 'ja': 'その他', 'en': 'Others', 'ko': '기타' },
-  'set.space.title':  { 'zh-TW': '管理空間', 'zh-CN': '管理空间', 'ja': '容量管理', 'en': 'Storage', 'ko': '저장 공간' },
-  'set.space.open':   { 'zh-TW': '檢視已下載資源', 'zh-CN': '查看已下载资源', 'ja': 'ダウンロード済みを表示', 'en': 'View downloaded packs', 'ko': '다운로드 목록 보기' },
-  'set.space.close':  { 'zh-TW': '收合資源清單', 'zh-CN': '收起资源列表', 'ja': '一覧を閉じる', 'en': 'Collapse list', 'ko': '목록 접기' },
-  'set.space.empty':  { 'zh-TW': '沒有可管理的資源。', 'zh-CN': '没有可管理的资源。', 'ja': '管理できるリソースはありません。', 'en': 'No managed resources.', 'ko': '관리할 리소스가 없습니다.' },
-  'set.space.summary':{ 'zh-TW': '{n} 個資源包（約 {size}）', 'zh-CN': '{n} 个资源包（约 {size}）', 'ja': '{n} 個のパック（約 {size}）', 'en': '{n} packs (≈ {size})', 'ko': '팩 {n}개 (약 {size})' },
-  'set.space.delete': { 'zh-TW': '刪除', 'zh-CN': '删除', 'ja': '削除', 'en': 'Delete', 'ko': '삭제' },
-  'set.space.locked': { 'zh-TW': '必要資源', 'zh-CN': '必要资源', 'ja': '必須リソース', 'en': 'Required', 'ko': '필수 리소스' },
-  'set.space.confirm':{ 'zh-TW': '確定刪除 {key}？', 'zh-CN': '确定删除 {key}？', 'ja': '{key} を削除しますか？', 'en': 'Delete {key}?', 'ko': '{key}을(를) 삭제할까요?' },
-  'set.space.kindCore':  { 'zh-TW': '核心', 'zh-CN': '核心', 'ja': 'コア', 'en': 'Core', 'ko': '코어' },
-  'set.space.kindIntro': { 'zh-TW': '開場', 'zh-CN': '开场', 'ja': 'オープニング', 'en': 'Intro', 'ko': '오프닝' },
-  'set.space.kindLobby': { 'zh-TW': '大廳', 'zh-CN': '大厅', 'ja': 'ホール', 'en': 'Lobby', 'ko': '로비' },
-  'set.space.kindVoice': { 'zh-TW': '語音', 'zh-CN': '语音', 'ja': 'ボイス', 'en': 'Voice', 'ko': '보이스' },
-  // set.space.* 其餘字串已併入 assets/ui/ui_i18n.json（單一來源），此處不再重複。
 };
 
 function t(key, params) {
@@ -206,6 +198,18 @@ function t(key, params) {
     ?? LOCAL_I18N[key]?.[I18N_TAG_FALLBACK]
     ?? key;
   if (params) for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v);
+  return s;
+}
+
+// 主進程回傳的錯誤碼 → i18n（未知碼原樣顯示，兼容技術性錯誤與舊版）
+function tMainErr(code) {
+  const s = String(code ?? '');
+  if (/^[a-z0-9_]+$/.test(s)) {
+    try {
+      const v = t('err.' + s);
+      if (v && v !== 'err.' + s) return v;
+    } catch {}
+  }
   return s;
 }
 
@@ -4138,8 +4142,8 @@ async function spaceDeleteKeys(keys) {
 function toggleSettingsPanel(force) {
   // force 可能是 addEventListener 傳入的 Event 物件（truthy）——只接受真正的 boolean。
   const open = typeof force === 'boolean' ? force : !settingsPanel.classList.contains('open');
-  // LAYOUT=1 自開追蹤：記錄是誰打開設定面板（查 Tap 後自開用）
-  if (open && /LAYOUT=1/.test(location.search + location.hash)) {
+  // 自開追蹤（BA_DEBUG.layout）：記錄是誰打開設定面板（查 Tap 後自開用）
+  if (open && BA_DEBUG.layout) {
     try {
       const stk = new Error('trace').stack.split('\n').slice(1, 6).join(' <- ');
       window.__lastSettingsStack = { at: Date.now(), force: String(force), stack: stk };
@@ -4564,9 +4568,10 @@ async function startAnimExport() {
     audioPcm: audio ? audio.pcm : null,
     sampleRate: audio ? audio.sampleRate : 44100,
     channels: audio ? audio.channels : 2,
+    labels: { title: t('exp.title'), videoFilter: t('dlg.filterVideo', { ext }), allFiles: t('dlg.allFiles') },
   });
   if (!sess || sess.canceled) { await cleanupAnimExport(); return; }
-  if (sess.error) { await cleanupAnimExport(); showErr(t('msg.expStartFail', { err: sess.error })); return; }
+  if (sess.error) { await cleanupAnimExport(); showErr(t('msg.expStartFail', { err: tMainErr(sess.error) })); return; }
 
   document.body.classList.add('recording');
 
@@ -4655,7 +4660,7 @@ async function startAnimExport() {
   await cleanupAnimExport();
   if (res?.path) { log(`動畫匯出完成: ${res.path}`); showToast(t('msg.animSaved')); }
   else if (animAbort) log('動畫匯出已取消');
-  else showErr(t('msg.animFail', { err: res?.error || t('msg.unknown') }));
+  else showErr(t('msg.animFail', { err: tMainErr(res?.error) || t('msg.unknown') }));
 }
 
 function stopAnimExport(abort = false) {
@@ -4700,10 +4705,11 @@ async function exportBgm() {
   const file = bgmForLobby(currentLobby);
   if (!file) { showErr(t('msg.noBgm')); return; }
   try {
-    const res = await window.ba.exportBgm({ filename: file, defaultName: file });
+    const res = await window.ba.exportBgm({ filename: file, defaultName: file,
+      labels: { title: t('exp.bgm'), audioFilter: t('dlg.audioFilter'), allFiles: t('dlg.allFiles') } });
     if (res?.canceled) log('BGM 匯出已取消');
     else if (res?.path) { log(`BGM 匯出完成: ${res.path}`); showToast(t('msg.bgmSaved')); }
-    else showErr(t('msg.bgmFail', { err: res?.error || t('msg.noResult') }));
+    else showErr(t('msg.bgmFail', { err: tMainErr(res?.error) || t('msg.noResult') }));
   } catch (e) {
     showErr(t('msg.bgmFail', { err: e.message }));
   }
@@ -6175,8 +6181,7 @@ async function loadLobby(name) {
     statsEnterLobby(name);
     // 首次進大廳邀請一次（自動化流程跳過，避免 confirm 擋住 PROBE）
     try {
-      const auto = /autostart=1|PROBE=1/.test(location.search + location.hash);
-      if (!auto && !statsAsked()) {
+      if (!BA_DEBUG.auto && !statsAsked()) {
         markStatsAsked();
         if (window.confirm(t('set.statsInvite'))) statsSetOptIn(true);
         if (setStatsCk) setStatsCk.checked = statsEnabled();
@@ -6709,7 +6714,7 @@ function showTapToStart() {
     const tts = document.getElementById('tapToStart');
     if (!ls || ls.classList.contains('hidden')) { resolve(); return; }
     // dev：URL 帶 autostart=1 時跳過等待（自動化測試 / hash 直連 lobby）
-    if (/autostart=1/.test(location.search + location.hash)) { fadeOutLoadingScreen(); resolve(); return; }
+    if (BA_DEBUG.auto) { fadeOutLoadingScreen(); resolve(); return; }
     let finished = false;
     let guard = null;
     // 音軌已由 startIntroAudioEarly()/手勢解鎖提前起播；此處只在尚未起播時補播
@@ -7310,9 +7315,8 @@ async function onSpaceVerify() {
     const m = location.hash.match(/[?#]lobby=([^&]+)/);
     // 開機 lobby：deep-link > 上次看的（localStorage）> index 首位。
     // 自動化（autostart/PROBE）固定走首位，保證 determinism。
-    const auto = /autostart=1|PROBE=1/.test(location.search + location.hash);
     let remembered = null;
-    if (!auto) {
+    if (!BA_DEBUG.auto) {
       try { remembered = localStorage.getItem('ba_lastLobby'); } catch {}
     }
     const first = (m && LOBBY_INDEX[m[1]])
@@ -7327,7 +7331,7 @@ async function onSpaceVerify() {
 // Headless self-test: with PROBE=1 the renderer dumps i18n state to the console
 // (main relays [renderer] lines). Must run before CAPTURE_DELAY elapses.
 // LAYOUT=1 附加：暴露即時版面數值供多比例量測（charScale/sceneScale/黑邊）。
-if (/LAYOUT=1/.test(location.search + location.hash)) {
+if (BA_DEBUG.layout) {
   window.__layout = () => {
     const bar = (id) => {
       const el = document.getElementById(id);
@@ -7354,9 +7358,9 @@ if (/LAYOUT=1/.test(location.search + location.hash)) {
     };
   };
 }
-if (/PROBE=1/.test(location.search + location.hash)) {
+if (BA_DEBUG.probe) {
   // 可選：PROBE 加 cursorOff=1 預置 ba_cursor=0，驗證游標關閉 class
-  if (/cursorOff=1/.test(location.search + location.hash)) {
+  if (BA_DEBUG.cursorOff) {
     try { localStorage.setItem('ba_cursor', '0'); } catch {}
   }
   window.__probeRun = async () => {

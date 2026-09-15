@@ -73,6 +73,8 @@ export default defineConfig({
       try {
         let html = readFileSync(src, 'utf-8');
         html = html.split('./assets/').join('./dist/assets/');
+        // 產物檔防呆：手改它會被下次 build 蓋掉，一律改 index.html
+        html = '<!-- GENERATED from index.html by `vite build` — DO NOT EDIT DIRECTLY -->\n' + html;
         writeFileSync(dst, html);
         console.log('[build] dist/index.html -> index.prod.html');
       } catch (e) {

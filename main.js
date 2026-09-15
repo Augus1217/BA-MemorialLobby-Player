@@ -198,7 +198,7 @@ function writeAnim(buf) {
 }
 
 ipcMain.handle('anim-start', async (event, payload) => {
-  const { w = 1280, h = 720, fps = 30, duration = 10, ext = 'mp4', defaultName = 'lobby.mp4', audioPcm = null, sampleRate = 44100, channels = 2 } = payload || {};
+  const { w = 1280, h = 720, fps = 30, duration = 10, ext = 'mp4', defaultName = 'lobby.mp4', audioPcm = null, sampleRate = 44100, channels = 2, labels = {} } = payload || {};
   try {
     let outPath;
     const autoDir = process.env.EXPORT_DIR;
@@ -206,11 +206,11 @@ ipcMain.handle('anim-start', async (event, payload) => {
       outPath = path.join(autoDir, defaultName);
     } else {
       const { canceled, filePath } = await dialog.showSaveDialog(win, {
-        title: '匯出動畫',
+        title: labels.title || '匯出動畫',
         defaultPath: defaultName,
         filters: [
-          { name: ext === 'webm' ? 'WebM 影片' : 'MP4 影片', extensions: [ext || 'mp4'] },
-          { name: '所有檔案', extensions: ['*'] },
+          { name: labels.videoFilter || (ext === 'webm' ? 'WebM 影片' : 'MP4 影片'), extensions: [ext || 'mp4'] },
+          { name: labels.allFiles || '所有檔案', extensions: ['*'] },
         ],
       });
       if (canceled || !filePath) return { canceled: true };
@@ -256,7 +256,7 @@ ipcMain.on('anim-frame', (event, buf) => {
 });
 
 ipcMain.handle('anim-finish', async () => {
-  if (!animProc) return { error: '沒有進行中的動畫匯出' };
+  if (!animProc) return { error: 'no_active_export' };
   const proc = animProc;
   const tmp = animAudioTmp;
   try { await animQueued; proc.stdin.end(); } catch (e) { proc.stdin.destroy(); }
@@ -275,10 +275,10 @@ ipcMain.on('anim-abort', () => {
 });
 
 ipcMain.handle('bgm-export', async (event, payload) => {
-  const { filename, defaultName } = payload || {};
+  const { filename, defaultName, labels = {} } = payload || {};
   if (!filename) return { canceled: true };
   const src = path.join(getAssetsDir(), 'bgm', filename);
-  if (!fs.existsSync(src)) return { error: 'BGM 檔案不存在' };
+  if (!fs.existsSync(src)) return { error: 'bgm_missing' };
   const autoDir = process.env.EXPORT_DIR;
   if (autoDir) {
     const dst = path.join(autoDir, defaultName || filename);
@@ -286,11 +286,11 @@ ipcMain.handle('bgm-export', async (event, payload) => {
     return { path: dst };
   }
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
-    title: '匯出 BGM',
+    title: labels.title || '匯出 BGM',
     defaultPath: defaultName || filename,
     filters: [
-      { name: 'OGG 音訊', extensions: ['ogg'] },
-      { name: '所有檔案', extensions: ['*'] },
+      { name: labels.audioFilter || 'OGG 音訊', extensions: ['ogg'] },
+      { name: labels.allFiles || '所有檔案', extensions: ['*'] },
     ],
   });
   if (canceled || !filePath) return { canceled: true };
@@ -491,7 +491,15 @@ ipcMain.handle('cancel-download-assets', async () => {
   return true;
 });
 
+// IPC 契約斷言：呼叫端欄位缺失直接 fail-loud（別等到下載 404／靜默 no-op
+// 才發現傳錯；invoke 端會收到 reject）。
+function assertIpc(cond, what) {
+  if (!cond) throw new Error(`bad IPC payload: ${what}`);
+}
+
 ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, voice, audioFmt }) => {
+  assertIpc(typeof version === 'string' && version && packages && typeof packages === 'object',
+    'download-assets needs {version, packages}');
   const assetsDir = getAssetsDir();
   const installed = readInstalled();
   const remotePackages = packages || {};
@@ -558,8 +566,10 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, 
   return results;
 });
 
-// 串流模式：確保某個 lobby 的資源已就緒（core + 該 lobby 需要的包）
+// 按需補齊：確保某個 lobby 的資源已就緒（core + 該 lobby 需要的包）
 ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies, voice, audioFmt }) => {
+  assertIpc(typeof lobby === 'string' && lobby && packages && typeof packages === 'object',
+    'ensure-lobby needs {lobby, packages}');
   const assetsDir = getAssetsDir();
   const installed = readInstalled();
   // lobby 需要哪些包（由 assets_version.json 的 lobbies 表提供）
@@ -681,6 +691,9 @@ function voiceLangKeep(key, wantKr) {
 }
 // 唯一選包入口：語言＋格式過濾（ogg key 有 m4a 對端即改取 m4a），去重保序，
 // 只留 manifest 有的 key。check/download/ensure 三處共用。
+// 注意：本檔案是 CJS 且正式版不帶 renderer/ 源碼，故此三函數是
+// renderer/asset-core.js 的逐字鏡像；scripts/check_asset_core_parity.py
+// 會在 CI 比對，改一邊必須改另一邊。
 function selectPacks(names, { voice, audioFmt, packages }) {
   const wantKr = voice === 'kr';
   const fmt = audioFmt === 'm4a' ? 'm4a' : 'ogg';
@@ -764,10 +777,10 @@ ipcMain.handle('assets-manage-delete', async (event, keys) => {
   const installed = readInstalled();
   const removed = [], errors = [];
   for (const key of list) {
-    if (key === 'core') { errors.push({ key, error: 'core 不可刪除' }); continue; }
+    if (key === 'core') { errors.push({ key, error: 'protect_core' }); continue; }
     // 安全檢查：只允許刪除已知 pack 對應的目錄，防止任意路徑注入
     const paths = packPaths(key);
-    if (!paths.length || !installed[key]) { errors.push({ key, error: '未知的資源包' }); continue; }
+    if (!paths.length || !installed[key]) { errors.push({ key, error: 'unknown_pack' }); continue; }
     try {
       for (const p of paths) {
         // 必須位於 assetsDir 之下才可刪

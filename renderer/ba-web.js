@@ -3,6 +3,7 @@
 // ensureAssets(neededPacks, onProgress) 是唯一的啟動 gate：併發下載、去重、
 // 完成後只寫一次 __meta。SW 只看 active cache（O(1) 查找）。
 import { gunzipSync } from 'fflate';
+import { selectPacks, mergeManifests, companionTag } from './asset-core.js';
 
 const WORKER_BASE = 'https://ba-assets.imlindora.workers.dev';
 const LATEST_VERSION_URL = `${WORKER_BASE}/latest/assets_version.json`;
@@ -108,13 +109,13 @@ async function fetchRemoteVersion() {
   const meta = await r.json();
   if (!meta?.version) throw new Error('assets_version.json invalid');
   meta._base = `${WORKER_BASE}/v${meta.version}`;
-  meta._m4aBase = `${WORKER_BASE}/v${meta.version}-m4a`;
+  meta._m4aBase = `${WORKER_BASE}/${companionTag(meta.version)}`;
   // companion（1000 上限分流；404 容忍→退回純 ogg，下次重試）
   try {
     const r2 = await fetch(`${meta._m4aBase}/assets_version_m4a.json`, { cache: 'no-store' });
     if (r2.ok) {
       const m4a = await r2.json();
-      if (m4a?.packages) meta.packages = { ...meta.packages, ...m4a.packages };
+      if (m4a?.packages) meta.packages = mergeManifests(meta, m4a);
     }
   } catch {}
   _versionMeta = meta;
@@ -127,31 +128,7 @@ function packUrl(meta, name) {
   return `${base}/assets-${name.replace(/\//g, '_')}-v${meta.version}.tar.gz`;
 }
 
-// 唯一選包入口（與 Electron main.js selectPacks 同語義）：語言＋格式過濾
-//（ogg key 有 m4a 對端即改取 m4a），去重保序，只留 manifest 有的 key。
-function webVoiceLangKeep(key, wantKr) {
-  const f = key.startsWith('voice-m4a/') ? key.slice('voice-m4a/'.length)
-    : key.startsWith('voice/') ? key.slice('voice/'.length) : null;
-  if (f === null) return true;
-  return wantKr ? f.startsWith('KR_') : f.startsWith('JP_');
-}
-function webAudioPackFor(key, fmt, packages) {
-  if (fmt !== 'm4a' || typeof key !== 'string' || !key.startsWith('voice/')) return key;
-  const alt = 'voice-m4a/' + key.slice('voice/'.length);
-  return packages && packages[alt] ? alt : key;
-}
-function webSelectPacks(names, { voice, audioFmt, packages }) {
-  const wantKr = voice === 'kr';
-  const fmt = audioFmt === 'm4a' ? 'm4a' : 'ogg';
-  const pkgs = packages || {};
-  const out = [];
-  for (const k of names || []) {
-    if (!webVoiceLangKeep(k, wantKr)) continue;
-    const m = webAudioPackFor(k, fmt, pkgs);
-    if (pkgs[m] && !out.includes(m)) out.push(m);
-  }
-  return out;
-}
+// 唯一選包入口見 ./asset-core.js（與 Electron main.js selectPacks 同語義，parity 由 CI 鎖死）
 
 // ---- mini tar parser（ustar；strip:1） ----
 function untarGz(buf, onEntry) {
@@ -435,7 +412,7 @@ const ba = {
     await migrateFromPreviousCache(meta, c);
     const installed = await readMeta(c);
     const coreOk = installed['core'] === meta.packages?.['core']?.sha256;
-    const needsDownloadPacks = webSelectPacks(
+    const needsDownloadPacks = selectPacks(
       Object.keys(meta.packages || {}).filter((k) => installed[k] !== meta.packages[k]?.sha256),
       { voice, audioFmt, packages: meta.packages });
     // bootPacks = 其中擋開機的 core/intro（開機只等它）
@@ -472,7 +449,7 @@ const ba = {
     await migrateFromPreviousCache(meta, c);
     const installed = await readMeta(c);
     // 格式選擇：ogg key 有 m4a 對端即改取（只留一邊，不重複下）；同 key 去重
-    const dlWanted = webSelectPacks(wanted, { voice, audioFmt, packages: meta.packages });
+    const dlWanted = selectPacks(wanted, { voice, audioFmt, packages: meta.packages });
     const toDownload = dlWanted.filter(
       (k) => installed[k] !== meta.packages[k]?.sha256
         && (fmt !== 'ogg' || !k.startsWith('voice-m4a/'))
@@ -530,8 +507,8 @@ const ba = {
       const k = 'lobby/' + lobby;
       if (packages?.[k]) packs = [k];
     }
-    // 該 lobby 需要的包：語言＋格式一次選定（webSelectPacks），非語音包全留。
-    packs = webSelectPacks(packs, { voice, audioFmt, packages: meta.packages });
+    // 該 lobby 需要的包：語言＋格式一次選定（selectPacks），非語音包全留。
+    packs = selectPacks(packs, { voice, audioFmt, packages: meta.packages });
     if (meta.packages?.['core'] && installed['core'] !== meta.packages['core']?.sha256) {
       packs.unshift('core');
     }

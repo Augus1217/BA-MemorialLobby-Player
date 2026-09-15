@@ -19,6 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Lint (i18n key parity + asset-core mirror parity, fail-loud)
+        run: |
+          python3 scripts/check_i18n.py
+          python3 scripts/check_asset_core_parity.py
       - uses: actions/setup-node@v4
         with:
           node-version: 22

@@ -12,6 +12,9 @@
     "build:win": "vite build && electron-builder --win",
     "build:mac": "vite build && electron-builder --mac",
     "copy-assets": "python3 scripts/copy_assets.py",
+    "lint:i18n": "python3 scripts/check_i18n.py",
+    "lint:parity": "python3 scripts/check_asset_core_parity.py",
+    "lint": "python3 scripts/check_i18n.py && python3 scripts/check_asset_core_parity.py",
     "dist": "vite build && electron-builder -mwl --publish always"
   },
   "build": {
