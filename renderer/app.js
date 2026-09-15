@@ -3575,7 +3575,6 @@ const settingsPanel = document.getElementById('settingsPanel');
 const setClose = document.getElementById('setClose');
 const settingsBackdrop = document.getElementById('settingsBackdrop');
 const setLangSegs = document.getElementById('setLangSegs');
-const setModeSegs = document.getElementById('setModeSegs');
 const setCursorCk = document.getElementById('setCursorCk');
 const setClickFxCk = document.getElementById('setClickFxCk');
 const setJpOnlyCk = document.getElementById('setJpOnlyCk');
@@ -3636,19 +3635,6 @@ function onVoiceLangClick(e) {
 setVoiceLangSegs?.addEventListener('click', onVoiceLangClick);
 ctlVoiceSegs?.addEventListener('click', onVoiceLangClick);
 
-function settingsStreaming() {
-  return window.ba?.getStreamingMode
-    ? window.ba.getStreamingMode()
-    : Promise.resolve(false);
-}
-
-async function syncSettingsModeSegs() {
-  const streaming = await settingsStreaming();
-  for (const b of setModeSegs.querySelectorAll('button')) {
-    b.classList.toggle('on', (b.dataset.m === 'streaming') === streaming);
-  }
-}
-
 function fmtBytes(n) {
   if (!Number.isFinite(n)) return '?';
   if (n >= 1073741824) return (n / 1073741824).toFixed(2) + ' GB';
@@ -3664,7 +3650,7 @@ let _settingsAssetInfo = null;
 
 async function refreshSettingsAssets() {
   try {
-    _settingsAssetInfo = await window.ba.checkAssets({ voice: voiceLang });
+    _settingsAssetInfo = await window.ba.checkAssets({ voice: voiceLang, audioFmt: audioExt });
   } catch {
     _settingsAssetInfo = null;
   }
@@ -3695,13 +3681,9 @@ function renderSettingsAssets() {
       setDownloadBtn.style.display = 'block';
       setAssetsProgress.style.display = 'block';
     } else {
-    // 主按鈕標籤跟模式走：串流＝檢查更新（只補核心），完整＝下載全部（寫明大小）
-    let isStream = true;
-    try { isStream = !setModeSegs.querySelector('button[data-m="full"].on'); } catch {}
+    // 主按鈕：預先下載全部（寫明大小；平時大廳隨點隨下，不經此鈕）
     try {
-      setDownloadBtn.textContent = isStream
-        ? t('set.checkUpdate')
-        : t('set.downloadAll', { size: fmtBytes(bytes) });
+      setDownloadBtn.textContent = t('set.downloadAll', { size: fmtBytes(bytes) });
     } catch {}
     setDownloadBtn.style.display = 'block';
     }
@@ -3782,7 +3764,7 @@ async function onSettingsDownloadBtn() {
   }
   startSettingsDownload();
 }
-function startSettingsDownload() {
+async function startSettingsDownload() {
   const info = _settingsAssetInfo;
   // packages 是 {包名: 資訊} 物件（不是陣列）——之前用 Array.isArray 擋掉一切。
   if (!info?.remoteVersion || !info.packages) return;
@@ -3812,11 +3794,11 @@ function startSettingsDownload() {
   const ttxt = document.getElementById('setProgressTextTotal');
   if (ttxt) ttxt.textContent = '';
   // 進度由全域 handler 更新（開機時註冊一次；這裡只確保可見）
-  // 下載全部缺的包（尊重目前模式：串流模式時 check-assets 已只回 core/intro）
+  // 預先下載全部：把缺包一次補滿（一次性動作，不是模式；平時大廳隨點隨下）。
+  // 先過儲存門檻，空間不夠就不開始，避免抓一半失敗更亂。
+  if (!(await ensureStorageForFull())) return;
   const version = info.remoteVersion || '1.0.0';
-  const pkgs = {};
-  for (const k of info.needsDownloadPacks || []) pkgs[k] = info.packages[k];
-  _dlPromise = window.ba.downloadAssets({ version, packages: pkgs, voice: voiceLang, audioFmt: audioExt }).then(async (res) => {
+  _dlPromise = window.ba.downloadAssets({ version, packages: info.packages, voice: voiceLang, audioFmt: audioExt }).then(async (res) => {
     _dlRunning = false;
     _dlPromise = null;
     const arr = Array.isArray(res) ? res : (res?.results || []);
@@ -4168,7 +4150,6 @@ function toggleSettingsPanel(force) {
     exportPanel.classList.remove('open');
     sidePanel.classList.remove('open');
     syncSettingsLangSegs();
-    syncSettingsModeSegs();
     syncVoiceLangSegs();
     syncSettingsEffectCks();
     refreshSettingsAssets();
@@ -6157,14 +6138,14 @@ async function loadLobby(name) {
       } catch {}
     }
   }
-  // 串流模式：確保該 lobby 的資源已在本地（隨播隨下）
+  // 按需補齊：確保該 lobby 的資源已在本地（隨播隨下）
   if (!_assetInfo && window.ba?.checkAssets) {
     // 首訪/硬重載後 checkAssets 可能尚未完成；deep-link 直接進大廳時在此補跑一次
-    try { _assetInfo = await window.ba.checkAssets(); } catch {}
+    try { _assetInfo = await window.ba.checkAssets({ voice: voiceLang, audioFmt: audioExt }); } catch {}
     if (!alive()) return;
   }
   if (_assetInfo?.lobbies?.[name]) {
-    try { await ensureLobbyAssets(name); retryBgmIfSilent(); } catch (e) { console.warn('[lobby] 串流下載失敗', e.message); }
+    try { await ensureLobbyAssets(name); retryBgmIfSilent(); } catch (e) { console.warn('[lobby] 隨播隨下失敗', e.message); }
     if (!alive()) return;
   }
   loadIdleClip(entry);
@@ -6823,166 +6804,6 @@ async function ensureLobbyAssets(lobbyName) {
   }
 }
 
-async function showAssetDownload(assetInfo) {
-  const downloadPanel = document.getElementById('downloadPanel');
-  const status = document.getElementById('assetStatus');
-  const progress = document.getElementById('assetProgress');
-  const fill = document.getElementById('assetProgressFill');
-  const pctText = document.getElementById('assetProgressText');
-  const detail = document.getElementById('assetDetail');
-  const btn = document.getElementById('assetBtn');
-  const choiceRow = document.getElementById('bootChoiceRow');
-  const btnFull = document.getElementById('assetBtnFull');
-  const btnQuick = document.getElementById('assetBtnQuick');
-  const bootStatsRow = document.getElementById('bootStatsRow');
-  const bootStatsCk = document.getElementById('bootStatsCk');
-
-  downloadPanel.style.display = 'block';
-  progress.style.display = 'none';
-  btn.style.display = 'none';
-  if (choiceRow) choiceRow.style.display = 'none';
-
-  const isIncremental = assetInfo.schema === 2 && assetInfo.needsDownloadPacks;
-  const packsToShow = isIncremental
-    ? assetInfo.needsDownloadPacks.map(k => assetInfo.packages[k]).filter(Boolean)
-    : (assetInfo.packages ? Object.values(assetInfo.packages) : []);
-  const namesToShow = isIncremental ? assetInfo.needsDownloadPacks : (assetInfo.packages ? Object.keys(assetInfo.packages) : []);
-
-  const totalBytes = packsToShow.reduce((s, p) => s + (p.size || 0), 0);
-  // 先進大廳：只抓 core＋intro（與串流定義一致）
-  const quickNames = namesToShow.filter((k) => k === 'core' || k === 'intro');
-  const quickBytes = quickNames.reduce((s, k) => s + (assetInfo.packages?.[k]?.size || 0), 0);
-
-  const updateDetail = () => {
-    if (isIncremental) {
-      if (namesToShow.length === 0) {
-        status.textContent = t('dl.upToDate');
-        detail.textContent = t('dl.allLatest', { n: Object.keys(assetInfo.packages).length });
-      } else {
-        detail.textContent = t('dl.pending', { n: namesToShow.length, gb: (totalBytes / 1073741824).toFixed(1), note: '' })
-          + namesToShow.slice(0, 8).join('、') + (namesToShow.length > 8 ? '…' : '');
-      }
-    } else {
-      detail.textContent = namesToShow.length ? namesToShow.join('、') : '';
-    }
-  };
-
-  if (assetInfo.hasAssets && assetInfo.remoteVersion) {
-    status.textContent = t('dl.versionFound', { remote: assetInfo.remoteVersion, local: assetInfo.localVersion || t('dl.localNone') });
-    updateDetail();
-  } else if (!assetInfo.hasAssets) {
-    status.textContent = t('dl.firstRun');
-    updateDetail();
-  } else {
-    status.textContent = t('dl.upToDate');
-    btn.style.display = 'none';
-    await new Promise(r => setTimeout(r, 1200));
-    downloadPanel.style.display = 'none';
-    return;
-  }
-
-  // 二選一：按鈕上寫明後果（大小），不再有 checkbox＋開始鈕兩段式
-  if (btnFull) btnFull.textContent = t('dl.fullInstall', { size: fmtBytes(totalBytes) });
-  if (btnQuick) btnQuick.textContent = t('dl.quickStart', { size: fmtBytes(quickBytes) });
-  if (choiceRow) choiceRow.style.display = 'flex';
-  btn.style.display = 'none';
-  // 首次啟動才顯示統計邀請（預設不勾）
-  if (bootStatsRow) bootStatsRow.style.display = statsAsked() ? 'none' : 'flex';
-  if (bootStatsCk) bootStatsCk.checked = false;
-
-  return new Promise((resolve) => {
-    const cancelBtn = document.getElementById('assetBtnCancel');
-    let userCancelled = false;
-    const showChoice = () => {
-      if (choiceRow) choiceRow.style.display = 'flex';
-      btn.style.display = 'none';
-      progress.style.display = 'none';
-      if (cancelBtn) cancelBtn.style.display = 'none';
-      if (bootStatsRow) bootStatsRow.style.display = 'none';
-      status.textContent = '';
-      detail.textContent = '';
-    };
-    if (cancelBtn) cancelBtn.onclick = async () => {
-      userCancelled = true;
-      cancelBtn.disabled = true;
-      try { await window.ba.cancelDownload?.(); } catch {}
-    };
-    const runDownload = async (streaming) => {
-      if (choiceRow) choiceRow.style.display = 'none';
-      btn.style.display = 'none';
-      progress.style.display = 'block';
-      userCancelled = false;
-      // 邀請只問這一次；勾了就直接 opt-in（不等進設定）
-      markStatsAsked();
-      if (bootStatsRow) bootStatsRow.style.display = 'none';
-      if (bootStatsCk?.checked) statsSetOptIn(true);
-      if (cancelBtn) { cancelBtn.style.display = 'inline-block'; cancelBtn.disabled = false; }
-      fill.style.width = '0%';
-      pctText.textContent = '0%';
-      try { await window.ba?.setStreamingMode?.(streaming); } catch {}
-
-      window.ba.onDownloadProgress?.((p) => {
-        if (p.status === 'downloading') {
-          status.textContent = t('dl.downloading', { pkg: p.package, i: p.index + 1, n: p.total });
-          fill.style.width = p.percent + '%';
-          pctText.textContent = p.percent + '%';
-          if (p.bytesTotal) detail.textContent = `${(p.downloaded / 1048576).toFixed(0)} MB / ${(p.bytesTotal / 1048576).toFixed(0)} MB`;
-        } else if (p.status === 'extracting') {
-          status.textContent = t('dl.extracting', { pkg: p.package });
-          detail.textContent = '';
-        } else if (p.status === 'done') {
-          status.textContent = t('dl.packDone', { pkg: p.package });
-        } else if (p.status === 'error') {
-          detail.innerHTML = `${ICO.warn} ${escapeHtml(p.error)}`;
-        }
-      });
-
-      const version = assetInfo.remoteVersion || '1.0.0';
-      // 先進大廳：只抓 core＋intro；完整安裝：全抓
-      const pkgs = streaming
-        ? Object.fromEntries(quickNames.map((k) => [k, assetInfo.packages[k]]).filter(([, v]) => v))
-        : assetInfo.packages;
-      let results = null;
-      try {
-        results = await window.ba.downloadAssets({ version, packages: pkgs, voice: voiceLang, audioFmt: audioExt });
-      } catch (e) {
-        results = [{ name: '', ok: false, error: e?.message || String(e) }];
-      }
-      if (cancelBtn) cancelBtn.style.display = 'none';
-
-      // 使用者主動取消：回到二選一，不當成失敗
-      if (userCancelled) { showChoice(); return; }
-
-      // 有包失敗（如 release 缺檔 404）：顯示錯誤並保留面板讓使用者重試，
-      // 不關閉面板、不 resolve（避免半套資源被當成安裝完成）。
-      if (Array.isArray(results) && results.some(r => !r.ok)) {
-        const failed = results.filter(r => !r.ok);
-        // 取消競態：若失敗全是 cancelled 也視為取消
-        if (failed.length && failed.every(r => r.error === 'cancelled')) { showChoice(); return; }
-        status.textContent = t('dl.failed');
-        detail.textContent = t('dl.failedDetail', { n: failed.length, err: failed[0]?.error || '' });
-        btn.textContent = t('dl.retry');
-        btn.style.display = 'inline-block';
-        progress.style.display = 'none';
-        btn.onclick = () => runDownload(streaming);
-        return;
-      }
-
-      status.textContent = t('dl.finished');
-      fill.style.width = '100%';
-      pctText.textContent = '100%';
-      detail.textContent = '';
-      btn.style.display = 'none';
-      await new Promise(r => setTimeout(r, 800));
-      downloadPanel.style.display = 'none';
-      resolve();
-    };
-    if (btnFull) btnFull.onclick = () => runDownload(false);
-    if (btnQuick) btnQuick.onclick = () => runDownload(true);
-    btn.onclick = () => runDownload(false);
-  });
-}
-
 // Boot 官方素材（title.webm / spinner.png / font.otf）在 vite build 時已被
 // 拷進 dist/assets/（靜態檔案），首屏通常正常載入。若首屏載入失敗（舊版部署
 // 或 edge case），在 core pack 就緒後由本函式補救。
@@ -7034,17 +6855,14 @@ async function ensureReady() {
   else if (window.ba?.checkAssets) {
     try {
       const info = await Promise.race([
-        window.ba.checkAssets(),
+        window.ba.checkAssets({ voice: voiceLang, audioFmt: audioExt }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('checkAssets timeout')), 10000)),
       ]);
       _assetInfo = info;
-      if (info.needsDownload && info.needsDownloadPacks?.length) {
-        if (info.streaming) {
-          await window.ba.downloadAssets({ version: info.remoteVersion, packages: info.packages, onlyPacks: ['core'] });
-        } else {
-          await showAssetDownload(info);
-        }
-        try { _assetInfo = await window.ba.checkAssets(); } catch {}
+      // 開機只等 core（其餘缺包不擋進入，隨點隨下）
+      if (info.needsBootDownload && info.bootPacks?.length) {
+        await window.ba.downloadAssets({ version: info.remoteVersion, packages: info.packages, onlyPacks: ['core'], voice: voiceLang, audioFmt: audioExt });
+        try { _assetInfo = await window.ba.checkAssets({ voice: voiceLang, audioFmt: audioExt }); } catch {}
       }
     } catch (e) {
       console.warn('[lobby] checkAssets failed/skipped:', e.message);
@@ -7052,7 +6870,7 @@ async function ensureReady() {
   }
   // 確保 _assetInfo 有值（ensureLobbyAssets 會用到）
   if (!_assetInfo && window.ba?.checkAssets) {
-    try { _assetInfo = await window.ba.checkAssets(); } catch {}
+    try { _assetInfo = await window.ba.checkAssets({ voice: voiceLang, audioFmt: audioExt }); } catch {}
   }
 }
 
@@ -7411,29 +7229,6 @@ async function onSpaceVerify() {
       setTimeout(() => { if (done.textContent) done.textContent = ''; }, 3000);
     }
   });
-  setModeSegs.addEventListener('click', async (e) => {
-    const b = e.target.closest('button');
-    if (!b || b.classList.contains('on')) return;
-    // 下載中切模式：先停掉舊的再切，避免兩路併發寫 meta
-    if (_dlRunning) {
-      try { await window.ba.cancelDownload?.(); } catch {}
-      try { await _dlPromise; } catch {}
-    }
-    const streaming = b.dataset.m === 'streaming';
-    try { await window.ba?.setStreamingMode?.(streaming); } catch {}
-    await syncSettingsModeSegs();
-    await refreshSettingsAssets();
-    // 切到完整安裝＝立刻開始抓全部（否則按鈕看似沒反應）；先過儲存門檻。
-    if (!streaming) {
-      if (await ensureStorageForFull()) startSettingsDownload();
-      else {
-        // 空間不夠：退回串流，避免抓一半失敗更亂
-        try { await window.ba?.setStreamingMode?.(true); } catch {}
-        await syncSettingsModeSegs();
-        await refreshSettingsAssets();
-      }
-    }
-  });
   setDownloadBtn.addEventListener('click', onSettingsDownloadBtn);
   // 雙進度條狀態：本包％＋總量％（總量按 manifest 標稱大小加權）
   // 全域下載進度（註冊一次；模式切換觸發的下載也經這裡顯示）
@@ -7570,7 +7365,6 @@ if (/PROBE=1/.test(location.search + location.hash)) {
     // 2) 設定面板開 → 點 ✕ 關
     toggleSettingsPanel(true);
     await new Promise(r => setTimeout(r, 400));
-    await syncSettingsModeSegs();
     document.getElementById('setClose')?.click();
     await new Promise(r => setTimeout(r, 300));
     const panelClosed = !settingsPanel.classList.contains('open');
@@ -7607,7 +7401,6 @@ if (/PROBE=1/.test(location.search + location.hash)) {
       ctlVoiceLbl: document.getElementById('ctlVoiceLbl')?.textContent,
       settingsBtnTitle: document.getElementById('btnCtlSettings')?.title,
       setLangSegs: document.getElementById('setLangSegs')?.children.length,
-      setModeSegs: [...(document.getElementById('setModeSegs')?.children || [])].map(b => `${b.dataset.m}:${b.classList.contains('on') ? 1 : 0}`).join(','),
       setAssetsStatus: document.getElementById('setAssetsStatus')?.textContent?.slice(0, 80),
       panelVisible: getComputedStyle(settingsPanel).display !== 'none',
       panelClass: settingsPanel.className,

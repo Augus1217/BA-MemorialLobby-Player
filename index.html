@@ -405,8 +405,6 @@
       box-shadow: 0 0 6px rgba(108,166,255,.6);
     }
     #setLangSegs button { min-width: 52px; }
-    #setStreamingRow { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    #setStreamingDesc { font-size: 14px; color: #c6d2f5; line-height: 1.6; margin-top: 6px; }
     #setAssetsStatus { font-size: 14px; color: #cfd6ff; line-height: 1.7; }
     #setAssetsStatus .ok { color: #8fd49c; }
     #setAssetsStatus .warn { color: #e8c268; }
@@ -650,42 +648,6 @@
         -1px 1px 0 rgba(255,255,255,0.9),
         1px 1px 0 rgba(255,255,255,0.9);
     }
-    #downloadPanel {
-      position: absolute; top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      width: 420px; max-width: 90vw; text-align: center; color: #e8ecff;
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      background: rgba(5,6,13,.85); padding: 32px; border-radius: 12px;
-    }
-    #assetTitle {
-      font-size: 28px; font-weight: 700; letter-spacing: .12em;
-      margin-bottom: 6px; color: #fff;
-    }
-    #assetSubtitle {
-      font-size: 14px; color: rgba(210,220,255,.6); letter-spacing: .08em;
-      margin-bottom: 28px;
-    }
-    #assetStatus {
-      font-size: 14px; color: #9aa4e0; letter-spacing: .06em;
-      margin-bottom: 14px; min-height: 20px;
-    }
-    #assetProgress { margin-bottom: 10px; }
-    #assetProgressBar {
-      width: 100%; height: 6px; background: rgba(255,255,255,.1);
-      border-radius: 3px; overflow: hidden;
-    }
-    #assetProgressFill {
-      height: 100%; width: 0%; background: linear-gradient(90deg, #6a7aff, #a0b4ff);
-      border-radius: 3px; transition: width .3s ease;
-    }
-    #assetProgressText {
-      font-size: 14px; color: rgba(210,220,255,.75); margin-top: 6px;
-    }
-    #assetDetail {
-      font-size: 14px; color: rgba(210,220,255,.7); margin-bottom: 20px;
-      min-height: 18px;
-    }
-
     /* BA PC cursor, scaled to the window via the same vw/3840 design scale used
        for the chat balloon. CSS cursors can't scale a url(), so this inline
        script regenerates the image into a data-URL and sets these vars. */
@@ -875,18 +837,6 @@
     </div>
 
     <div class="set-section">
-      <div class="set-head" data-i18n="set.download">資源下載</div>
-      <div id="setStreamingRow">
-        <span class="lbl" data-i18n="set.mode">下載模式</span>
-        <div class="segs" id="setModeSegs">
-          <button data-m="full" data-i18n="set.modeFull">完整安裝</button>
-          <button data-m="streaming" data-i18n="set.modeStreaming">串流模式</button>
-        </div>
-      </div>
-      <div id="setStreamingDesc" data-i18n="set.modeStreamingDesc">串流模式：初始只下載核心資源，進入大廳時才下載該角色的資料。可離線播放已下載過的大廳。</div>
-    </div>
-
-    <div class="set-section">
       <div class="set-head" data-i18n="set.effects">視覺效果</div>
       <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setCursorCk"> <span data-i18n="set.cursor">BA 遊標</span></label>
       <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setClickFxCk"> <span data-i18n="set.clickfx">點擊特效 (Click FX)</span></label>
@@ -1006,27 +956,6 @@
     </div>
     <!-- 檢查完成後顯示，點擊進入 lobby -->
     <div id="tapToStart" style="display:none">TAP TO START</div>
-    <!-- 需要下載時顯示的面板 -->
-    <div id="downloadPanel" style="display:none">
-      <div id="assetTitle">BA Memorial Lobby</div>
-      <div id="assetSubtitle" data-i18n="dl.subtitle">發現新版本，需下載遊戲資源</div>
-      <div id="assetStatus"></div>
-      <div id="assetProgress">
-        <div id="assetProgressBar"><div id="assetProgressFill"></div></div>
-        <div id="assetProgressText">0%</div>
-      </div>
-      <div id="assetDetail"></div>
-      <div id="bootChoiceRow" style="display:none; gap:10px; justify-content:center; margin:12px 0; flex-wrap:wrap;">
-        <button id="assetBtnFull" class="btnTxt primary" data-i18n="dl.fullInstall">完整安裝</button>
-        <button id="assetBtnQuick" class="btnTxt" data-i18n="dl.quickStart">先進大廳</button>
-      </div>
-      <label id="bootStatsRow" style="display:none; gap:8px; align-items:flex-start; text-align:left; margin:4px auto 0; max-width:340px; font-size: 14px; color:#c6d2f5; cursor:pointer;">
-        <input type="checkbox" id="bootStatsCk" style="margin-top:2px; accent-color:#7f8ac0;">
-        <span><span data-i18n="set.stats">分享匿名使用統計</span><br><small data-i18n="set.statsDesc" style="color:#9aa4e0;">只回報看過哪些大廳與停留秒數，用於人氣排行。預設關閉；關閉會刪除未送出的本地記錄。</small></span>
-      </label>
-      <button id="assetBtn" class="btnTxt primary" style="display:none" data-i18n="dl.start">開始下載</button>
-      <button id="assetBtnCancel" class="btnTxt" style="display:none; margin-top:8px;" data-i18n="dl.cancel">取消</button>
-    </div>
   </div>
 
   <script>

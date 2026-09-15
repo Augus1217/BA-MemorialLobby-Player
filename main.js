@@ -330,18 +330,9 @@ function writeInstalled(map) {
   fs.mkdirSync(getAssetsDir(), { recursive: true });
   fs.writeFileSync(getInstalledPath(), JSON.stringify(map, null, 2));
 }
-function getStreamingFlagPath() {
-  return path.join(getAssetsDir(), '.streaming');
-}
-// 串流模式為預設：無旗標檔或 '1' 都視為串流；只有明確的 '0' 才是完整安裝
-function isStreamingMode() {
-  try { return fs.readFileSync(getStreamingFlagPath(), 'utf-8').trim() !== '0'; }
-  catch { return true; }
-}
-function setStreamingMode(v) {
-  fs.mkdirSync(getAssetsDir(), { recursive: true });
-  fs.writeFileSync(getStreamingFlagPath(), v ? '1' : '0');
-}
+// 資源取得只有一種行為：按需補齊（開機擋 core/intro；大廳隨點隨下）。
+// 「完整安裝」不是模式，只是設定頁的一次性動作（把缺包一次補滿）。
+// （舊版 .streaming 旗標檔若殘留磁碟，無任何程式讀它，可無視。）
 
 function readLocalVersion() {
   try {
@@ -432,11 +423,10 @@ async function extractTarGzToAssets(tarPath) {
   await tar.x({ file: tarPath, cwd: getAssetsDir(), strip: 1 });
 }
 
-ipcMain.handle('check-assets', async (event, { voice } = {}) => {
+ipcMain.handle('check-assets', async (event, { voice, audioFmt } = {}) => {
   const localVersion = readLocalVersion();
   const installed = readInstalled();
   const assetsDir = getAssetsDir();
-  const streaming = isStreamingMode();
   const hasAssets = fs.existsSync(assetsDir) && fs.existsSync(path.join(assetsDir, 'spine'));
 
   let remoteVersion = null;
@@ -460,34 +450,21 @@ ipcMain.handle('check-assets', async (event, { voice } = {}) => {
     }
   }
 
-  // 計算需要下載的包（schema 2 增量；schema 1 回退為整版）
-  // dev 模式（直接跑 repo）：assets/ 已在本地，installed.json 只是下載器記帳，
-  // 不該讓它反過來把整個 assets 判成未安裝。此時僅提示有新版本、不強制下載。
+  // 計算需要下載的包：sha 比對（schema 無關；舊版 schema-1 整版回退已刪除，
+  // 逐包 sha 在 schema 2 下恒成立）。dev 模式（直接跑 repo）：assets/ 已在本地，
+  // installed.json 只是下載器記帳，不該讓它反過來把整個 assets 判成未安裝。
+  // 此時僅提示有新版本、不強制下載。
+  // needsDownloadPacks = 全部缺包（設定頁「預先下載全部」用）；
+  // bootPacks = 其中擋開機的 core/intro（開機只等它）。
   let needsDownloadPacks = [];
+  let bootPacks = [];
   const devAssets = isDev && hasAssets;
-  if (remoteVersion?.packages) {
-    if (devAssets) {
-      needsDownloadPacks = [];
-    } else if (remoteVersion.schema === 2) {
-      for (const [k, v] of Object.entries(remoteVersion.packages)) {
-        if (installed[k] !== v.sha256) needsDownloadPacks.push(k);
-      }
-      // 串流模式：初始只需 core
-      if (streaming) {
-        const coreNeeds = needsDownloadPacks.filter(k => k === 'core' || k === 'intro');
-        // 若 core 已齊，即使其他 lobby 缺也不阻擋進入
-        if (coreNeeds.length === 0 && hasAssets) needsDownloadPacks = [];
-        else needsDownloadPacks = coreNeeds;
-      }
-    } else {
-      if (!hasAssets || (remoteVersion && localVersion !== remoteVersion.version)) {
-        needsDownloadPacks = Object.keys(remoteVersion.packages);
-        // 只下玩家選擇的語音語言（jp/kr）的語音包，不下另一種
-        const wantKr = voice === 'kr';
-        needsDownloadPacks = needsDownloadPacks.filter(k => !k.startsWith('voice/')
-          || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')));
-      }
-    }
+  if (remoteVersion?.packages && !devAssets) {
+    const allMissing = Object.keys(remoteVersion.packages)
+      .filter(k => installed[k] !== remoteVersion.packages[k].sha256);
+    needsDownloadPacks = selectPacks(allMissing,
+      { voice, audioFmt, packages: remoteVersion.packages });
+    bootPacks = needsDownloadPacks.filter(k => k === 'core' || k === 'intro');
   }
 
   return {
@@ -498,17 +475,12 @@ ipcMain.handle('check-assets', async (event, { voice } = {}) => {
     // dev 模式本地資源已齊，永不阻擋進入
     needsDownload: devAssets ? false : (needsDownloadPacks.length > 0 || !hasAssets),
     needsDownloadPacks: devAssets ? [] : needsDownloadPacks,
+    bootPacks: devAssets ? [] : bootPacks,
+    needsBootDownload: devAssets ? false : (bootPacks.length > 0 || !hasAssets),
     packages: remoteVersion?.packages || null,
     lobbies: remoteVersion?.lobbies || null,
-    streaming,
     installed,
   };
-});
-
-ipcMain.handle('get-streaming-mode', async () => isStreamingMode());
-ipcMain.handle('set-streaming-mode', async (event, v) => {
-  setStreamingMode(!!v);
-  return isStreamingMode();
 });
 
 // 設定頁暫停鈕用（download-assets 迴圈內檢查；進行中的包經 ctl abort）
@@ -523,27 +495,20 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, 
   const assetsDir = getAssetsDir();
   const installed = readInstalled();
   const remotePackages = packages || {};
-  const fmt = audioFmt === 'm4a' ? 'm4a' : 'ogg';
   // 設定頁暫停鈕用：包之間檢查旗標，進行中的包經 ctl abort
   dlCancel.cancelled = false;
   dlCancel.cancel = null;
   // 僅下載需要的包（增量）：sha 不同的才下；若呼叫端指定 onlyPacks 則限於該清單
   let pkgNames;
   if (onlyPacks && Array.isArray(onlyPacks)) {
-    const mapped = onlyPacks.map(k => audioPackFor(k, fmt, remotePackages));
-    pkgNames = mapped.filter(k => remotePackages[k] && installed[k] !== remotePackages[k].sha256);
-    if (pkgNames.length === 0) pkgNames = mapped.filter(k => remotePackages[k]); // 串流：即使 sha 相同但本地檔案遺失也補下
+    const mapped = selectPacks(onlyPacks, { voice, audioFmt, packages: remotePackages });
+    pkgNames = mapped.filter(k => installed[k] !== remotePackages[k].sha256);
+    if (pkgNames.length === 0) pkgNames = mapped; // 串流：即使 sha 相同但本地檔案遺失也補下
   } else {
-    pkgNames = Object.keys(remotePackages).filter(k => installed[k] !== remotePackages[k].sha256);
-    // 舊版 schema 1 無 per-pack sha 回退為全量
-    if (pkgNames.length === 0 && !Object.keys(installed).length) pkgNames = Object.keys(remotePackages);
-    // 格式過濾：只留所選格式（m4a 端無對應包的 ogg 保留作退路）
-    if (fmt === 'm4a') pkgNames = pkgNames.filter(k => !k.startsWith('voice/') || !remotePackages['voice-m4a/' + k.slice('voice/'.length)]);
-    else pkgNames = pkgNames.filter(k => !k.startsWith('voice-m4a/'));
+    pkgNames = selectPacks(
+      Object.keys(remotePackages).filter(k => installed[k] !== remotePackages[k].sha256),
+      { voice, audioFmt, packages: remotePackages });
   }
-  // 只下玩家選擇的語音語言（jp/kr）的語音包，不下另一種（兩種前綴都認）
-  const wantKr = voice === 'kr';
-  pkgNames = pkgNames.filter(k => voiceLangKeep(k, wantKr));
   if (pkgNames.length === 0) {
     try { fs.writeFileSync(getAssetsVersionPath(), version); } catch {}
     return [];
@@ -605,16 +570,10 @@ ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies
     const k = 'lobby/' + lobby;
     if (packages?.[k]) packs = [k];
   }
-  // 只下玩家選擇的語音語言（jp/kr）的語音包，不下另一種；
-  // 非語音包（lobby/spine/scene/bgm/core）全部保留。
-  const wantKr = voice === 'kr';
-  const fmt = audioFmt === 'm4a' ? 'm4a' : 'ogg';
-  packs = packs.filter((k) => voiceLangKeep(k, wantKr));
-  // 音訊格式：ogg key 有 m4a 對端即改取 m4a（manifest 缺對端＝舊包，沿用 ogg）
-  packs = packs.map((k) => audioPackFor(k, fmt, packages));
+  // 該 lobby 需要的包：語言＋格式一次選定（selectPacks），非語音包全留。
+  packs = selectPacks(packs, { voice, audioFmt, packages });
   // core 必須先有
   if (packages?.['core'] && installed['core'] !== packages['core'].sha256) packs.unshift('core');
-  packs = [...new Set(packs)];
   const missing = packs.filter(k => installed[k] !== packages[k]?.sha256);
   // 額外檢查：即使 sha 相同但目錄其實不存在也視為缺失
   const actuallyMissing = missing.length ? missing : packs.filter(k => {
@@ -720,6 +679,20 @@ function voiceLangKeep(key, wantKr) {
   if (f === null) return true;
   return wantKr ? f.startsWith('KR_') : f.startsWith('JP_');
 }
+// 唯一選包入口：語言＋格式過濾（ogg key 有 m4a 對端即改取 m4a），去重保序，
+// 只留 manifest 有的 key。check/download/ensure 三處共用。
+function selectPacks(names, { voice, audioFmt, packages }) {
+  const wantKr = voice === 'kr';
+  const fmt = audioFmt === 'm4a' ? 'm4a' : 'ogg';
+  const pkgs = packages || {};
+  const out = [];
+  for (const k of names || []) {
+    if (!voiceLangKeep(k, wantKr)) continue;
+    const m = audioPackFor(k, fmt, pkgs);
+    if (pkgs[m] && !out.includes(m)) out.push(m);
+  }
+  return out;
+}
 
 ipcMain.handle('assets-manage-list', async () => {
   const installed = readInstalled();
@@ -745,7 +718,7 @@ ipcMain.handle('assets-manage-list', async () => {
     });
   }
   const total = packs.reduce((a, p) => a + p.size, 0);
-  return { version: localVersion, packs, totalSize: total, orphans: 0, streaming: isStreamingMode() };
+  return { version: localVersion, packs, totalSize: total, orphans: 0 };
 });
 
 // 管理空間：完整性（代表路徑存在性）＋修復（去 sha，缺席計數）

@@ -127,6 +127,32 @@ function packUrl(meta, name) {
   return `${base}/assets-${name.replace(/\//g, '_')}-v${meta.version}.tar.gz`;
 }
 
+// 唯一選包入口（與 Electron main.js selectPacks 同語義）：語言＋格式過濾
+//（ogg key 有 m4a 對端即改取 m4a），去重保序，只留 manifest 有的 key。
+function webVoiceLangKeep(key, wantKr) {
+  const f = key.startsWith('voice-m4a/') ? key.slice('voice-m4a/'.length)
+    : key.startsWith('voice/') ? key.slice('voice/'.length) : null;
+  if (f === null) return true;
+  return wantKr ? f.startsWith('KR_') : f.startsWith('JP_');
+}
+function webAudioPackFor(key, fmt, packages) {
+  if (fmt !== 'm4a' || typeof key !== 'string' || !key.startsWith('voice/')) return key;
+  const alt = 'voice-m4a/' + key.slice('voice/'.length);
+  return packages && packages[alt] ? alt : key;
+}
+function webSelectPacks(names, { voice, audioFmt, packages }) {
+  const wantKr = voice === 'kr';
+  const fmt = audioFmt === 'm4a' ? 'm4a' : 'ogg';
+  const pkgs = packages || {};
+  const out = [];
+  for (const k of names || []) {
+    if (!webVoiceLangKeep(k, wantKr)) continue;
+    const m = webAudioPackFor(k, fmt, pkgs);
+    if (pkgs[m] && !out.includes(m)) out.push(m);
+  }
+  return out;
+}
+
 // ---- mini tar parser（ustar；strip:1） ----
 function untarGz(buf, onEntry) {
   const files = gunzipSync(new Uint8Array(buf));
@@ -402,28 +428,18 @@ const ba = {
     return ensureAssets(neededPacks, combined);
   },
 
-  // ---- legacy：設定面板用（完整安裝） ----
-  async checkAssets({ voice } = {}) {
+  // ---- 設定頁「預先下載全部」＋狀態顯示用（完整缺包清單） ----
+  async checkAssets({ voice, audioFmt } = {}) {
     const meta = await fetchRemoteVersion();
     const c = await caches.open(CACHE_PREFIX + meta.version);
     await migrateFromPreviousCache(meta, c);
     const installed = await readMeta(c);
     const coreOk = installed['core'] === meta.packages?.['core']?.sha256;
-    const wantKr = voice === 'kr';
-    let needsDownloadPacks = Object.keys(meta.packages || {}).filter(
-      (k) => installed[k] !== meta.packages[k]?.sha256
-        && (!k.startsWith('voice/')
-          || (wantKr ? k.startsWith('voice/KR_') : k.startsWith('voice/JP_')))
-    );
-    // 串流模式：初始只需 core/intro（與 Electron 版一致；之前 web 版回全部，
-    // 開始下載會把串流用戶的全包也抓下來）。
-    let streaming = true;
-    try { streaming = localStorage.getItem('ba_streaming') !== '0'; } catch {}
-    if (streaming) {
-      const coreNeeds = needsDownloadPacks.filter((k) => k === 'core' || k === 'intro');
-      if (coreNeeds.length === 0 && coreOk) needsDownloadPacks = [];
-      else needsDownloadPacks = coreNeeds;
-    }
+    const needsDownloadPacks = webSelectPacks(
+      Object.keys(meta.packages || {}).filter((k) => installed[k] !== meta.packages[k]?.sha256),
+      { voice, audioFmt, packages: meta.packages });
+    // bootPacks = 其中擋開機的 core/intro（開機只等它）
+    const bootPacks = needsDownloadPacks.filter((k) => k === 'core' || k === 'intro');
     return {
       localVersion: meta.version,
       hasAssets: !!coreOk,
@@ -431,9 +447,10 @@ const ba = {
       schema: meta.schema || 1,
       needsDownload: !coreOk || needsDownloadPacks.length > 0,
       needsDownloadPacks,
+      bootPacks,
+      needsBootDownload: !coreOk || bootPacks.length > 0,
       packages: meta.packages,
       lobbies: meta.lobbies,
-      streaming,
       installed,
     };
   },
@@ -446,17 +463,6 @@ const ba = {
       ?? (packages ? Object.keys(packages).filter((k) => meta.packages?.[k]) : null)
       ?? Object.keys(meta.packages || {});
     const fmt = audioFmt === 'm4a' ? 'm4a' : 'ogg';
-    const audioPackFor = (k) => {
-      if (fmt !== 'm4a' || !k.startsWith('voice/')) return k;
-      const alt = 'voice-m4a/' + k.slice('voice/'.length);
-      return meta.packages?.[alt] ? alt : k;
-    };
-    const voiceLangKeep = (k) => {
-      const f = k.startsWith('voice-m4a/') ? k.slice('voice-m4a/'.length)
-        : k.startsWith('voice/') ? k.slice('voice/'.length) : null;
-      if (f === null) return true;
-      return (voice === 'kr') ? f.startsWith('KR_') : f.startsWith('JP_');
-    };
     const sendProgress = (p) => {
       try { onProgress?.(p); } catch {}
       ba._emitProgress(p);
@@ -466,9 +472,9 @@ const ba = {
     await migrateFromPreviousCache(meta, c);
     const installed = await readMeta(c);
     // 格式選擇：ogg key 有 m4a 對端即改取（只留一邊，不重複下）；同 key 去重
-    const dlWanted = [...new Set(wanted.map(audioPackFor))];
+    const dlWanted = webSelectPacks(wanted, { voice, audioFmt, packages: meta.packages });
     const toDownload = dlWanted.filter(
-      (k) => installed[k] !== meta.packages[k]?.sha256 && voiceLangKeep(k)
+      (k) => installed[k] !== meta.packages[k]?.sha256
         && (fmt !== 'ogg' || !k.startsWith('voice-m4a/'))
         && (fmt !== 'm4a' || !k.startsWith('voice/') || !meta.packages?.['voice-m4a/' + k.slice('voice/'.length)])
     );
@@ -524,24 +530,8 @@ const ba = {
       const k = 'lobby/' + lobby;
       if (packages?.[k]) packs = [k];
     }
-    // 只下玩家選擇的語音語言（jp/kr）的語音包，不下另一種（兩種前綴都認）；
-    // 非語音包（lobby/spine/scene/bgm/core）全部保留。
-    const wantKr = voice === 'kr';
-    const voiceLangKeep = (k) => {
-      const f = k.startsWith('voice-m4a/') ? k.slice('voice-m4a/'.length)
-        : k.startsWith('voice/') ? k.slice('voice/'.length) : null;
-      if (f === null) return true;
-      return wantKr ? f.startsWith('KR_') : f.startsWith('JP_');
-    };
-    packs = packs.filter(voiceLangKeep);
-    // 音訊格式：ogg key 有 m4a 對端即改取 m4a（manifest 缺對端＝舊包，沿用 ogg）
-    const fmt = audioFmt === 'm4a' ? 'm4a' : 'ogg';
-    const audioPackFor = (k) => {
-      if (fmt !== 'm4a' || !k.startsWith('voice/')) return k;
-      const alt = 'voice-m4a/' + k.slice('voice/'.length);
-      return meta.packages?.[alt] ? alt : k;
-    };
-    packs = packs.map(audioPackFor);
+    // 該 lobby 需要的包：語言＋格式一次選定（webSelectPacks），非語音包全留。
+    packs = webSelectPacks(packs, { voice, audioFmt, packages: meta.packages });
     if (meta.packages?.['core'] && installed['core'] !== meta.packages['core']?.sha256) {
       packs.unshift('core');
     }
@@ -574,18 +564,7 @@ const ba = {
     return failed.length ? { ok: false, results } : { ok: true, results };
   },
 
-  // ---- 下載模式（web 真實實作；過去是永遠回 true 的 stub，設定頁切換看似沒反應）----
-  // streaming=true：只保 core/intro，大廳隨點隨下；false＝完整安裝。
-  async getStreamingMode() {
-    try { return localStorage.getItem('ba_streaming') !== '0'; }
-    catch { return true; }
-  },
-  async setStreamingMode(v) {
-    const streaming = !!v;
-    try { localStorage.setItem('ba_streaming', streaming ? '1' : '0'); } catch {}
-    return streaming;
-  },
-  // ---- 瀏覽器儲存鎖定＋配額（完整安裝前調用）----
+  // ---- 瀏覽器儲存鎖定＋配額（預先下載全部前調用）----
   // Cache Storage 與 IDB/OPFS 同一配額池、可被清除；persist 要到就不清。
   async ensurePersistent() {
     try {
@@ -693,7 +672,6 @@ const ba = {
       packs,
       totalSize: packs.reduce((a, p) => a + p.size, 0),
       orphans,
-      streaming: await this.getStreamingMode(),
     };
   },
   // ---- 按包刪除：只刪無其他已裝包共用的檔案（共用如 bgm 保留）
