@@ -352,6 +352,16 @@
     }
     .spaceDel:hover { background: rgba(255,90,90,.35); }
     .spaceDel:disabled { opacity: .4; cursor: wait; }
+    /* 下載鈕與刪除鈕同形（圓形圖示，文字只進 title/aria-label）：動作格僅 22px，
+       任何文字鈕都會換行撐開列高。忙碌中 disabled 灰掉，label 切換為下載中。 */
+    .spaceDl {
+      width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(120,160,255,.4);
+      background: rgba(90,120,255,.14); color: #c3d0ff; font-size: 14px; line-height: 1;
+      cursor: pointer; flex-shrink: 0; transition: background .2s; white-space: nowrap;
+    }
+    .spaceDl:hover { background: rgba(90,120,255,.35); }
+    .spaceDl:disabled { opacity: .4; cursor: wait; }
+    .sg-act { min-width: 22px; }
 
     /* settings panel：固定尺寸（不隨分頁內容伸縮）。
        display 只能在 .open 時給 flex——寫在基底會蓋掉上面的 display:none，

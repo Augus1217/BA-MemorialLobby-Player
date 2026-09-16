@@ -3987,13 +3987,14 @@ function spaceInstalledRow(p, usedBy) {
 function spaceMissingRow(m) {
   const k = m.key;
   const busy = _spaceDownloading.has(k);
+  // 下載鈕與刪除鈕同形（20px 圓形圖示；文字放 title/aria-label，絕不換行撐開 22px 動作格）
+  const label = busy ? t('set.space.downloading') : t('set.space.download');
   return `<div class="spaceRow">`
     + `<span class="spaceName sg-cell">${escapeHtml(spaceLobbyDisplay(k))}</span>`
     + `<span class="spaceKind sg-cell">${spaceKindLabel('lobby')}</span>`
     + `<span class="sg-cell sg-info"><span class="spaceKey">${escapeHtml(k)}</span></span>`
     + `<span class="spaceSize sg-num">${m.bytes > 0 ? fmtBytes(m.bytes) : '—'}</span>`
-    + `<span class="sg-act"><button class="btnTxt spaceDl" data-key="${escapeHtml(k)}"${busy ? ' disabled' : ''}>`
-    + `${busy ? t('set.space.downloading') : t('set.space.download')}</button></span></div>`;
+    + `<span class="sg-act"><button class="spaceDl" data-key="${escapeHtml(k)}"${busy ? ' disabled' : ''} title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">⤓</button></span></div>`;
 }
 
 let _rankDays = 30;
@@ -5131,6 +5132,14 @@ function previewClipFor(voiceId) {
     if (!fallback) fallback = clip;
   }
   if (fallback) return fallback;
+  // 無排程資料（如 CH0184 精簡條目）：talk 編號直連 Talk_%02d_M。
+  // 比「全塞進第一個 Talk」正確——否則整 lobby 併成一組、計時全 0，
+  // 按下去全部同時爆音。
+  const m = want.match(/_memoriallobby_(\d+)/);
+  if (m) {
+    const c = `Talk_${String(parseInt(m[1], 10)).padStart(2, '0')}_M`;
+    if (has(c)) return c;
+  }
   const talks = animNames().filter(n => n.startsWith('Talk_') && n.endsWith('_M'));
   return talks[0] || null;
 }
@@ -5192,34 +5201,56 @@ async function advancePreview() {
   // 旧单句直播路径已改由 scheduleGroupVoices 按事件时间出声；保留空壳以防外部引用。
   return;
 }
-// 整组语音按 clip 事件时间排播（t 秒后出声；找不到 t 立即播）。
-// 每句播出时推进高亮＋进度条；最后一句播完收尾。
+// 整組試播共用：播出一句、接好進度條，回傳 end promise。
+// 世代檢查由呼叫端負責（preview !== p 即停）。
+function previewFireLine(p, vid) {
+  markPreviewLineEl(vid);
+  const done = playVoice(vid);
+  const audio = lastVoiceAudio;
+  p.audio = audio;
+  p.barEl = p.lineEl?.querySelector('.prog i') || null;
+  if (audio && p.barEl) {
+    audio.addEventListener('timeupdate', () => {
+      if (preview !== p || p.audio !== audio || !p.barEl) return;
+      const d = audio.duration;
+      if (d && isFinite(d) && d > 0) p.barEl.style.width = `${Math.min(100, audio.currentTime / d * 100)}%`;
+    });
+  }
+  return done;
+}
+// 整组语音按 clip 事件时间排播（t 秒后出声；全组都有事件时间才用这条路）。
+// 任一句缺事件时间 → 整组改串接（逐句播完再下一句；缺计时硬排 t=0 会同时
+// 爆音，如 CH0184 精简条目）。每句播出时推进高亮＋进度条；最后一句播完收尾。
 function scheduleGroupVoices() {
   const p = preview;
   if (!p || p.lobby !== currentLobby || !spine) { stopPreview(); return; }
   const anims = SCHEDULE?.lobbies?.[currentLobby]?.animations || {};
   const schedVoices = (p.clip && anims[p.clip]?.voice) || [];
+  const hasT = (vid) => schedVoices.some(v => String(v?.name || v).toLowerCase() === vid.toLowerCase());
   const tOf = (vid) => {
     const v = schedVoices.find(v => String(v?.name || v).toLowerCase() === vid.toLowerCase());
     return v ? Math.max(0, v.t || 0) : 0;
   };
   p.timers = [];
+  if (!p.lines.every(hasT)) {
+    const runChain = async () => {
+      for (let i = 0; i < p.lines.length; i++) {
+        if (preview !== p) return;
+        let done;
+        try { done = previewFireLine(p, p.lines[i]); } catch { return; }
+        if (preview !== p) return;
+        try { await done; } catch {}
+      }
+      if (preview === p) stopPreview();
+    };
+    runChain();
+    return;
+  }
   p.lines.forEach((vid, i) => {
     const id = setTimeout(() => {
       if (preview !== p) return;
-      markPreviewLineEl(vid);
-      const done = playVoice(vid);
-      const audio = lastVoiceAudio;
-      if (preview !== p) return;   // 播出瞬间被取代／停止
-      p.audio = audio;
-      p.barEl = p.lineEl?.querySelector('.prog i') || null;
-      if (audio && p.barEl) {
-        audio.addEventListener('timeupdate', () => {
-          if (preview !== p || p.audio !== audio || !p.barEl) return;
-          const d = audio.duration;
-          if (d && isFinite(d) && d > 0) p.barEl.style.width = `${Math.min(100, audio.currentTime / d * 100)}%`;
-        });
-      }
+      const done = previewFireLine(p, vid);
+      if (preview !== p) return;
       const last = i === p.lines.length - 1;
       done.then(() => { if (last && preview === p) stopPreview(); });
     }, Math.max(0, tOf(vid)) * 1000);
