@@ -3843,7 +3843,7 @@ let _spaceSort = 'size';
 let _spaceBroken = {};
 
 function spaceKindLabel(kind) {
-  const map = { core: t('set.space.kindCore'), intro: t('set.space.kindIntro'), lobby: t('set.space.kindLobby'), voice: t('set.space.kindVoice'), 'voice-m4a': t('set.space.kindVoiceM4a') };
+  const map = { core: t('set.space.kindCore'), meta: t('set.space.kindMeta'), intro: t('set.space.kindIntro'), lobby: t('set.space.kindLobby'), voice: t('set.space.kindVoice'), 'voice-m4a': t('set.space.kindVoiceM4a') };
   return map[kind] || kind;
 }
 
@@ -5044,14 +5044,28 @@ function renderInfoPanel() {
     empty.textContent = t('info.noLines');
     infoLines.appendChild(empty);
   } else {
+    // 同組且文字完全相同的連續列合併為一列顯示（如 Hina 每組 2~3 個 segment
+    // 共用整組文案，否則看起來像重複 bug）。音訊仍逐檔播（engine 照 id 走），
+    // 高亮/進度追整列；不同組或文字不同絕不合併。
+    const runs = [];
+    {
+      let cur = null;
+      const gkeyOf = (id) => { try { return previewGroupFor(id).key; } catch { return 'solo:' + id; } };
+      lines.forEach((ln) => {
+        const gkey = gkeyOf(ln.id);
+        if (cur && cur.gkey === gkey && cur.text === ln.text) cur.ids.push(ln.id);
+        else { cur = { ids: [ln.id], text: ln.text, gkey }; runs.push(cur); }
+      });
+    }
     const seenGroups = new Set();
-    lines.forEach((ln, i) => {
+    runs.forEach((run, i) => {
       const div = document.createElement('div');
       div.className = 'line';
-      div.dataset.vid = ln.id;
-      // 播放鈕只在每組第一句（同 canonical clip＝同組；孤句自成一組），
+      div.dataset.vid = run.ids[0];
+      if (run.ids.length > 1) div.dataset.vids = run.ids.join(' ');
+      // 播放鈕只在每組第一列（同 canonical clip＝同組；孤句自成一組），
       // 放框右邊讓句首對齊；組與組之間加分割線（首組之前不加）
-      const gkey = previewGroupFor(ln.id).key;
+      const gkey = run.gkey;
       const isFirst = !seenGroups.has(gkey);
       if (seenGroups.size > 0 && isFirst) {
         const sep = document.createElement('div');
@@ -5066,7 +5080,7 @@ function renderInfoPanel() {
       div.appendChild(no);
       const txt = document.createElement('span');
       txt.className = 'txt';
-      txt.textContent = ln.text;
+      txt.textContent = run.text;
       div.appendChild(txt);
       if (isFirst) {
         const btn = document.createElement('button');
@@ -5074,7 +5088,7 @@ function renderInfoPanel() {
         btn.title = t('info.playLine');
         btn.setAttribute('aria-label', t('info.playLine'));
         btn.innerHTML = SVG_PLAY;
-        btn.addEventListener('click', (ev) => { ev.stopPropagation(); playPreviewLine(ln.id, div); });
+        btn.addEventListener('click', (ev) => { ev.stopPropagation(); playPreviewLine(run.ids[0], div); });
         div.appendChild(btn);
       }
       const prog = document.createElement('div');
@@ -5263,7 +5277,14 @@ function scheduleGroupVoices() {
 function talkLineEl(voiceId) {
   if (!infoLines) return null;
   try {
-    return infoLines.querySelector(`[data-vid="${CSS.escape(String(voiceId).toLowerCase())}"]`);
+    const exact = infoLines.querySelector(`[data-vid="${CSS.escape(String(voiceId).toLowerCase())}"]`);
+    if (exact) return exact;
+    // 合併列：segment id 藏在 data-vids（空白分隔），高亮/進度追整列
+    const low = String(voiceId).toLowerCase();
+    for (const el of infoLines.querySelectorAll('.line[data-vids]')) {
+      if ((el.dataset.vids || '').split(' ').includes(low)) return el;
+    }
+    return null;
   } catch { return null; }
 }
 function clearAllLinePlaying() {
@@ -5460,6 +5481,13 @@ function renderSidebar() {
       name.className = 'name';
       name.textContent = variantText(g, c);
       b.appendChild(name);
+      if (c.info.labels.length === 0 && (_dupCount[(g.display || '').toLowerCase()] || 0) > 1) {
+        const hint = document.createElement('span');
+        hint.className = 'sb-keyhint';
+        hint.textContent = c.key;
+        hint.title = c.key;
+        b.appendChild(hint);
+      }
       const rk = statsRankOf(c.key);
       if (rk && rk.rank <= 10 && _statsTop) {
         const hot = document.createElement('span');
@@ -5493,6 +5521,13 @@ function renderSidebar() {
   }
   const pinnedGroups = groups.filter(g => pinned.has(g.core));
   const restGroups = groups.filter(g => !pinned.has(g.core));
+  // 同名組消歧義（如兩個「砂狼白子」：Shiroko_home vs CH0263_home 為不同大廳）：
+  // 無 variant 標籤的光桿列才會撞名，撞名者在名字後附 lobby key。
+  const _dupCount = {};
+  for (const g of groups) {
+    const d = (g.display || '').toLowerCase();
+    _dupCount[d] = (_dupCount[d] || 0) + 1;
+  }
   if (_sbSort === 'top') {
     // 人氣排序：組內最佳名次小的在前；無排行壓底（維持名稱序）
     const cmp = (a, b) => (groupBestRank(a) - groupBestRank(b))
@@ -6883,7 +6918,7 @@ async function ensureReady() {
 
   // 新 API：ba-web.js ensureAssets（web 版；intro 4MB 順便裝，否則首訪無開場音樂）
   if (window.ba?.ensureAssets) {
-    try { await window.ba.ensureAssets(['core', 'intro'], showP); } catch (e) {
+    try { await window.ba.ensureAssets(['core', 'meta', 'intro'], showP); } catch (e) {
       console.warn('[lobby] ensureAssets failed:', e.message);
     }
   }
@@ -6895,9 +6930,9 @@ async function ensureReady() {
         new Promise((_, rej) => setTimeout(() => rej(new Error('checkAssets timeout')), 10000)),
       ]);
       _assetInfo = info;
-      // 開機只等 core（其餘缺包不擋進入，隨點隨下）
+      // 開機只等核心三件（其餘缺包不擋進入，隨點隨下）
       if (info.needsBootDownload && info.bootPacks?.length) {
-        await window.ba.downloadAssets({ version: info.remoteVersion, packages: info.packages, onlyPacks: ['core'], voice: voiceLang, audioFmt: audioExt });
+        await window.ba.downloadAssets({ version: info.remoteVersion, packages: info.packages, onlyPacks: ['core', 'meta', 'intro'], voice: voiceLang, audioFmt: audioExt });
         try { _assetInfo = await window.ba.checkAssets({ voice: voiceLang, audioFmt: audioExt }); } catch {}
       }
     } catch (e) {

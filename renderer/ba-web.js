@@ -416,7 +416,7 @@ const ba = {
       Object.keys(meta.packages || {}).filter((k) => installed[k] !== meta.packages[k]?.sha256),
       { voice, audioFmt, packages: meta.packages });
     // bootPacks = 其中擋開機的 core/intro（開機只等它）
-    const bootPacks = needsDownloadPacks.filter((k) => k === 'core' || k === 'intro');
+    const bootPacks = needsDownloadPacks.filter((k) => k === 'core' || k === 'meta' || k === 'intro');
     return {
       localVersion: meta.version,
       hasAssets: !!coreOk,

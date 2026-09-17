@@ -464,7 +464,7 @@ ipcMain.handle('check-assets', async (event, { voice, audioFmt } = {}) => {
       .filter(k => installed[k] !== remoteVersion.packages[k].sha256);
     needsDownloadPacks = selectPacks(allMissing,
       { voice, audioFmt, packages: remoteVersion.packages });
-    bootPacks = needsDownloadPacks.filter(k => k === 'core' || k === 'intro');
+    bootPacks = needsDownloadPacks.filter(k => k === 'core' || k === 'meta' || k === 'intro');
   }
 
   return {
@@ -663,7 +663,8 @@ function dirStats(dir) {
 // installed.json 的 pack key → 磁碟路徑清單（與 build_assets.py 打包規則一一對應）
 function packPaths(key) {
   const assetsDir = getAssetsDir();
-  if (key === 'core') return ['data', 'students', 'ui', 'loading', 'fonts'].map(s => path.join(assetsDir, s));
+  if (key === 'core') return ['students', 'ui', 'loading', 'fonts'].map(s => path.join(assetsDir, s));
+  if (key === 'meta') return [path.join(assetsDir, 'data')];
   if (key === 'intro') return [path.join(assetsDir, 'intro')];
   if (key.startsWith('lobby/')) {
     const nm = key.slice('lobby/'.length);
@@ -737,7 +738,8 @@ ipcMain.handle('assets-manage-list', async () => {
 // 管理空間：完整性（代表路徑存在性）＋修復（去 sha，缺席計數）
 function packPrimaryPath(key) {
   const assetsDir = getAssetsDir();
-  if (key === 'core') return path.join(assetsDir, 'data');
+  if (key === 'core') return path.join(assetsDir, 'fonts');
+  if (key === 'meta') return path.join(assetsDir, 'data');
   if (key === 'intro') return path.join(assetsDir, 'intro');
   if (key === 'assets-player') return path.join(assetsDir, 'bgm');
   if (key.startsWith('lobby/')) return path.join(assetsDir, 'spine', key.slice('lobby/'.length));
@@ -750,7 +752,7 @@ ipcMain.handle('assets-verify', async () => {
   const installed = readInstalled();
   const broken = {};
   for (const key of Object.keys(installed)) {
-    if (key === 'core') continue;
+    if (key === 'core' || key === 'meta') continue;
     const p = packPrimaryPath(key);
     if (p && !fs.existsSync(p)) broken[key] = 1;
   }
