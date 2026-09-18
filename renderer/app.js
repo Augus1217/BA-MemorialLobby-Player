@@ -376,7 +376,6 @@ let mouse = { x: -9999, y: -9999, active: false };
 
 function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 const rand = (a, b) => a + Math.random() * (b - a);
-const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 // Compute per-layer base fit.
 // The in-game camera centres on a marker bone (Camera_Pos / Camera_Root,
@@ -1752,10 +1751,16 @@ async function playTalk() {
     // exact clip name, but server doesn't expose MemorialLobby dialogs — the
     // closest determinism we can deliver is to filter to clips that actually
     // emit voice events. Falls back to all Talk_N_M if schedule is unavailable.
+    // Order is SEQUENTIAL per lobby (round-robin, persisted): the game cycles
+    // Talk_01 → 02 → … → N → 01 on successive taps, never random.
     const schAnim = SCHEDULE?.lobbies?.[currentLobby]?.animations || {};
     const withVoice = talks.filter(n => (schAnim[n]?.voice || []).length > 0);
-    const pool = withVoice.length ? withVoice : talks;
-    const m = pick(pool);
+    const pool = [...(withVoice.length ? withVoice : talks)].sort();
+    const seqKey = `ba_talkSeq_${currentLobby}`;
+    let seq = 0;
+    try { seq = parseInt(localStorage.getItem(seqKey) || '0', 10) || 0; } catch {}
+    const m = pool[((seq % pool.length) + pool.length) % pool.length];
+    try { localStorage.setItem(seqKey, String(seq + 1)); } catch {}
     const a = m.replace(/_M$/, '_A');
     setAnimationWithClipMix(1, m, false);
     if (animNames().includes(a)) setAnimationWithClipMix(2, a, false);
@@ -5715,8 +5720,8 @@ function loadPostConfig() {
   })();
   return POST_CONFIG_LOAD;
 }
-let baPostOn = false;
-try { baPostOn = localStorage.getItem('ba_post') === '1'; } catch {}
+let baPostOn = true;   // 預設開：還原遊戲內建後製（光環色散等全 lobby 都有）
+try { if (localStorage.getItem('ba_post') === '0') baPostOn = false; } catch {}
 // mild = 跳過 exposure（官方 5.5EV 是補償遊戲內更暗的客製 shader；我們的 unlit 重現直接套會爆白）
 // faithful = 完整照官方數值。panini/chroma/LGG 兩種模式都套。
 let POST_MODE = 'mild';
