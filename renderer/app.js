@@ -512,7 +512,10 @@ function fitScene() {
       spine.skeleton.findBone('Camera_Root') ||
       spine.skeleton.findBone('All_Layer');
     cameraTargetY = camPos ? boneWorldY(camPos) : 962;   // 962 = 遊戲標準相機線
-    charScale = vw / 2900;   // 3000 偏鬆，收一點（體感；UI 量測帶內）
+    // 正交相機（fixed orthoSize）：可見高度恆定 → 縮放只跟 vh 有關，與寬度無關。
+    // 舊 vw/2900 在 16:9 等價於 vh/1631.25（16/2900 = 9/1631.25，逐像素一致），
+    // 但超寬屏會拉太近、直式屏會縮太小。CHARSCALE_DIV 待實機標定後替換為真值。
+    charScale = vh / 1631.25;
     sceneBiasY = cameraTargetY * charScale;               // 相機線置於畫面垂直中央
   }
 
