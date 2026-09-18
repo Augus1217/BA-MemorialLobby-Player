@@ -48,6 +48,7 @@ const btnCtlExport = document.getElementById('btnCtlExport');
 const btnCtlSettings = document.getElementById('btnCtlSettings');
 const btnCtlRank = document.getElementById('btnCtlRank');
 const btnCtlVignette = document.getElementById('btnCtlVignette');
+const btnCtlPost = document.getElementById('btnCtlPost');
 const ctlVoiceSegs = document.getElementById('ctlVoiceSegs');
 const fxEl = document.getElementById('fx');
 const exportPanel = document.getElementById('exportPanel');
@@ -224,6 +225,7 @@ const CTL_I18N = {
   settings:  { 'zh-TW': '設定',          'zh-CN': '设置',      'ja': '設定',                'en': 'Settings',             'ko': '설정' },
   rank:      { 'zh-TW': '人氣排行',      'zh-CN': '人气排行',  'ja': '人気ランキング',      'en': 'Top lobbies',          'ko': '인기 순위' },
   vignette:  { 'zh-TW': '電影燈光效果',  'zh-CN': '电影灯光效果', 'ja': '映画ライト効果',    'en': 'Cinematic lighting',   'ko': '시네마 조명 효과' },
+  post:      { 'zh-TW': '濾鏡效果',        'zh-CN': '滤镜效果',       'ja': 'フィルター効果',      'en': 'Filter',               'ko': '필터 효과' },
   voiceLang: { 'zh-TW': '語音',          'zh-CN': '语音',      'ja': 'ボイス',              'en': 'Voice',                'ko': '보이스' },
   voiceJp:   { 'zh-TW': '日文',          'zh-CN': '日文',      'ja': '日本語',              'en': 'JP',                   'ko': '일본어' },
   voiceKr:   { 'zh-TW': '韓文',          'zh-CN': '韩文',      'ja': '韓国語',              'en': 'KR',                   'ko': '한국어' },
@@ -247,6 +249,7 @@ function applyCtlI18n() {
   setLabel('rank', btnCtlRank);
   setLabel('focus', btnCtlFocus);
   setLabel('vignette', btnCtlVignette);
+  setLabel('post', btnCtlPost);
   const vl = document.getElementById('ctlVoiceLbl');
   if (vl) vl.textContent = ctlText('voiceLang');
   for (const b of (ctlVoiceSegs?.querySelectorAll('button') ?? [])) {
@@ -7187,6 +7190,25 @@ async function init() {
   });
   syncVignetteUI();
 
+  // ---- 後製濾鏡（Volume 色散/LGG/Panini）開關，持久化（預設開） ----
+  const syncPostUI = () => {
+    btnCtlPost?.classList.toggle('on', baPostOn);
+    btnCtlPost?.classList.toggle('off', !baPostOn);
+  };
+  btnCtlPost?.addEventListener('click', () => {
+    if (baPostOn) {
+      baPostOn = false;
+      try { localStorage.setItem('ba_post', '0'); } catch {}
+      if (postWrap) postWrap.filters = [];
+    } else {
+      baPostOn = true;
+      try { localStorage.setItem('ba_post', '1'); } catch {}
+      applyPostGrade(currentLobby);
+    }
+    syncPostUI();
+  });
+  syncPostUI();
+
   // ---- settings panel ----
   btnCtlSettings.addEventListener('click', toggleSettingsPanel);
   if (btnCtlRank) btnCtlRank.addEventListener('click', () => {
@@ -7481,7 +7503,7 @@ if (BA_DEBUG.probe) {
       fxCanvas: !!document.querySelector('#fx canvas, .baclickfx, [id*="clickfx" i]'),
       uiLang,
       dictLoaded: !!i18nDict,
-      ctlLabels: ['bgm', 'focus', 'vignette', 'voiceJp'].map(k => `${k}:${ctlText(k)}`).join(', '),
+      ctlLabels: ['bgm', 'focus', 'vignette', 'post', 'voiceJp'].map(k => `${k}:${ctlText(k)}`).join(', '),
       skipTitle: t('skip.title'),
       skipOk: document.getElementById('skipYes')?.textContent,
       jpOnlyCk: document.getElementById('setJpOnlyCk')?.checked,

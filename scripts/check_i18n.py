@@ -80,6 +80,22 @@ def main() -> int:
     elif not quiet:
         print(f"[i18n] {len(codes)} 個主進程錯誤碼全有對應 key" if codes else "[i18n] 主進程無錯誤碼")
 
+    # HUD data-ck 必須在 CTL_I18N 有定義（且五語齊全）
+    m = re.search(r"const CTL_I18N = \{(.*?)\n\};", app_src, re.S)
+    if m:
+        entries = re.findall(r"^\s{2}(\w+):\s*\{([^}]*)\}", m.group(1), re.M)
+        ctl = {k: v for k, v in entries}
+        for k, v in ctl.items():
+            langs = re.findall(r"'(zh-TW|zh-CN|ja|en|ko)'", v)
+            if sorted(langs) != ["en", "ja", "ko", "zh-CN", "zh-TW"]:
+                print(f"::error::CTL_I18N.{k} 語言不齊: {sorted(langs)}")
+                failed = True
+        for ck in set(re.findall(r'data-ck="(\w+)"', html_src)):
+            if ck not in ctl:
+                print(f"::error::data-ck={ck} 在 CTL_I18N 無定義")
+                failed = True
+        if not quiet:
+            print(f"[i18n] CTL_I18N {len(ctl)} keys 五語齊全，data-ck 全命中")
     # 孤兒 key：全 repo 無字面出現（僅提醒；err.* 由動態前綴覆蓋，不計入）
     if not quiet:
         blob = app_src + web_src + html_src + main_src
