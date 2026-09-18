@@ -1758,7 +1758,8 @@ async function playTalk() {
     // Talk_01 → 02 → … → N → 01 on successive taps, never random.
     const schAnim = SCHEDULE?.lobbies?.[currentLobby]?.animations || {};
     const withVoice = talks.filter(n => (schAnim[n]?.voice || []).length > 0);
-    const pool = [...(withVoice.length ? withVoice : talks)].sort();
+    const pool = [...(withVoice.length ? withVoice : talks)].sort((a, b) =>
+      (parseInt((a.match(/Talk_(\d+)/) || [])[1] || '0', 10) - parseInt((b.match(/Talk_(\d+)/) || [])[1] || '0', 10)) || (a < b ? -1 : 1));
     const seqKey = `ba_talkSeq_${currentLobby}`;
     let seq = 0;
     try { seq = parseInt(localStorage.getItem(seqKey) || '0', 10) || 0; } catch {}
@@ -5725,11 +5726,27 @@ function loadPostConfig() {
 }
 let baPostOn = true;   // 預設開：還原遊戲內建後製（光環色散等全 lobby 都有）
 try { if (localStorage.getItem('ba_post') === '0') baPostOn = false; } catch {}
-// mild = 跳過 exposure（官方 5.5EV 是補償遊戲內更暗的客製 shader；我們的 unlit 重現直接套會爆白）
-// faithful = 完整照官方數值。panini/chroma/LGG 兩種模式都套。
+// mild 模式跳過 exposure（官方 5.5EV 是補償遊戲內更暗的客製 shader；我們的
+// unlit 重現直接套會爆白）。panini/chroma/LGG 兩種模式都套。
 let POST_MODE = 'mild';
 try { POST_MODE = localStorage.getItem('ba_post_mode') === 'faithful' ? 'faithful' : 'mild'; } catch {}
-const baPostCfgFor = (lobby) => POST_CONFIG[(lobby || '').toLowerCase()] || null;
+const baPostCfgFor = (lobby) => {
+  const key = (lobby || '').toLowerCase();
+  if (POST_CONFIG[key]) return POST_CONFIG[key];
+  // 變體 lobby 沿用本體配置（如 ako_home_teen → ako_home、
+  // ch0070_home_gl → ch0070_home；全表僅 4 間缺）。一次剝一層，
+  // 先 _gl（否則 _home_gl 會被剝成裸名而錯過本體）。
+  let b = key;
+  for (;;) {
+    let next = null;
+    for (const suf of ['_gl', '_home', '_teen', '_multi']) {
+      if (b.endsWith(suf) && b.length > suf.length) { next = b.slice(0, -suf.length); break; }
+    }
+    if (!next) return null;
+    if (POST_CONFIG[next]) return POST_CONFIG[next];
+    b = next;
+  }
+};
 // URP Panini：viewExtents = (aspect*tan(fov/2), tan(fov/2))；fov 遊戲端未知，假設 60
 function postPaniniParams(cfg) {
   const d = cfg.p ? cfg.p[0] : 0;
