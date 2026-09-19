@@ -2579,6 +2579,23 @@ window.ba_debug = {
     stageTint: (v) => { try { app.stage.filters = [new ColorMatrixFilter({ brightness: Number(v) ?? 3 })]; return app.stage.filters.length + ''; } catch (e) { return 'ERR ' + e.message; } },
     clearFilters: () => { app.stage.filters = []; return app.stage.filters.length; },
     renderNow: () => { app.render(); return 'rendered'; },
+    setChroma: (v) => { const f = postWrap && postWrap.filters && postWrap.filters[0]; if (!f) return 'NOFILTER'; f.resources.baPostUniforms.uniforms.uChroma = Number(v); return f.resources.baPostUniforms.uniforms.uChroma; },
+    postInfo: () => {
+      const r = app.renderer;
+      const w = postWrap;
+      const f = w && w.filters && w.filters[0];
+      return {
+        rendererW: r.width, rendererH: r.height, resolution: r.resolution,
+        postWrapBounds: w ? (() => { const b = w.getBounds(); return { x: b.x, y: b.y, w: b.width, h: b.height }; })() : null,
+        postWrapScale: w ? [w.scale.x, w.scale.y] : null,
+        filterOn: !!(w && w.filters && w.filters.length),
+        uChroma: f ? f.resources.baPostUniforms.uniforms.uChroma : null,
+        uPanini: f ? Array.from(f.resources.baPostUniforms.uniforms.uPanini ?? []) : null,
+        gUOutputFrame: Array.from(app.renderer.filter._filterGlobalUniforms.uniforms.uOutputFrame ?? []),
+        gUInputSize: Array.from(app.renderer.filter._filterGlobalUniforms.uniforms.uInputSize ?? []),
+        gUOutputTexture: Array.from(app.renderer.filter._filterGlobalUniforms.uniforms.uOutputTexture ?? []),
+      };
+    },
     present: async () => { app.render(); await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); return 'presented'; },
     readPix: (fx, fy) => {
       try {
@@ -5614,6 +5631,8 @@ const POST_FRAG = `
 in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uTexture;
+uniform highp vec4 uInputSize;
+uniform highp vec4 uOutputFrame;
 uniform float uOn;
 uniform float uExp;
 uniform float uCon;
@@ -5643,13 +5662,17 @@ vec2 paniniUv(vec2 uv) {
   return (cylPos / (cylDist - d)) / uPanini.xy * 0.5 + 0.5;
 }
 // URP UberPost — ChromaticAberration（3 sample，r@uv / g@uv+d / b@uv+2d）
-vec3 sampleWarp(vec2 uv) {
+// 官方 uv 為屏幕空間；pixi 的 vTextureCoord 覆蓋 [0, uOutputFrame.zw*uInputSize.zw]
+// （uInputSize 是濾鏡紋理尺寸，通常大於屏幕），故先還原屏幕相對 uv 再算 c2。
+vec3 sampleWarp(vec2 tcoord) {
+  vec2 k = uOutputFrame.zw * uInputSize.zw;
+  vec2 uv = tcoord / k;
   vec2 c2 = 2.0 * uv - 1.0;
   vec2 end = uv - c2 * dot(c2, c2) * uChroma;
   vec2 delta = (end - uv) / 3.0;
-  float r = texture(uTexture, paniniUv(uv)).r;
-  float g = texture(uTexture, paniniUv(delta + uv)).g;
-  float b = texture(uTexture, paniniUv(delta * 2.0 + uv)).b;
+  float r = texture(uTexture, paniniUv(uv) * k).r;
+  float g = texture(uTexture, paniniUv(delta + uv) * k).g;
+  float b = texture(uTexture, paniniUv(delta * 2.0 + uv) * k).b;
   return vec3(r, g, b);
 }
 void main() {
