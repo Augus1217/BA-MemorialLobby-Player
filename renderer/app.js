@@ -5750,12 +5750,16 @@ const baPostCfgFor = (lobby) => {
     b = next;
   }
 };
-// URP Panini：viewExtents = (aspect*tan(fov/2), tan(fov/2))；fov 遊戲端未知，假設 60
+// URP Panini：viewExtents = (aspect*tan(fov/2), tan(fov/2))；fov 取自遊戲
+// 相機系統（STANDARD_FOV=10° 經 CameraFovScaler 換長寬比縮放，見
+// MEMORIAL_LOBBY_SPEC §2.1；16:9 時垂直 7.51°）。曾誤假設 fov=60，
+// warp 強 ~8 倍（中央 1.16x＋頂部裁 9%，即回報的「被放大」）。
 function postPaniniParams(cfg) {
   const d = cfg.p ? cfg.p[0] : 0;
   const crop = cfg.p ? (cfg.p.length > 1 ? cfg.p[1] : 1) : 0;
-  const tanH = Math.tan(60 * Math.PI / 360);
   const aspect = app.renderer.width / Math.max(1, app.renderer.height);
+  const vfov = 2 * Math.atan(Math.tan(10 * Math.PI / 360) * 1.3333 / aspect) * 360 / (2 * Math.PI);
+  const tanH = Math.tan(vfov * Math.PI / 360);
   const vex = [aspect * tanH, tanH];
   let scaleF = 1;
   if (d > 0) {
