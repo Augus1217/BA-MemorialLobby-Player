@@ -515,10 +515,12 @@ function fitScene() {
       spine.skeleton.findBone('Camera_Root') ||
       spine.skeleton.findBone('All_Layer');
     cameraTargetY = camPos ? boneWorldY(camPos) : 962;   // 962 = 遊戲標準相機線
-    // 正交相機（fixed orthoSize）：可見高度恆定 → 縮放只跟 vh 有關，與寬度無關。
-    // 舊 vw/2900 在 16:9 等價於 vh/1631.25（16/2900 = 9/1631.25，逐像素一致），
-    // 但超寬屏會拉太近、直式屏會縮太小。CHARSCALE_DIV 待實機標定後替換為真值。
-    charScale = vh / 1631.25;
+    // 遊戲相機為透視（CameraFovScaler 保持水平 fov 恆定，SPEC §2.1），可見高 =
+    // 2·D·tan(vfov/2)；以 spine 單位計除數 = 200·tan(5°)·4/3·D = 23.33·D。
+    // 2800 目測值反解 D=119.99 ≈ 120（整數 authored 值）；舊 2900 反解 D=124.3
+    // 不整 → 2800 為真值。D=120 → 16:9 可見高 1574.8 spine 單位，
+    // charScale = vh/1575（=vw/2800；精確值 1574.8，差 0.013% 不可見）。
+    charScale = vh / 1575;
     sceneBiasY = cameraTargetY * charScale;               // 相機線置於畫面垂直中央
   }
 
