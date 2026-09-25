@@ -348,21 +348,12 @@ const log = (s) => console.log('[lobby]', s);
 //   3. 真正的亮度控制不在 blend，而在後製：見 postExposure（ColorAdjustments，_C
 //      profile）與 flash_curves 的 exposure 曲線。
 // 保留本函式（記錄 .skel 原值供 A/B 與稽核），但不再改動 blendMode。
-// kivo 模式（URL hash 加 kivoFix=1 開啟）：恢復舊的 additive→screen 名稱啟發式。
-// 用途是 A/B 實測——執行期改 blendMode 不會重繪（pixi-spine 快取批次混合狀態），
-// 必須在載入期、首次渲染前套用才有效，故只能靠開機參數切換。
-const KIVO_FIX_ON = /kivoFix=1/.test(location.hash + location.search);
-// Neutral tonemapping 開關：預設開（= URP 預設），URL 加 tone=0 可關掉做 A/B。
-// 與 shader uniform uTone、CPU 對照版 BA_POST_TONE 共用同一條件。
-const BA_POST_TONE = !/(?:^|&)tone=0/.test(location.hash + location.search);
 const fixAdditiveSlots = (obj) => {
-  let n = 0;
   for (const slot of obj.skeleton.slots) {
     if (!obj.__blendOrig) obj.__blendOrig = new Map();
     if (!obj.__blendOrig.has(slot.data.name)) obj.__blendOrig.set(slot.data.name, slot.data.blendMode);
-    if (KIVO_FIX_ON && slot.data.blendMode === 1 && /light|flare/i.test(slot.data.name)) { slot.data.blendMode = 3; n++; }
   }
-  return n;
+  return 0;
 };
 
 // ---- camera (lobby_camera_config.json) ----
@@ -2627,6 +2618,8 @@ window.ba_debug = {
         postWrapScale: w ? [w.scale.x, w.scale.y] : null,
         filterOn: !!(w && w.filters && w.filters.length),
         uChroma: f ? f.resources.baPostUniforms.uniforms.uChroma : null,
+        uExp: f ? f.resources.baPostUniforms.uniforms.uExp : null,
+        uTone: f ? f.resources.baPostUniforms.uniforms.uTone : null,
         uPanini: f ? Array.from(f.resources.baPostUniforms.uniforms.uPanini ?? []) : null,
         gUOutputFrame: Array.from(app.renderer.filter._filterGlobalUniforms.uniforms.uOutputFrame ?? []),
         gUInputSize: Array.from(app.renderer.filter._filterGlobalUniforms.uniforms.uInputSize ?? []),
@@ -5725,27 +5718,6 @@ uniform highp vec4 uInputSize;
 uniform highp vec4 uOutputFrame;
 uniform float uOn;
 uniform float uExp;
-// URP Neutral tonemapping（Khronos PBR Neutral，URP 的預設模式）。
-// 全 266 個 lobby 的 Volume profile 都沒有 Tonemapping 覆寫（已完整列舉元件類型：
-// ChromaticAberration／ColorAdjustments／LiftGammaGain／DepthOfField／
-// PaniniProjection／LensDistortion），故實際生效的是 pipeline asset 的預設值＝Neutral。
-// 少了這一段會整體偏亮：Neutral 對我們的畫面約 上方 −7.6、中間 −2.6（sRGB 階度），
-// 與 kivo 舊的 screen 混色（上 −5.5／中 −2.6）同型同量 —— kivo 其實是在近似這個步驟。
-uniform float uTone;
-vec3 neutralTonemap(vec3 color) {
-  const float startCompression = 0.8 - 0.04;
-  const float desaturation = 0.15;
-  float x = min(color.r, min(color.g, color.b));
-  float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
-  color -= offset;
-  float peak = max(color.r, max(color.g, color.b));
-  if (peak < startCompression) return color;
-  float d = 1.0 - startCompression;
-  float newPeak = 1.0 - d * d / (peak + d - startCompression);
-  color *= newPeak / peak;
-  float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
-  return mix(color, newPeak * vec3(1.0), g);
-}
 uniform float uCon;
 uniform float uSat;
 uniform float uChroma;
@@ -5790,9 +5762,8 @@ void main() {
   vec4 c = texture(uTexture, vTextureCoord);
   if (uOn <= 0.5 || c.a <= 0.003) { finalColor = c; return; }
   vec3 rgb = sampleWarp(vTextureCoord);
-  // === URP UberPost 等價管線：Tonemap → exposure → LutBuilderHdr grading ===
+  // === URP LutBuilderHdr（HDR grading）+ UberPost 等價管線 ===
   vec3 lin = vec3(srgb2lin(max(rgb.r, 0.0)), srgb2lin(max(rgb.g, 0.0)), srgb2lin(max(rgb.b, 0.0)));
-  if (uTone > 0.5) lin = max(neutralTonemap(lin), vec3(0.0));
   // uber：input *= postExposure（線性）；LUT 索引前 saturate(LinearToLogC(input))
   lin *= uExp;
   vec3 lg = vec3(0.241514 * log10f(max(5.555556 * lin.r, 1e-6)) + 0.584878,
@@ -5835,8 +5806,6 @@ function ensurePostFilter() {
     const baPostUniforms = new UniformGroup({
       uOn: { value: 0, type: 'f32' },
       uExp: { value: 1, type: 'f32' },
-      // uTone: URP Neutral tonemapping 開關（1=開，0=關以便 A/B）
-      uTone: { value: (/(?:^|&)tone=0/.test(location.hash + location.search)) ? 0 : 1, type: 'f32' },
       uCon: { value: 1, type: 'f32' },
       uSat: { value: 1, type: 'f32' },
       uChroma: { value: 0, type: 'f32' },
@@ -5933,23 +5902,8 @@ function baPostCpu(rgb, cfg) {
   const G2L = c => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
   const L2G = c => c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
   const MID = 0.4135884;
-  // CPU 對照版與 shader 同序：Neutral tonemap → exposure → grading
-  let lin = rgb.map(v => G2L(Math.max(v, 0)));
-  if (BA_POST_TONE) {
-    const startC = 0.8 - 0.04, desat = 0.15;
-    const x = Math.min(lin[0], lin[1], lin[2]);
-    const off = x < 0.08 ? x - 6.25 * x * x : 0.04;
-    lin = lin.map(v => Math.max(v - off, 0));
-    const peak = Math.max(lin[0], lin[1], lin[2]);
-    if (peak >= startC) {
-      const d = 1 - startC;
-      const newPeak = 1 - (d * d) / (peak + d - startC);
-      lin = lin.map(v => v * (newPeak / peak));
-      const g = 1 - 1 / (desat * (peak - newPeak) + 1);
-      lin = lin.map(v => v + (newPeak - v) * g);
-    }
-  }
   const e = POST_MODE === 'mild' ? 1 : Math.pow(cfg.e ?? 1, exposureVolumeWeight());
+  let lin = rgb.map(v => G2L(Math.max(v, 0)));
   lin = lin.map(v => v * e);
   let lg = lin.map(v => 0.241514 * Math.log10(Math.max(5.555556 * v, 1e-6)) + 0.584878);
   lg = lg.map(v => Math.min(Math.max(v, 0), 1));
