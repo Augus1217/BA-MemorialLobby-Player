@@ -337,16 +337,23 @@ const log = (s) => console.log('[lobby]', s);
  let ORDER = [];
  let STUDENT_ICONS = {};
 
-// kivo.wiki 光線修復公式：Additive 槽且名稱含 light/flare → Screen 混色。
-// 比對 kivo _fix skel 實證（Hanako 3/3、CH0220 8/8、Seia 1/1 個 Additive 槽全改）。
-// 不能「全部 Additive→Screen」：全庫 4296 個 Additive 槽中有眼睛/背景/光暈等
-// 非光效槽（kivo 未修角色在站上仍維持 Additive），名稱過濾才不會改壞眼睛。
+// kivo.wiki 的光線修復（Additive 槽且名含 light/flare → Screen 混色）已推翻。
+//
+// 推翻依據（2026-09-25 實測，Hanako_home）：
+//   1. .skel 是遊戲自己的資料，該 3 槽原值就是 blendMode=1(additive)。kivo 的名稱
+//      啟發式把它改掉，是對遊戲資料的偏離，不是修正。
+//   2. 凍結同幀 A/B（freeze(true) + 僅切 blend，附「隱藏全部 spine」對照組驗證量測
+//      有效：對照組 41.18% 像素變動、亮度 211→239，還原後誤差 0.000）：把這 3 槽在
+//      additive 與 screen 之間來回切，畫面差異 = 0.000 —— idle 下這條規則毫無作用。
+//   3. 真正的亮度控制不在 blend，而在後製：見 postExposure（ColorAdjustments，_C
+//      profile）與 flash_curves 的 exposure 曲線。
+// 保留本函式（記錄 .skel 原值供 A/B 與稽核），但不再改動 blendMode。
 const fixAdditiveSlots = (obj) => {
-  let n = 0;
   for (const slot of obj.skeleton.slots) {
-    if (slot.data.blendMode === 1 && /light|flare/i.test(slot.data.name)) { slot.data.blendMode = 3; n++; }
+    if (!obj.__blendOrig) obj.__blendOrig = new Map();
+    if (!obj.__blendOrig.has(slot.data.name)) obj.__blendOrig.set(slot.data.name, slot.data.blendMode);
   }
-  return n;
+  return 0;
 };
 
 // ---- camera (lobby_camera_config.json) ----
@@ -2066,6 +2073,25 @@ function flashCurves() {
   return t === null ? FALLBACK_FLASH_KEYS : null;
 }
 
+// Unity Volume 以 weight 在「預設值」與「override 值」之間 lerp：postExposure 只在
+// _C profile 的 weight>0 時生效，而 weight 由 flash_curves 的 exposure 曲線驅動。
+// 舊碼在 faithful 模式直接套 cfg.e（= 2^postExposure，花子 45.25），LogC 頂到 [0,1]
+// → 高於中灰的像素全變純白。改為 cfg.e ** weight。
+//
+// 開場窗口外一律取 weight=0（倍率 1.0），不採曲線收尾值。理由：
+//   * 曲線描述的是 intro timeline，窗口外該 volume override 不再被驅動；
+//   * 全庫 183+/266 間收尾值確為 0，與此一致；
+//   * 少數非零尾值不可信：nonomi_home(1.0×e64 → 64 倍)、ch0080_home(0.7547 → 17.8 倍)
+//     會把畫面推到全白，且 asuna/hiyori 出現 450、-50000 等 float32 溢位的損毀值。
+// 開場期間仍用曲線實值（那段資料可靠，且白閃疊層本就主導觀感）。
+function exposureVolumeWeight() {
+  const t = introFlashTime();
+  if (t < 0) return 0;
+  const c = flashCurves();
+  if (!c || !c.exposure) return 0;
+  return clamp(cubicAt(c.exposure, t), 0, 1);
+}
+
 // Net screen whiteness (0..1): the exposure volume and the white sprite both
 // white-out the frame, so take their max (Unity post-process + sprite overlay).
 function whiteFlashAlpha(t) {
@@ -2571,7 +2597,9 @@ window.ba_debug = {
     on: () => { baPostOn = true; try { localStorage.setItem('ba_post', '1'); } catch {} applyPostGrade(currentLobby); return baPostOn; },
     off: () => { baPostOn = false; try { localStorage.setItem('ba_post', '0'); } catch {} if (postWrap) postWrap.filters = []; return baPostOn; },
     mode: (m) => { if (m === 'faithful' || m === 'mild') { POST_MODE = m; try { localStorage.setItem('ba_post_mode', m); } catch {} applyPostGrade(currentLobby); } return POST_MODE; },
-    get status() { return { on: baPostOn, mode: POST_MODE, cfg: baPostCfgFor(currentLobby), filter: !!baPostFilter, stageF: app?.stage?.filters?.length ?? 0, onStage: !!(baPostFilter && app?.stage?.filters?.some(f => f === baPostFilter)) }; },
+    // cfg／uExp 都要可序列化：Runtime.evaluate(returnByValue) 遇到非純資料會整個回
+    // undefined（除錯時踩過），故轉成 JSON 字串／純數。
+    get status() { const c = baPostCfgFor(currentLobby); const u = postWrap?.filters?.[0]?.resources?.baPostUniforms?.uniforms; return { on: baPostOn, mode: POST_MODE, cfg: c ? JSON.parse(JSON.stringify(c)) : null, filter: !!baPostFilter, uExp: u?.uExp ?? null, expWeight: exposureVolumeWeight(), introT: introFlashTime() }; },
     apply: (lobby) => applyPostGrade(lobby || currentLobby),
     cpu: (rgb, lobby) => baPostCpu(rgb, baPostCfgFor(lobby || currentLobby)),
     test: (rgb, lobby) => { const c = baPostCfgFor(lobby || currentLobby); return c ? { in: rgb, cfg: c, out: baPostCpu(rgb, c) } : null; },
@@ -3341,17 +3369,70 @@ window.ba_debug = {
   },
   dbgTexAlphaMode: () => {
     try {
-      const slot = spine.skeleton.findSlot('top_light');
-      const at = slot.getAttachment();
-      const cd = spine.attachmentCacheData[slot.data.index][at.name];
-      const out = { light: { uid: cd.texture.uid, alphaMode: cd.texture.alphaMode, srcAlphaMode: cd.texture.source.alphaMode } };
+      // 舊版寫死 'top_light'，但多數 lobby 槽名是 'toplight'（無底線），
+      // 查不到 slot 就整個函式擲掉。改為掃描第一個有 attachment 的槽。
+      let cd = null, hitSlot = null;
+      for (const s of spine.skeleton.slots) {
+        const a = s.getAttachment();
+        if (!a || !a.region) continue;
+        const c = spine.attachmentCacheData[s.data.index]?.[a.name];
+        if (c?.texture) { cd = c; hitSlot = s.data.name; break; }
+      }
+      if (!cd) return { err: 'no slot with cached texture', slots: spine.skeleton.slots.length };
+      const out = { slot: hitSlot, light: { uid: cd.texture.uid, alphaMode: cd.texture.alphaMode, srcAlphaMode: cd.texture.source.alphaMode } };
       const pipe = app.renderer.renderPipes.spine;
       const gpu = pipe.gpuSpineData[spine.uid];
-      const others = Object.values(gpu.slotBatches).map(b => ({ uid: b.texture?.uid, alphaMode: b.texture?.alphaMode, srcAlphaMode: b.texture?.source?.alphaMode, w: b.texture?.width }));
+      const others = Object.values(gpu.slotBatches).map(b => ({ uid: b.texture?.uid, alphaMode: b.texture?.alphaMode, srcAlphaMode: b.texture?.source?.alphaMode, w: b.texture?.width, n: b.start?.length ?? b.slots?.length }));
       const unique = {};
       for (const o of others) { const k = o.uid + '|' + o.srcAlphaMode + '|' + o.w; unique[k] = o; }
       out.all = Object.values(unique).slice(0, 20);
       return out;
+    } catch (e) { return 'EXC: ' + String(e); }
+  },
+  // 光效槽渲染稽核：.skel 裡有 attachment、setup alpha=1 的槽，是否真的進了 GPU 批次。
+  // 用途：抓「素材在但畫不出來」（atlas 第 2 頁沒載 / blend 被改 / 批次缺頁）。
+  dbgEffectSlots: (re) => {
+    try {
+      const rx = re || /light|flare|star|spark|fountain|water|splash|mist/i;
+      const pipe = app.renderer.renderPipes.spine;
+      const gpu = pipe.gpuSpineData[spine.uid];
+      // slotBatches 結構未經文件確認：先印 keys 再決定如何攤平，避免誤判 notBatched。
+      const batches = Object.values(gpu.slotBatches || {});
+      const shape = batches.length ? Object.keys(batches[0]) : [];
+      const batched = new Set();
+      for (const b of batches) {
+        const arr = b.slots || b.slotIndices || b.start || b.indices || [];
+        for (const s of arr) batched.add(typeof s === 'object' && s ? (s.data?.index ?? s) : s);
+      }
+      const rows = [];
+      for (const s of spine.skeleton.slots) {
+        if (!rx.test(s.data.name)) continue;
+        const a = s.getAttachment();
+        const cd = a ? spine.attachmentCacheData[s.data.index]?.[a.name] : null;
+        rows.push({
+          name: s.data.name,
+          blend: s.data.blendMode,
+          att: a ? a.constructor.name : null,
+          tex: !!cd?.texture,
+          batched: batched.has(s),
+          srcAlpha: cd?.texture?.source?.alphaMode ?? null,
+          w: cd?.texture?.width ?? null,
+        });
+      }
+      const sum = {
+        total: rows.length,
+        noAttachment: rows.filter(r => !r.att).length,
+        noTexture: rows.filter(r => r.att && !r.tex).length,
+        notBatched: rows.filter(r => r.att && r.tex && !r.batched).length,
+        blends: [...new Set(rows.map(r => r.blend))],
+        alphaModes: [...new Set(rows.map(r => r.srcAlpha))],
+        pages: [...new Set(rows.map(r => r.w))],
+        batchCount: batches.length,
+        batchShape: shape,
+        batchedTotal: batched.size,
+        allSlots: spine.skeleton.slots.length,
+      };
+      return { sum, sample: rows.filter(r => !r.batched || !r.tex).slice(0, 12) };
     } catch (e) { return 'EXC: ' + String(e); }
   },
   dbgShowTex: () => {
@@ -5801,7 +5882,7 @@ function applyPostGrade(lobby) {
   if (!cfg) { w.filters = []; return null; }
   const u = baPostFilter.resources.baPostUniforms.uniforms;
   u.uOn = 1;
-  u.uExp = POST_MODE === 'mild' ? 1 : (cfg.e ?? 1);
+  u.uExp = POST_MODE === 'mild' ? 1 : Math.pow(cfg.e ?? 1, exposureVolumeWeight());
   u.uCon = cfg.c ?? 1;
   u.uSat = cfg.s ?? 1;
   u.uChroma = cfg.ch ?? 0;
@@ -5819,7 +5900,7 @@ function baPostCpu(rgb, cfg) {
   const G2L = c => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
   const L2G = c => c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
   const MID = 0.4135884;
-  const e = POST_MODE === 'mild' ? 1 : (cfg.e ?? 1);
+  const e = POST_MODE === 'mild' ? 1 : Math.pow(cfg.e ?? 1, exposureVolumeWeight());
   let lin = rgb.map(v => G2L(Math.max(v, 0)));
   lin = lin.map(v => v * e);
   let lg = lin.map(v => 0.241514 * Math.log10(Math.max(5.555556 * v, 1e-6)) + 0.584878);
