@@ -5876,10 +5876,13 @@ function retargetTexturesLinear(obj) {
 // 故把動態場景全部掛到 stage 下的 wrapper，filter 綁在 wrapper 上。
 function ensurePostWrap() {
   if (!postWrap) { postWrap = new Container(); postWrap.name = 'postWrap'; app.stage.addChild(postWrap); }
-  // 線性混合模式：場景全部收進 linearScene（渲染進 rgba16float RT），
-  // 由 linearSprite 顯示該 RT 並掛 baPostFilter 做線性→sRGB 輸出。
+  // 線性混合模式：場景收進「不掛在 stage 上」的 linearScene（只當線性 RT 的渲染
+  // 來源），postWrap 只放顯示該 RT 的 linearSprite。絕不能讓 linearScene 仍是
+  // postWrap 的子節點 —— 那會讓場景被畫兩次（一次進 RT、一次直接上 stage），
+  // 半透明區域重複疊加造成整片泛白。
   if (BA_LINEAR_MIX) {
-    if (!linearScene) { linearScene = new Container(); linearScene.name = 'linearScene'; postWrap.addChild(linearScene); }
+    if (!linearScene) { linearScene = new Container(); linearScene.name = 'linearScene'; }
+    if (linearScene.parent) linearScene.parent.removeChild(linearScene);
     if (!linearSprite) { linearSprite = new Sprite(Texture.EMPTY); linearSprite.name = 'linearRTView'; postWrap.addChild(linearSprite); }
     for (const c of [...app.stage.children]) {
       if (c === postWrap) continue;
@@ -5887,7 +5890,7 @@ function ensurePostWrap() {
       linearScene.addChild(c);
     }
     for (const c of [...postWrap.children]) {
-      if (c === linearScene || c === linearSprite) continue;
+      if (c === linearSprite) continue;
       postWrap.removeChild(c);
       linearScene.addChild(c);
     }
