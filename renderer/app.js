@@ -1,4 +1,4 @@
-import { Application, Assets, Texture, Sprite, MeshSimple, Container, BlurFilter, ColorMatrixFilter, Cache, UniformGroup, GlProgram, Filter } from 'pixi.js';
+import { Application, Assets, Texture, Sprite, MeshSimple, Container, BlurFilter, ColorMatrixFilter, Cache, UniformGroup, GlProgram, Filter, RenderTexture, UPDATE_PRIORITY } from 'pixi.js';
 import { Spine, ScaleTimeline } from '@esotericsoftware/spine-pixi-v8';
 import { Vector2 } from '@esotericsoftware/spine-core';
 import { i as initClickFx } from '../assets/clickfx/clickFx.js';
@@ -1496,6 +1496,7 @@ async function playExtraSkeleton(skelName, clips, vis) {
       const atlasUrl = assetUrl(`${base}${skRaw}.atlas`);
       await Assets.load(atlasUrl);
       obj = Spine.from({ skeleton: skelUrl, atlas: atlasUrl });
+      if (BA_LINEAR_MIX) retargetTexturesLinear(obj);
       fixAdditiveSlots(obj);
       obj.skelName = skelNorm(skRaw);
       applySkeletonMix(obj, skRaw);
@@ -2594,6 +2595,30 @@ window.ba_debug = {
     return out;
   },
   post: {
+    linear: () => {
+      const f = postWrap?.filters?.[0];
+      const u = f?.resources?.baPostUniforms?.uniforms;
+      let tex = null;
+      try {
+        const cache = spine?.attachmentCacheData || {};
+        for (const si of Object.keys(cache)) for (const an of Object.keys(cache[si] || {})) {
+          const t = cache[si][an]?.texture; const src = t?.source || t;
+          if (src) { tex = { format: src.format, alphaMode: src.alphaMode, w: src.width, h: src.height }; break; }
+        }
+        if (!tex) for (const si of Object.keys(cache)) for (const an of Object.keys(cache[si] || {})) {
+          const t = cache[si][an]?.texture; if (t) { tex = { format: t.format, alphaMode: t.alphaMode, w: t.width, h: t.height }; break; }
+        }
+      } catch (e) { tex = { err: e.message }; }
+      return {
+        BA_LINEAR_MIX, hasRT: !!linearRT,
+        rt: linearRT ? { w: linearRT.width, h: linearRT.height, fmt: linearRT.source?.format } : null,
+        hasScene: !!linearScene, hasSprite: !!linearSprite,
+        uLinIn: u?.uLinIn ?? null, uGrade: u?.uGrade ?? null, uOn: u?.uOn ?? null,
+        filterOn: !!(postWrap && postWrap.filters && postWrap.filters.length),
+        sceneChildren: linearScene ? linearScene.children.length : -1,
+        sampleTex: tex,
+      };
+    },
     on: () => { baPostOn = true; try { localStorage.setItem('ba_post', '1'); } catch {} applyPostGrade(currentLobby); return baPostOn; },
     off: () => { baPostOn = false; try { localStorage.setItem('ba_post', '0'); } catch {} if (postWrap) postWrap.filters = []; return baPostOn; },
     mode: (m) => { if (m === 'faithful' || m === 'mild') { POST_MODE = m; try { localStorage.setItem('ba_post_mode', m); } catch {} applyPostGrade(currentLobby); } return POST_MODE; },
@@ -5718,6 +5743,13 @@ uniform highp vec4 uInputSize;
 uniform highp vec4 uOutputFrame;
 uniform float uOn;
 uniform float uExp;
+// uLinIn：1 = 輸入已是線性（線性 RenderTexture），須跳過 srgb2lin 並在輸出做
+//          linear→sRGB。0 = 傳統 sRGB 輸入。
+// uGrade：URP pipeline asset 的 m_ColorGradingMode = 0 (None) → 遊戲根本不跑 LUT
+//         調色，故 exposure / LogC / contrast / colorFilter / LGG / saturation 全部
+//         無效。線性模式預設關閉（0），可用 URL hash grade=1 強制開啟做 A/B。
+uniform float uLinIn;
+uniform float uGrade;
 uniform float uCon;
 uniform float uSat;
 uniform float uChroma;
@@ -5760,10 +5792,19 @@ vec3 sampleWarp(vec2 tcoord) {
 }
 void main() {
   vec4 c = texture(uTexture, vTextureCoord);
-  if (uOn <= 0.5 || c.a <= 0.003) { finalColor = c; return; }
-  vec3 rgb = sampleWarp(vTextureCoord);
+  bool linIn = uLinIn > 0.5;
+  bool fx = uOn > 0.5;
+  bool hasA = c.a > 0.003;
+  if (!linIn && (!fx || !hasA)) { finalColor = c; return; }
+  vec3 rgb = (fx && hasA) ? sampleWarp(vTextureCoord) : max(c.rgb, vec3(0.0));
+  // 線性模式輸入已是線性值，不可再 srgb2lin（否則二次轉換會整體變暗）
+  vec3 lin = linIn ? rgb : vec3(srgb2lin(max(rgb.r, 0.0)), srgb2lin(max(rgb.g, 0.0)), srgb2lin(max(rgb.b, 0.0)));
+  vec3 outc;
+  if (uGrade < 0.5) {
+    // ColorGradingMode = None：遊戲只做 CA + Panini，直接線性→sRGB
+    outc = vec3(lin2srgb(clamp(lin.r, 0.0, 1.0)), lin2srgb(clamp(lin.g, 0.0, 1.0)), lin2srgb(clamp(lin.b, 0.0, 1.0)));
+  } else {
   // === URP LutBuilderHdr（HDR grading）+ UberPost 等價管線 ===
-  vec3 lin = vec3(srgb2lin(max(rgb.r, 0.0)), srgb2lin(max(rgb.g, 0.0)), srgb2lin(max(rgb.b, 0.0)));
   // uber：input *= postExposure（線性）；LUT 索引前 saturate(LinearToLogC(input))
   lin *= uExp;
   vec3 lg = vec3(0.241514 * log10f(max(5.555556 * lin.r, 1e-6)) + 0.584878,
@@ -5783,16 +5824,75 @@ void main() {
   float luma = dot(lin, vec3(0.2126, 0.7152, 0.0722));
   lin = vec3(luma) + uSat * (lin - vec3(luma));
   // uber：LinearToSRGB 輸出
-  vec3 outc = vec3(lin2srgb(clamp(lin.r, 0.0, 1.0)), lin2srgb(clamp(lin.g, 0.0, 1.0)), lin2srgb(clamp(lin.b, 0.0, 1.0)));
+  outc = vec3(lin2srgb(clamp(lin.r, 0.0, 1.0)), lin2srgb(clamp(lin.g, 0.0, 1.0)), lin2srgb(clamp(lin.b, 0.0, 1.0)));
+  }
   finalColor = vec4(outc * c.a, c.a);
 }
 `;
 let baPostFilter = null;
 let postWrap = null;
+
+// ---- 線性混合（對齊遊戲的 Linear color space）----------------------------
+// globalgamemanagers 的 PlayerSettings.m_ActiveColorSpace = 1 (Linear)：遊戲在
+// 線性空間做 alpha 混合，最後才轉 sRGB。我們原本在 sRGB 空間混合，導致每一處
+// 半透明重疊都系統性偏亮（半透明白疊中灰：sRGB 混合 1.00 爆白 vs 線性混合 0.87），
+// 也讓那 50 片半透明白色水花被推到接近純白而看不見。
+//
+// 做法：spine 場景先渲染進 rgba16float 線性 RenderTexture，貼圖改用
+// rgba8unorm-srgb（取樣硬體解碼成線性）、預乘改在 shader 做（premultiply-alpha-in-shader，
+// 原本 atlasLoader 用 premultiply-alpha-on-upload 是在 sRGB 空間乘 alpha，會錯），
+// 再由後製濾鏡統一做 linear→sRGB 輸出。
+// URL hash 加 linearMix=0 可關掉（回到原本的 sRGB 空間混合）。
+const BA_LINEAR_MIX = !/(?:^|&)linearMix=0/.test(location.hash + location.search);
+let linearRT = null;
+let linearScene = null;    // 線性 RT 內的場景容器（spine/bg/scene/extras）
+let linearSprite = null;   // 顯示線性 RT，掛 baPostFilter 負責 linear→sRGB
+
+// 把 spine 用到的所有貼圖改成 sRGB 解碼 + shader 預乘。
+function retargetTexturesLinear(obj) {
+  let n = 0; const seen = new Set();
+  const visit = (t) => {
+    if (!t) return;
+    const src = t.source || t;
+    if (seen.has(src.uid)) return;
+    seen.add(src.uid);
+    try {
+      src.format = 'rgba8unorm-srgb';
+      src.alphaMode = 'premultiply-alpha-in-shader';
+      if (typeof src.update === 'function') src.update();
+      n++;
+    } catch (e) { /* 記錄在 debug 裡，不中斷載入 */ }
+  };
+  try {
+    const cache = obj?.attachmentCacheData || {};
+    for (const si of Object.keys(cache)) {
+      const byAtt = cache[si] || {};
+      for (const an of Object.keys(byAtt)) visit(byAtt[an]?.texture);
+    }
+  } catch (e) { }
+  return n;
+}
 // pixi v8 的 RenderGroup 忽略 root stage 上的 filter（實測 built-in 亦無作用），
 // 故把動態場景全部掛到 stage 下的 wrapper，filter 綁在 wrapper 上。
 function ensurePostWrap() {
   if (!postWrap) { postWrap = new Container(); postWrap.name = 'postWrap'; app.stage.addChild(postWrap); }
+  // 線性混合模式：場景全部收進 linearScene（渲染進 rgba16float RT），
+  // 由 linearSprite 顯示該 RT 並掛 baPostFilter 做線性→sRGB 輸出。
+  if (BA_LINEAR_MIX) {
+    if (!linearScene) { linearScene = new Container(); linearScene.name = 'linearScene'; postWrap.addChild(linearScene); }
+    if (!linearSprite) { linearSprite = new Sprite(Texture.EMPTY); linearSprite.name = 'linearRTView'; postWrap.addChild(linearSprite); }
+    for (const c of [...app.stage.children]) {
+      if (c === postWrap) continue;
+      app.stage.removeChild(c);
+      linearScene.addChild(c);
+    }
+    for (const c of [...postWrap.children]) {
+      if (c === linearScene || c === linearSprite) continue;
+      postWrap.removeChild(c);
+      linearScene.addChild(c);
+    }
+    return postWrap;
+  }
   for (const c of [...app.stage.children]) {
     if (c === postWrap) continue;
     app.stage.removeChild(c);
@@ -5800,12 +5900,30 @@ function ensurePostWrap() {
   }
   return postWrap;
 }
+
+// 依畫布尺寸建立/更新線性 RenderTexture，並把 linearSprite 對齊到全螢幕。
+function ensureLinearRT() {
+  if (!BA_LINEAR_MIX || !linearSprite) return null;
+  const w = Math.max(1, app.renderer.width), h = Math.max(1, app.renderer.height);
+  if (!linearRT) {
+    linearRT = RenderTexture.create({ width: w, height: h, format: 'rgba16float', scaleMode: 'linear', antialias: false });
+    linearSprite.texture = linearRT;
+  } else if (linearRT.width !== w || linearRT.height !== h) {
+    linearRT.resize(w, h);
+  }
+  linearSprite.width = w; linearSprite.height = h;
+  // 線性模式下濾鏡必須常駐：它同時是 linear→sRGB 的輸出級。
+  if (baPostFilter && !postWrap.filters.includes(baPostFilter)) postWrap.filters = [baPostFilter];
+  return linearRT;
+}
 function ensurePostFilter() {
   if (baPostFilter) return baPostFilter;
   try {
     const baPostUniforms = new UniformGroup({
       uOn: { value: 0, type: 'f32' },
       uExp: { value: 1, type: 'f32' },
+      uLinIn: { value: BA_LINEAR_MIX ? 1 : 0, type: 'f32' },
+      uGrade: { value: /(?:^|&)grade=1/.test(location.hash + location.search) ? 1 : 0, type: 'f32' },
       uCon: { value: 1, type: 'f32' },
       uSat: { value: 1, type: 'f32' },
       uChroma: { value: 0, type: 'f32' },
@@ -5881,18 +5999,19 @@ function applyPostGrade(lobby) {
   if (!ensurePostFilter()) return null;
   const cfg = baPostOn ? baPostCfgFor(lobby) : null;
   const w = ensurePostWrap();
-  if (!cfg) { w.filters = []; return null; }
+  // 線性混合：濾鏡同時是 linear→sRGB 輸出級，即使關閉後製也必須常駐
+  if (!cfg && !BA_LINEAR_MIX) { w.filters = []; return null; }
   const u = baPostFilter.resources.baPostUniforms.uniforms;
-  u.uOn = 1;
+  u.uOn = cfg ? 1 : 0;
   u.uExp = POST_MODE === 'mild' ? 1 : Math.pow(cfg.e ?? 1, exposureVolumeWeight());
-  u.uCon = cfg.c ?? 1;
-  u.uSat = cfg.s ?? 1;
-  u.uChroma = cfg.ch ?? 0;
-  u.uGain = cfg.g || [1, 1, 1];
-  u.uLift = cfg.l || [0, 0, 0];
-  u.uGam = cfg.gm || [1, 1, 1];
-  u.uCF = cfg.cf || [1, 1, 1];
-  u.uPanini = postPaniniParams(cfg);
+  u.uCon = cfg?.c ?? 1;
+  u.uSat = cfg?.s ?? 1;
+  u.uChroma = cfg?.ch ?? 0;
+  u.uGain = cfg?.g || [1, 1, 1];
+  u.uLift = cfg?.l || [0, 0, 0];
+  u.uGam = cfg?.gm || [1, 1, 1];
+  u.uCF = cfg?.cf || [1, 1, 1];
+  u.uPanini = postPaniniParams(cfg || { p: [0, 0] });
   baPostFilter.resources.baPostUniforms.update();
   w.filters = [baPostFilter];
   return { lobby, mode: POST_MODE };
@@ -5944,6 +6063,7 @@ async function loadScene(entry) {
       await Assets.load(skel);
       await Assets.load(atlas);
       const obj = Spine.from({ skeleton: skel, atlas });
+      if (BA_LINEAR_MIX) retargetTexturesLinear(obj);
       fixAdditiveSlots(obj);
       obj.skelName = (res.skel.startsWith('./') ? res.skel.slice(2) : res.skel).replace(/\.(skel|json)$/i, '').toLowerCase();
       applySkeletonMix(obj, obj.skelName);
@@ -6370,6 +6490,7 @@ async function loadLobby(name) {
     await Promise.all(charAssets.map(a => Assets.load(a)));
     if (!alive()) return;   // 被超車：不可再建 spine，否則蓋掉新大廳
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
+    if (BA_LINEAR_MIX) retargetTexturesLinear(spine);
     fixAdditiveSlots(spine);
     const sch = SCHEDULE?.lobbies?.[name];
     currentLobbyVoiceFolder = sch?.voiceFolder || null;
@@ -7232,11 +7353,28 @@ async function init() {
 
   // camera smoothing
   app.ticker.add(() => {
-    if (baPostOn) ensurePostWrap();
+    if (baPostOn || BA_LINEAR_MIX) ensurePostWrap();
     if (spine && fitted) applyCamera(CAMERA.weight);
     tickWhiteFlash();
     tickExtraVisibility();
-  });
+  }, null, UPDATE_PRIORITY.UTILITY);
+  // 線性混合：場景先渲染進 rgba16float RT（Priority.UTILITY 先於 Application
+  // 自己的 LOW 渲染），再由 postWrap 的濾鏡做 linear→sRGB 輸出到畫布。
+  if (BA_LINEAR_MIX) {
+    app.ticker.add(() => {
+      if (!linearScene || !app.renderer) return;
+      // attachmentCacheData 在首次渲染前是空的，所以延後到這裡才改貼圖格式。
+      if (!app.__linTexDone) {
+        let total = 0;
+        for (const o of [spine, bg, scene, ...extras]) if (o?.skeleton) total += retargetTexturesLinear(o);
+        if (total > 0) { app.__linTexDone = total; console.log('[linearMix] retargeted textures:', total); }
+      }
+      const rt = ensureLinearRT();
+      if (!rt) return;
+      try { app.renderer.render({ container: linearScene, target: rt, clear: true }); }
+      catch (e) { if (!app.__linErr) { app.__linErr = 1; console.warn('[linearMix] render failed:', e && e.message); } }
+    }, null, UPDATE_PRIORITY.UTILITY + 1);
+  }
   // Re-fit on window resize (resizeTo resizes the canvas, but charScale/sceneScale
   // are only recomputed in fitScene — re-run it so the layout doesn't go stale
   // until the next character switch).
