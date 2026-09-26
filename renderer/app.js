@@ -2619,6 +2619,38 @@ window.ba_debug = {
         sampleTex: tex,
       };
     },
+    // 逐項隔離量測：依名稱規則把槽 alpha 設為 0（或還原），用於驗證各光效的實際貢獻。
+    // pattern 傳 null 代表全部還原。內建對照組：hide=backgrund 會讓畫面劇變，
+    // 用來確認「執行期改 alpha 真的會重繪」，否則整套量測無效。
+    hideSlots: (pattern) => {
+      try {
+        const rx = pattern ? new RegExp(pattern, 'i') : null;
+        const rep = { hidden: 0, restored: 0 };
+        for (const o of [spine, bg, scene, ...extras]) {
+          if (!o?.skeleton) continue;
+          for (const s of o.skeleton.slots) {
+            if (rx && !rx.test(s.data.name)) continue;
+            const c = s.color || s.getColor?.();
+            if (!c) continue;
+            if (rx) { if (c.a !== 0) { s.__prevA = c.a; c.a = 0; rep.hidden++; } }
+            else if (s.__prevA !== undefined && s.__prevA !== null) { c.a = s.__prevA; s.__prevA = null; rep.restored++; }
+          }
+        }
+        return rep;
+      } catch (e) { return 'EXC: ' + String(e); }
+    },
+    // 線性 RT 的 alpha 行為（懷疑雙重疊加的來源之一）
+    rtAlpha: () => {
+      try {
+        if (!linearRT) return 'no linearRT';
+        app.renderer.render({ container: linearScene, target: linearRT, clear: true });
+        const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl');
+        const w = linearRT.width, h = linearRT.height;
+        const buf = new Float32Array(w * h * 4);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);   // 讀回的是畫布，非 RT
+        return { note: '讀不到 RT 內容，改以 sprite 設定推斷', spriteBlend: linearSprite?.blendMode, rtFormat: linearRT.source?.format, clearColor: app.renderer.background?.colorRgba };
+      } catch (e) { return 'EXC: ' + String(e); }
+    },
     on: () => { baPostOn = true; try { localStorage.setItem('ba_post', '1'); } catch {} applyPostGrade(currentLobby); return baPostOn; },
     off: () => { baPostOn = false; try { localStorage.setItem('ba_post', '0'); } catch {} if (postWrap) postWrap.filters = []; return baPostOn; },
     mode: (m) => { if (m === 'faithful' || m === 'mild') { POST_MODE = m; try { localStorage.setItem('ba_post_mode', m); } catch {} applyPostGrade(currentLobby); } return POST_MODE; },
@@ -5832,18 +5864,21 @@ void main() {
 let baPostFilter = null;
 let postWrap = null;
 
-// ---- 線性混合（對齊遊戲的 Linear color space）----------------------------
-// globalgamemanagers 的 PlayerSettings.m_ActiveColorSpace = 1 (Linear)：遊戲在
-// 線性空間做 alpha 混合，最後才轉 sRGB。我們原本在 sRGB 空間混合，導致每一處
-// 半透明重疊都系統性偏亮（半透明白疊中灰：sRGB 混合 1.00 爆白 vs 線性混合 0.87），
-// 也讓那 50 片半透明白色水花被推到接近純白而看不見。
+// ---- 線性混合（實驗性，預設關閉）--------------------------------------
+// 動機：globalgamemanagers 的 PlayerSettings.m_ActiveColorSpace = 1 (Linear)，
+// 遊戲在線性空間做 alpha 混合，我們原本在 sRGB 空間混合，理論上會在所有半透明
+// 重疊處偏亮。實作：rgba16float RT + rgba8unorm-srgb 貼圖 + shader 預乘 +
+// uLinIn/uGrade（見下方）。
 //
-// 做法：spine 場景先渲染進 rgba16float 線性 RenderTexture，貼圖改用
-// rgba8unorm-srgb（取樣硬體解碼成線性）、預乘改在 shader 做（premultiply-alpha-in-shader，
-// 原本 atlasLoader 用 premultiply-alpha-on-upload 是在 sRGB 空間乘 alpha，會錯），
-// 再由後製濾鏡統一做 linear→sRGB 輸出。
-// URL hash 加 linearMix=0 可關掉（回到原本的 sRGB 空間混合）。
-const BA_LINEAR_MIX = !/(?:^|&)linearMix=0/.test(location.hash + location.search);
+// 實測結論（2026-09-26，Hanako_home，同一定格幀、對照組驗證量測機制有效）：
+//   組態          亮度    近全白%   toplight 貢獻亮度
+//   線性混合      210.52   16.41     +4.53
+//   sRGB 混合     197.97   12.75     +8.74
+// 線性混合確實把 toplight 這個加算槽的加光量砍半（8.74→4.53，機制正確），
+// 但**整體反而變亮**：半透明白色壓在藍天／深色背景上時，線性混合在 sRGB 尺度
+// 反而較亮（sRGB 解碼壓暗來源、輸出 lin2srgb 放大暗值），花子這種比例較高。
+// 對「太亮」是反效果，故預設關閉。開啟：URL hash 加 linearMix=1。
+const BA_LINEAR_MIX = /(?:^|&)linearMix=1/.test(location.hash + location.search);
 let linearRT = null;
 let linearScene = null;    // 線性 RT 內的場景容器（spine/bg/scene/extras）
 let linearSprite = null;   // 顯示線性 RT，掛 baPostFilter 負責 linear→sRGB
