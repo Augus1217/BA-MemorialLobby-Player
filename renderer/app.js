@@ -337,23 +337,30 @@ const log = (s) => console.log('[lobby]', s);
  let ORDER = [];
  let STUDENT_ICONS = {};
 
-// kivo.wiki 的光線修復（Additive 槽且名含 light/flare → Screen 混色）已推翻。
+// kivo.wiki 的光線修復：Additive 槽且名含 light/flare → Screen 混色。
+// 依使用者要求於 2026-09-26 恢復啟用（預設開；URL hash 加 kivoFix=0 可關）。
 //
-// 推翻依據（2026-09-25 實測，Hanako_home）：
-//   1. .skel 是遊戲自己的資料，該 3 槽原值就是 blendMode=1(additive)。kivo 的名稱
-//      啟發式把它改掉，是對遊戲資料的偏離，不是修正。
-//   2. 凍結同幀 A/B（freeze(true) + 僅切 blend，附「隱藏全部 spine」對照組驗證量測
-//      有效：對照組 41.18% 像素變動、亮度 211→239，還原後誤差 0.000）：把這 3 槽在
-//      additive 與 screen 之間來回切，畫面差異 = 0.000 —— idle 下這條規則毫無作用。
-//   3. 真正的亮度控制不在 blend，而在後製：見 postExposure（ColorAdjustments，_C
-//      profile）與 flash_curves 的 exposure 曲線。
-// 保留本函式（記錄 .skel 原值供 A/B 與稽核），但不再改動 blendMode。
+// 恢復理由：使用者在多輪排查後決定先維持 kivo 的視覺結果，後續再自行安排處理。
+// 以下保留實測事實供日後決策用（勿當成已證實的結論）：
+//   1. 資料面：.skel 原值確實是 blendMode=1(additive)，kivo 的名稱啟發式是對遊戲
+//      資料的偏離。遊戲材質可佐證沒有對 blend mode 用特殊材質：
+//      blendModeMaterials 的 requiresBlendModeMaterials=0、applyAdditiveMaterial=0、
+//      四個材質陣列全空。
+//   2. 視覺面（載入期 A/B，Hanako_home，同一定格幀）：kivo 的 screen 混色讓畫面變暗
+//      —— 上 15% 181.00→174.56、近全白像素 15.32%→10.96%、過曝 44.62%→41.08%；
+//      逐項隔離量到 toplight 單槽的加光量在 sRGB 混合下 +8.74、線性混合下 +4.53。
+//      也就是說 kivo 實際在做「壓低加算光暈過曝」，方向與「太亮」一致，但機制
+//      不是遊戲的。
+//   3. 本函式同時記錄 .skel 原值（obj.__blendOrig）供日後 A/B 與稽核使用。
+const KIVO_FIX_ON = !/(?:^|&)kivoFix=0/.test(location.hash + location.search);
 const fixAdditiveSlots = (obj) => {
+  let n = 0;
   for (const slot of obj.skeleton.slots) {
     if (!obj.__blendOrig) obj.__blendOrig = new Map();
     if (!obj.__blendOrig.has(slot.data.name)) obj.__blendOrig.set(slot.data.name, slot.data.blendMode);
+    if (KIVO_FIX_ON && slot.data.blendMode === 1 && /light|flare/i.test(slot.data.name)) { slot.data.blendMode = 3; n++; }
   }
-  return 0;
+  return n;
 };
 
 // ---- camera (lobby_camera_config.json) ----
