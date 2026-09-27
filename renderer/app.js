@@ -1513,9 +1513,8 @@ async function playExtraSkeleton(skelName, clips, vis) {
       await Assets.load(skelUrl);
       // atlas 檔名與 skel 同名；png 由 atlas 文字列出（其上層載入會帶入）
       const atlasUrl = assetUrl(`${base}${skRaw}.atlas`);
-      await Assets.load(atlasUrl);
+      await loadSpineAtlas(atlasUrl);
       obj = Spine.from({ skeleton: skelUrl, atlas: atlasUrl });
-      if (BA_LINEAR_MIX) retargetTexturesLinear(obj);
       fixAdditiveSlots(obj);
       obj.skelName = skelNorm(skRaw);
       applySkeletonMix(obj, skRaw);
@@ -3338,6 +3337,21 @@ window.ba_debug = {
         spineAlpha: spine.alpha, groupAlpha: spine.groupAlpha,
       };
     } catch (e) { return 'EXC: ' + String(e); }
+  },
+  dbgTexFormat: () => {
+    try {
+      const out = [];
+      const seen = new Set();
+      for (const o of [spine, bg, scene]) {
+        const cache = o?.attachmentCacheData || {};
+        for (const si of Object.keys(cache)) for (const an of Object.keys(cache[si] || {})) {
+          const t = cache[si][an]?.texture;
+          const src = t?.source;
+          if (src && !seen.has(src.uid)) { seen.add(src.uid); out.push({ fmt: src.format, alpha: src.alphaMode, w: src.width, h: src.height }); }
+        }
+      }
+      return out;
+    } catch (e) { return 'EXC: ' + String(e).slice(0, 120); }
   },
   dbgSlotBatch: (name) => {
     try {
@@ -5909,46 +5923,35 @@ let postWrap = null;
 // ---- 線性混合（實驗性，預設關閉）--------------------------------------
 // 動機：globalgamemanagers 的 PlayerSettings.m_ActiveColorSpace = 1 (Linear)，
 // 遊戲在線性空間做 alpha 混合，我們原本在 sRGB 空間混合，理論上會在所有半透明
-// 重疊處偏亮。實作：rgba16float RT + rgba8unorm-srgb 貼圖 + shader 預乘 +
-// uLinIn/uGrade（見下方）。
+// 重疊處偏亮。實作：rgba16float RT + 載入期 sRGB 貼圖（loadSpineAtlas）+
+// 輸出級 lin2srgb（uLinIn，見下方 shader）。
 //
-// 實測結論（2026-09-26，Hanako_home，同一定格幀、對照組驗證量測機制有效）：
-//   組態          亮度    近全白%   toplight 貢獻亮度
-//   線性混合      210.52   16.41     +4.53
-//   sRGB 混合     197.97   12.75     +8.74
-// 線性混合確實把 toplight 這個加算槽的加光量砍半（8.74→4.53，機制正確），
-// 但**整體反而變亮**：半透明白色壓在藍天／深色背景上時，線性混合在 sRGB 尺度
-// 反而較亮（sRGB 解碼壓暗來源、輸出 lin2srgb 放大暗值），花子這種比例較高。
-// 對「太亮」是反效果，故預設關閉。開啟：URL hash 加 linearMix=1。
+// 2026-09-27 修復：舊 retargetTexturesLinear 在首次上傳後才改 source.format
+// （pixi internalFormat 只在首次上傳決定 → sRGB 解碼從未發生）又誤切
+// alphaMode（已預乘資料重複預乘）→ 輸出級再 lin2srgb = 重複轉換，整圖泛白
+// （Hanako 天光區 184 vs 實機 187 看似接近，實為高光溢出＋全圖 +12.5 階）。
+// 修後（Hanako，同條件）：天光區 151、純背景 139，无高光溢出，臉部有層次；
+// 與 kivo screen 版（156/139）幾乎一致——理論上就該如此（screen ≈ 線性加算
+// 再編碼的近似）。剩餘與實機（187/180）的全域亮度差與混合無關（所有版本
+// 皆然：貼圖抽取／模擬器亮度／未發現的 grade，待查），另案處理。
+// 開啟：URL hash 加 linearMix=1（另加 kivoFix=0 還原官方 additive 做對照）。
 const BA_LINEAR_MIX = /(?:^|&)linearMix=1/.test(location.hash + location.search);
 let linearRT = null;
 let linearScene = null;    // 線性 RT 內的場景容器（spine/bg/scene/extras）
 let linearSprite = null;   // 顯示線性 RT，掛 baPostFilter 負責 linear→sRGB
 
-// 把 spine 用到的所有貼圖改成 sRGB 解碼 + shader 預乘。
-function retargetTexturesLinear(obj) {
-  let n = 0; const seen = new Set();
-  const visit = (t) => {
-    if (!t) return;
-    const src = t.source || t;
-    if (seen.has(src.uid)) return;
-    seen.add(src.uid);
-    try {
-      src.format = 'rgba8unorm-srgb';
-      src.alphaMode = 'premultiply-alpha-in-shader';
-      if (typeof src.update === 'function') src.update();
-      n++;
-    } catch (e) { /* 記錄在 debug 裡，不中斷載入 */ }
-  };
-  try {
-    const cache = obj?.attachmentCacheData || {};
-    for (const si of Object.keys(cache)) {
-      const byAtt = cache[si] || {};
-      for (const an of Object.keys(byAtt)) visit(byAtt[an]?.texture);
-    }
-  } catch (e) { }
-  return n;
+// 線性模式的 atlas 載入：頁貼圖必須在載入期就帶 sRGB 格式，GPU 首次上傳
+// 才會配 SRGB8_ALPHA8 自動解碼。pixi 貼圖的 internalFormat 只在首次上傳時
+// 決定，事後改 source.format 不會重建（舊 retargetTexturesLinear 的死因）；
+// 且舊碼還誤切 alphaMode → 已預乘資料配 PMA blend 重複計算，整體泛白。
+// 經 spine atlasLoader 的 imageMetadata 注入（其 assetsToLoadIn 原樣傳給
+// 貼圖 parser，見 loadTextures 的 ...asset.data）。只在 BA_LINEAR_MIX 用；
+// sRGB 預設路徑保持 RGBA8 原狀。alphaMode 维持 loader 預設（PMA 貼圖上傳預乘）。
+async function loadSpineAtlas(url) {
+  if (BA_LINEAR_MIX) await Assets.load({ src: url, data: { imageMetadata: { format: 'rgba8unorm-srgb' } } });
+  else await Assets.load(url);
 }
+// （已刪除：事後改格式不會重建 GPU 貼圖，見 loadSpineAtlas 註解）
 // pixi v8 的 RenderGroup 忽略 root stage 上的 filter（實測 built-in 亦無作用），
 // 故把動態場景全部掛到 stage 下的 wrapper，filter 綁在 wrapper 上。
 function ensurePostWrap() {
@@ -6141,9 +6144,8 @@ async function loadScene(entry) {
       const base = `assets/scene/${currentLobby}/`;
       const skel = assetUrl(base + res.skel), atlas = assetUrl(base + res.atlas);
       await Assets.load(skel);
-      await Assets.load(atlas);
+      await loadSpineAtlas(atlas);
       const obj = Spine.from({ skeleton: skel, atlas });
-      if (BA_LINEAR_MIX) retargetTexturesLinear(obj);
       fixAdditiveSlots(obj);
       obj.skelName = (res.skel.startsWith('./') ? res.skel.slice(2) : res.skel).replace(/\.(skel|json)$/i, '').toLowerCase();
       applySkeletonMix(obj, obj.skelName);
@@ -6567,10 +6569,12 @@ async function loadLobby(name) {
     const charAssets = entry.skel && entry.atlas
       ? [assetUrl(`assets/spine/${name}/${entry.skel}`), assetUrl(`assets/spine/${name}/${entry.atlas}`)]
       : [];
-    await Promise.all(charAssets.map(a => Assets.load(a)));
+    if (charAssets.length) {
+      await Assets.load(charAssets[0]);
+      await loadSpineAtlas(charAssets[1]);
+    }
     if (!alive()) return;   // 被超車：不可再建 spine，否則蓋掉新大廳
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
-    if (BA_LINEAR_MIX) retargetTexturesLinear(spine);
     fixAdditiveSlots(spine);
     const sch = SCHEDULE?.lobbies?.[name];
     currentLobbyVoiceFolder = sch?.voiceFolder || null;
@@ -7443,12 +7447,6 @@ async function init() {
   if (BA_LINEAR_MIX) {
     app.ticker.add(() => {
       if (!linearScene || !app.renderer) return;
-      // attachmentCacheData 在首次渲染前是空的，所以延後到這裡才改貼圖格式。
-      if (!app.__linTexDone) {
-        let total = 0;
-        for (const o of [spine, bg, scene, ...extras]) if (o?.skeleton) total += retargetTexturesLinear(o);
-        if (total > 0) { app.__linTexDone = total; console.log('[linearMix] retargeted textures:', total); }
-      }
       const rt = ensureLinearRT();
       if (!rt) return;
       try { app.renderer.render({ container: linearScene, target: rt, clear: true }); }
