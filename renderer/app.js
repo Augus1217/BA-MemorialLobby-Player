@@ -1774,17 +1774,22 @@ async function playTalk() {
     // exact clip name, but server doesn't expose MemorialLobby dialogs — the
     // closest determinism we can deliver is to filter to clips that actually
     // emit voice events. Falls back to all Talk_N_M if schedule is unavailable.
-    // Order is SEQUENTIAL per lobby (round-robin, persisted): the game cycles
-    // Talk_01 → 02 → … → N → 01 on successive taps, never random.
+    // Selection is RANDOM per group (dump.cs: ChatDialog.prevGroupId +
+    // AllIdleDialogs grouped by GroupId; Talk SpineClips PlayMode=1/BaseRandom).
+    // Tap → uniform random group ≠ previous group (prevGroupId avoidance),
+    // never sequential round-robin. Group N ↔ Talk_%02d_M clip convention.
     const schAnim = SCHEDULE?.lobbies?.[currentLobby]?.animations || {};
     const withVoice = talks.filter(n => (schAnim[n]?.voice || []).length > 0);
     const pool = [...(withVoice.length ? withVoice : talks)].sort((a, b) =>
       (parseInt((a.match(/Talk_(\d+)/) || [])[1] || '0', 10) - parseInt((b.match(/Talk_(\d+)/) || [])[1] || '0', 10)) || (a < b ? -1 : 1));
-    const seqKey = `ba_talkSeq_${currentLobby}`;
-    let seq = 0;
-    try { seq = parseInt(localStorage.getItem(seqKey) || '0', 10) || 0; } catch {}
-    const m = pool[((seq % pool.length) + pool.length) % pool.length];
-    try { localStorage.setItem(seqKey, String(seq + 1)); } catch {}
+    const grpOf = (n) => parseInt((n.match(/Talk_(\d+)/) || [])[1] || '0', 10);
+    const prevKey = `ba_talkPrev_${currentLobby}`;
+    let prev = 0;
+    try { prev = parseInt(localStorage.getItem(prevKey) || '0', 10) || 0; } catch {}
+    let cand = pool.filter(n => grpOf(n) !== prev);
+    if (!cand.length) cand = pool;
+    const m = cand[(Math.random() * cand.length) | 0];
+    try { localStorage.setItem(prevKey, String(grpOf(m))); } catch {}
     const a = m.replace(/_M$/, '_A');
     setAnimationWithClipMix(1, m, false);
     if (animNames().includes(a)) setAnimationWithClipMix(2, a, false);
