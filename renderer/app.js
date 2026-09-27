@@ -261,17 +261,27 @@ function applyCtlI18n() {
 // 散佈），改為 runtime 從 assets/fonts/（pack 安裝後由 SW 快取提供）動態
 // 註冊 FontFace。未載入前以系統字體 fallback，註冊成功後瀏覽器自動重繪。
 // 對話框字體遊戲真值 = Malgun Gothic（UseLocalizeFont=1，fonts bundle 實測）。
+// Malgun 13MB：Chromium 對 url() 大字體會用 Range 串流，而 dev/靜態伺服器
+// 可能忽略 Range 回 200 全檔 → FontFace 中止（實測 "network error"；同 URL
+// fetch 全檔正常，ArrayBuffer 註冊一次成功）。故 Malgun 走 fetch →
+// ArrayBuffer 註冊， bypass range 邏輯；小字體維持 url()。
 async function loadGameFonts() {
   const defs = [
-    { family: 'BA MalgunGothic', file: 'assets/fonts/BA-MalgunGothic.ttf',      fmt: 'truetype' },
-    { family: 'BA MalgunGothic', file: 'assets/fonts/BA-MalgunGothic-Bold.ttf', fmt: 'truetype', weight: 'bold' },
+    { family: 'BA MalgunGothic', file: 'assets/fonts/BA-MalgunGothic.ttf',      viaBuffer: true },
+    { family: 'BA MalgunGothic', file: 'assets/fonts/BA-MalgunGothic-Bold.ttf', viaBuffer: true, weight: 'bold' },
     { family: 'BA MPlus1p',    file: 'assets/fonts/BA-MPLUS1p-Medium.ttf',      fmt: 'truetype' },
     { family: 'BA NotoSansTC', file: 'assets/fonts/BA-NotoSansTC-Medium.otf',   fmt: 'opentype' },
     { family: 'BA NotoSans',   file: 'assets/fonts/BA-NotoSans-Regular.ttf',    fmt: 'truetype' },
   ];
-  for (const { family, file, fmt, weight } of defs) {
+  for (const { family, file, fmt, weight, viaBuffer } of defs) {
     try {
-      const face = new FontFace(family, `url('${assetUrl(file)}') format('${fmt}')`, weight ? { weight } : {});
+      let face;
+      if (viaBuffer) {
+        const buf = await (await fetchRetry(assetUrl(file))).arrayBuffer();
+        face = new FontFace(family, buf, weight ? { weight } : {});
+      } else {
+        face = new FontFace(family, `url('${assetUrl(file)}') format('${fmt}')`, weight ? { weight } : {});
+      }
       await face.load();
       document.fonts.add(face);
     } catch {

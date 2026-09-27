@@ -659,20 +659,11 @@
        from the JP client's fonts bundle (MALGUN/MALGUNBD; MALGUNSL lacks kanji,
        LINESeedKR_Bd lacks kanji; MALGUN covers kana+kanji+Hangul+Latin, verified
        by cmap). TTFs ship via the fonts core pack (gitignored, never in git);
-       where absent (e.g. Pages web build) the stack falls through to the OS
-       'Malgun Gothic' (present on all Windows) then per-language systems. */
-    @font-face {
-      font-family: 'BA MalgunGothic';
-      src: url('assets/fonts/BA-MalgunGothic.ttf') format('truetype');
-      font-weight: normal;
-      font-style: normal;
-    }
-    @font-face {
-      font-family: 'BA MalgunGothic';
-      src: url('assets/fonts/BA-MalgunGothic-Bold.ttf') format('truetype');
-      font-weight: bold;
-      font-style: normal;
-    }
+       registered at runtime by loadGameFonts() in renderer/app.js (fetch →
+       ArrayBuffer, because dev/static servers may ignore Range and Chromium
+       aborts url()-based loads of big fonts). Where absent (e.g. Pages web
+       build) the stack falls through to the OS 'Malgun Gothic' (present on all
+       Windows) then per-language systems. */
     #loadingText,
     #bootLoadingText {
       font-size: 2.5vh; color: #000;
