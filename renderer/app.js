@@ -3327,6 +3327,22 @@ window.ba_debug = {
       };
     } catch (e) { return 'EXC: ' + String(e); }
   },
+  dbgSlotBatch: (name) => {
+    try {
+      const pipe = app.renderer.renderPipes.spine;
+      const gpu = pipe?.gpuSpineData?.[spine.uid];
+      if (!gpu) return 'no-gpu-data';
+      const slot = spine.skeleton.findSlot(name);
+      if (!slot) return 'no-slot';
+      const at = slot.getAttachment();
+      const cd = at && spine.attachmentCacheData[slot.data.index]?.[at.name];
+      if (!cd) return { dataBlend: slot.data.blendMode, att: at?.name || null, cache: 'MISS' };
+      const b = gpu.slotBatches[cd.id];
+      return { dataBlend: slot.data.blendMode, att: at.name, cacheId: cd.id,
+        skipRender: cd.skipRender, batchBlend: b?.blendMode || null,
+        batcher: b?.batcherName || null, idxSize: b?.indexSize || null };
+    } catch (e) { return 'EXC: ' + String(e).slice(0, 160); }
+  },
   dbgBatchState: () => {
     try {
       const pipe = app.renderer.renderPipes.spine;
