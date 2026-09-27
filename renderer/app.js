@@ -351,26 +351,20 @@ const log = (s) => console.log('[lobby]', s);
  let STUDENT_ICONS = {};
 
 // kivo.wiki 的光線修復：Additive 槽且名含 light/flare → Screen 混色。
-// 2026-09-27 起預設關閉（還原官方 additive；URL hash 加 kivoFix=1 可開回舊觀感）。
+// 2026-09-27 起預設開（還原 kivo；URL hash 加 kivoFix=0 可關回官方 additive）。
 //
-// 關閉理由（遊戲資料堆＋運行態實測）：
-//   1. 資料面：官方 .skel 原值就是 blendMode=1(additive)（Hanako 247 槽僅
-//      Lens_flare_01/Lens_flare_1/toplight 三槽）；SkeletonDataAsset 的
-//      blendModeMaterials requires=0、applyAdditiveMaterial=0、四材質陣列全空
-//      → 遊戲用同一顆 Spine/Skeleton PMA 材質以 ONE/ONE render，無特殊處理。
-//      PlayerSettings ActiveColorSpace=Linear → 在線性空間加算。screen 在遊戲
-//      資料裡對這些槽不存在，是近似 hack，不是正確處理。
-//   2. 視覺面（Hanako_home 運行態 A/B vs Waydroid 實機，同 16:9 取靜態區）：
-//      天光flare區 實機186.7 / screen156.2 / additive174.4 / additive+linear183.7；
-//      純背景區 實機180.1 / screen139.5 / additive151.1 / additive+linear167.9。
-//      additive 全面比 screen 接近實機（screen 把光壓得比實機暗 18~40 階）。
-//   3. 量測陷阱：凍結幀（timeScale=0）下切 blend 像素差恆為 0——pixi 會快取靜態
-//      指令，blend 變更要下一幀重收才生效；舊「凍結 A/B 差異 0.000」結論無效。
-//   4. 殘差：additive+linear 最接近但高光仍溢（linear 管線疑似重複轉換，見
-//      linearMix 實驗）；穩態曝光权重=0（_C 的 ColorAdjustments 只在開場閃白
-//      窗口內生效），故殘差在混合空間＋輸出轉換，不在 blend。日後處理。
+// 為何不用官方 additive（雖是資料真值）：Hanako Idle_01 整個循環 toplight
+// 槽 alpha 恆為 1.0（實測 20 點），additive 疊在亮部皮膚上硬 clip——臉部死白、
+// 手臂黃爆（使用者實機對比判定「變更糟了」）。screen 有 s+d-s·d 壓縮，峰值收斂。
+// 區亮度 stats 曾顯示 additive 較接近實機（flare 區 174 vs 156 vs 實機 187），
+// 但那是單相位採樣＋區域平均，藏不住 clip 觀感；以眼睛為準。
+// 資料真值備查（日後 linear 管線修好再回來）：官方 .skel 3 槽 additive、
+// SkeletonDataAsset blendModeMaterials 全空、PlayerSettings Linear 空間；
+// additive+linear 區 stats 最接近實機（183.7/187）但高光溢出，管線另有問題。
+// 量測陷阱：凍結幀（timeScale=0）下切 blend 像素差恆為 0——pixi 會快取靜態
+// 指令，blend 變更要下一幀重收才生效；一切換 A/B 必須在運行態做。
 // 本函式同時記錄 .skel 原值（obj.__blendOrig）供 A/B 與稽核使用。
-const KIVO_FIX_ON = /(?:^|&)kivoFix=1/.test(location.hash + location.search);
+const KIVO_FIX_ON = !/(?:^|&)kivoFix=0/.test(location.hash + location.search);
 const fixAdditiveSlots = (obj) => {
   let n = 0;
   for (const slot of obj.skeleton.slots) {
