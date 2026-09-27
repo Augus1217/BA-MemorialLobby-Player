@@ -260,15 +260,18 @@ function applyCtlI18n() {
 // ---- 聊天/對話 UI 字體：不再寫死在 index.html @font-face（官方字體不 static
 // 散佈），改為 runtime 從 assets/fonts/（pack 安裝後由 SW 快取提供）動態
 // 註冊 FontFace。未載入前以系統字體 fallback，註冊成功後瀏覽器自動重繪。
+// 對話框字體遊戲真值 = Malgun Gothic（UseLocalizeFont=1，fonts bundle 實測）。
 async function loadGameFonts() {
   const defs = [
+    { family: 'BA MalgunGothic', file: 'assets/fonts/BA-MalgunGothic.ttf',      fmt: 'truetype' },
+    { family: 'BA MalgunGothic', file: 'assets/fonts/BA-MalgunGothic-Bold.ttf', fmt: 'truetype', weight: 'bold' },
     { family: 'BA MPlus1p',    file: 'assets/fonts/BA-MPLUS1p-Medium.ttf',      fmt: 'truetype' },
     { family: 'BA NotoSansTC', file: 'assets/fonts/BA-NotoSansTC-Medium.otf',   fmt: 'opentype' },
     { family: 'BA NotoSans',   file: 'assets/fonts/BA-NotoSans-Regular.ttf',    fmt: 'truetype' },
   ];
-  for (const { family, file, fmt } of defs) {
+  for (const { family, file, fmt, weight } of defs) {
     try {
-      const face = new FontFace(family, `url('${assetUrl(file)}') format('${fmt}')`);
+      const face = new FontFace(family, `url('${assetUrl(file)}') format('${fmt}')`, weight ? { weight } : {});
       await face.load();
       document.fonts.add(face);
     } catch {
@@ -338,21 +341,26 @@ const log = (s) => console.log('[lobby]', s);
  let STUDENT_ICONS = {};
 
 // kivo.wiki 的光線修復：Additive 槽且名含 light/flare → Screen 混色。
-// 依使用者要求於 2026-09-26 恢復啟用（預設開；URL hash 加 kivoFix=0 可關）。
+// 2026-09-27 起預設關閉（還原官方 additive；URL hash 加 kivoFix=1 可開回舊觀感）。
 //
-// 恢復理由：使用者在多輪排查後決定先維持 kivo 的視覺結果，後續再自行安排處理。
-// 以下保留實測事實供日後決策用（勿當成已證實的結論）：
-//   1. 資料面：.skel 原值確實是 blendMode=1(additive)，kivo 的名稱啟發式是對遊戲
-//      資料的偏離。遊戲材質可佐證沒有對 blend mode 用特殊材質：
-//      blendModeMaterials 的 requiresBlendModeMaterials=0、applyAdditiveMaterial=0、
-//      四個材質陣列全空。
-//   2. 視覺面（載入期 A/B，Hanako_home，同一定格幀）：kivo 的 screen 混色讓畫面變暗
-//      —— 上 15% 181.00→174.56、近全白像素 15.32%→10.96%、過曝 44.62%→41.08%；
-//      逐項隔離量到 toplight 單槽的加光量在 sRGB 混合下 +8.74、線性混合下 +4.53。
-//      也就是說 kivo 實際在做「壓低加算光暈過曝」，方向與「太亮」一致，但機制
-//      不是遊戲的。
-//   3. 本函式同時記錄 .skel 原值（obj.__blendOrig）供日後 A/B 與稽核使用。
-const KIVO_FIX_ON = !/(?:^|&)kivoFix=0/.test(location.hash + location.search);
+// 關閉理由（遊戲資料堆＋運行態實測）：
+//   1. 資料面：官方 .skel 原值就是 blendMode=1(additive)（Hanako 247 槽僅
+//      Lens_flare_01/Lens_flare_1/toplight 三槽）；SkeletonDataAsset 的
+//      blendModeMaterials requires=0、applyAdditiveMaterial=0、四材質陣列全空
+//      → 遊戲用同一顆 Spine/Skeleton PMA 材質以 ONE/ONE render，無特殊處理。
+//      PlayerSettings ActiveColorSpace=Linear → 在線性空間加算。screen 在遊戲
+//      資料裡對這些槽不存在，是近似 hack，不是正確處理。
+//   2. 視覺面（Hanako_home 運行態 A/B vs Waydroid 實機，同 16:9 取靜態區）：
+//      天光flare區 實機186.7 / screen156.2 / additive174.4 / additive+linear183.7；
+//      純背景區 實機180.1 / screen139.5 / additive151.1 / additive+linear167.9。
+//      additive 全面比 screen 接近實機（screen 把光壓得比實機暗 18~40 階）。
+//   3. 量測陷阱：凍結幀（timeScale=0）下切 blend 像素差恆為 0——pixi 會快取靜態
+//      指令，blend 變更要下一幀重收才生效；舊「凍結 A/B 差異 0.000」結論無效。
+//   4. 殘差：additive+linear 最接近但高光仍溢（linear 管線疑似重複轉換，見
+//      linearMix 實驗）；穩態曝光权重=0（_C 的 ColorAdjustments 只在開場閃白
+//      窗口內生效），故殘差在混合空間＋輸出轉換，不在 blend。日後處理。
+// 本函式同時記錄 .skel 原值（obj.__blendOrig）供 A/B 與稽核使用。
+const KIVO_FIX_ON = /(?:^|&)kivoFix=1/.test(location.hash + location.search);
 const fixAdditiveSlots = (obj) => {
   let n = 0;
   for (const slot of obj.skeleton.slots) {
@@ -4534,8 +4542,9 @@ async function mixVoicePcm(timeline, duration) {
 // 的 CSS 規則（9-slice Lobby_balloon/2.png、padding、min-height、字體/行高/間距、
 // positionChat 錨點 + flip）把氣泡直接畫上輸出畫布。
 function balloonFont(lang) {
-  if (lang === 'ja' || lang === 'jp') return `'BA MPlus1p','M PLUS 1p','Noto Sans JP','Noto Sans TC',sans-serif`;
-  if (lang === 'en') return `'BA NotoSans','Noto Sans','Segoe UI',sans-serif`;
+  if (lang === 'ja' || lang === 'jp') return `'BA MalgunGothic','Malgun Gothic','M PLUS 1p','Noto Sans JP','Noto Sans TC',sans-serif`;
+  if (lang === 'kr') return `'BA MalgunGothic','Malgun Gothic','Noto Sans KR','Noto Sans TC',sans-serif`;
+  if (lang === 'en') return `'BA MalgunGothic','Malgun Gothic','Noto Sans','Segoe UI',sans-serif`;
   return `'BA NotoSansTC','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif`;
 }
 function wrapCanvasText(ctx, text, maxW) {
@@ -4780,6 +4789,7 @@ async function startAnimExport() {
     try {
       await document.fonts.ready;
       await Promise.all([
+        document.fonts.load('52px "BA MalgunGothic"'),
         document.fonts.load('52px "BA NotoSansTC"'),
         document.fonts.load('52px "BA MPlus1p"'),
         document.fonts.load('52px "BA NotoSans"'),

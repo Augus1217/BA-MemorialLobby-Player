@@ -467,8 +467,11 @@
       position: fixed; z-index: 9;
       --bs: calc(100vw / 3000);
       /* Talk font follows the game's per-language runtime swap (UseLocalizeFont):
-         tw/zh -> Noto Sans TC, ja/jp -> M PLUS 1p, en -> Noto Sans; unknown
-         text defaults to the TC stack (the app's TW-first subtitle behaviour). */
+         the JP client's dialog label resolves to Malgun Gothic (Regular/Bold
+         from the fonts bundle; cmap-verified kana+kanji+Hangul+Latin coverage).
+         ja/jp/kr/en lead with Malgun (Windows falls back to the OS copy);
+         tw has no game-client reference — Malgun misses common TW chars
+         (您嗎麼啊), so it keeps Noto Sans TC first. */
       --chatFont: 'BA NotoSansTC', 'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', sans-serif;
       width: fit-content; height: fit-content;
       /* The box is top-pinned at the Talk origin and grows downward with
@@ -484,8 +487,9 @@
       transition: opacity .4s ease;
     }
     #chatDialog.show { opacity: 1; }
-    #chatDialog[data-lang="ja"], #chatDialog[data-lang="jp"] { --chatFont: 'BA MPlus1p', 'M PLUS 1p', 'Noto Sans JP', 'Noto Sans TC', sans-serif; }
-    #chatDialog[data-lang="en"] { --chatFont: 'BA NotoSans', 'Noto Sans', 'Segoe UI', sans-serif; }
+    #chatDialog[data-lang="ja"], #chatDialog[data-lang="jp"] { --chatFont: 'BA MalgunGothic', 'Malgun Gothic', 'M PLUS 1p', 'Noto Sans JP', 'Noto Sans TC', sans-serif; }
+    #chatDialog[data-lang="kr"] { --chatFont: 'BA MalgunGothic', 'Malgun Gothic', 'Noto Sans KR', 'Noto Sans TC', sans-serif; }
+    #chatDialog[data-lang="en"] { --chatFont: 'BA MalgunGothic', 'Malgun Gothic', 'Noto Sans', 'Segoe UI', sans-serif; }
     /* Balloon sprite + label margins follow the line's DialogType (set on
        #chatDialog[data-dtype] by renderer/app.js). Think lines (OS bubble) use
        Lobby_balloon2 (186x146, NGUI borders L130 R50 T85 B55), Talk uses
@@ -647,6 +651,26 @@
       font-family: 'BA Font';
       src: url('assets/loading/font.otf') format('opentype');
       font-weight: normal;
+      font-style: normal;
+    }
+    /* Memorial lobby dialog font (game truth): the Talk/Think UILabel has no
+       baked-in font (mTrueTypeFont/mFont null, UseLocalizeFont=1) and resolves
+       at runtime to Malgun Gothic Regular (Normal style) / Bold — extracted
+       from the JP client's fonts bundle (MALGUN/MALGUNBD; MALGUNSL lacks kanji,
+       LINESeedKR_Bd lacks kanji; MALGUN covers kana+kanji+Hangul+Latin, verified
+       by cmap). TTFs ship via the fonts core pack (gitignored, never in git);
+       where absent (e.g. Pages web build) the stack falls through to the OS
+       'Malgun Gothic' (present on all Windows) then per-language systems. */
+    @font-face {
+      font-family: 'BA MalgunGothic';
+      src: url('assets/fonts/BA-MalgunGothic.ttf') format('truetype');
+      font-weight: normal;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: 'BA MalgunGothic';
+      src: url('assets/fonts/BA-MalgunGothic-Bold.ttf') format('truetype');
+      font-weight: bold;
       font-style: normal;
     }
     #loadingText,
