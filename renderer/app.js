@@ -351,20 +351,17 @@ const log = (s) => console.log('[lobby]', s);
  let STUDENT_ICONS = {};
 
 // kivo.wiki 的光線修復：Additive 槽且名含 light/flare → Screen 混色。
-// 2026-09-27 起預設開（還原 kivo；URL hash 加 kivoFix=0 可關回官方 additive）。
+// 預設關閉（官方 additive；URL hash 加 kivoFix=1 可開回舊觀感）。
 //
-// 為何不用官方 additive（雖是資料真值）：Hanako Idle_01 整個循環 toplight
-// 槽 alpha 恆為 1.0（實測 20 點），additive 疊在亮部皮膚上硬 clip——臉部死白、
-// 手臂黃爆（使用者實機對比判定「變更糟了」）。screen 有 s+d-s·d 壓縮，峰值收斂。
-// 區亮度 stats 曾顯示 additive 較接近實機（flare 區 174 vs 156 vs 實機 187），
-// 但那是單相位採樣＋區域平均，藏不住 clip 觀感；以眼睛為準。
-// 資料真值備查（日後 linear 管線修好再回來）：官方 .skel 3 槽 additive、
-// SkeletonDataAsset blendModeMaterials 全空、PlayerSettings Linear 空間；
-// additive+linear 區 stats 最接近實機（183.7/187）但高光溢出，管線另有問題。
-// 量測陷阱：凍結幀（timeScale=0）下切 blend 像素差恆為 0——pixi 會快取靜態
-// 指令，blend 變更要下一幀重收才生效；一切換 A/B 必須在運行態做。
+// 決策鏈（全經遊戲資料＋實測驗證）：
+//   1. 官方 .skel 原值就是 additive；blendModeMaterials 全空（無特殊材質）。
+//   2. 貼圖是 straight（本檔 straightPageTexture 處理），PMA 管線會削弱 wash。
+//   3. 線性空間＋官方 additive（linearMix 預設）下，輸出級 lin2srgb 自然壓縮
+//      高光，臉部有層次不死白（已驗 Hanako/custom zealous 等）；sRGB additive
+//      才會硬 clip（那才是之前「變更糟」的原因，不是 additive 本身的錯）。
+//   4. screen 在遊戲資料裡不存在；留作 opt-in 只是觀感選項。
 // 本函式同時記錄 .skel 原值（obj.__blendOrig）供 A/B 與稽核使用。
-const KIVO_FIX_ON = !/(?:^|&)kivoFix=0/.test(location.hash + location.search);
+const KIVO_FIX_ON = /(?:^|&)kivoFix=1/.test(location.hash + location.search);
 const fixAdditiveSlots = (obj) => {
   let n = 0;
   for (const slot of obj.skeleton.slots) {
@@ -5942,22 +5939,15 @@ void main() {
 let baPostFilter = null;
 let postWrap = null;
 
-// ---- 線性混合（實驗性，預設關閉）--------------------------------------
-// 動機：globalgamemanagers 的 PlayerSettings.m_ActiveColorSpace = 1 (Linear)，
-// 遊戲在線性空間做 alpha 混合，我們原本在 sRGB 空間混合，理論上會在所有半透明
-// 重疊處偏亮。實作：rgba16float RT + 載入期 sRGB 貼圖（loadSpineAtlas）+
-// 輸出級 lin2srgb（uLinIn，見下方 shader）。
-//
-// 2026-09-27 修復：舊 retargetTexturesLinear 在首次上傳後才改 source.format
-// （pixi internalFormat 只在首次上傳決定 → sRGB 解碼從未發生）又誤切
-// alphaMode（已預乘資料重複預乘）→ 輸出級再 lin2srgb = 重複轉換，整圖泛白
-// （Hanako 天光區 184 vs 實機 187 看似接近，實為高光溢出＋全圖 +12.5 階）。
-// 修後（Hanako，同條件）：天光區 151、純背景 139，无高光溢出，臉部有層次；
-// 與 kivo screen 版（156/139）幾乎一致——理論上就該如此（screen ≈ 線性加算
-// 再編碼的近似）。剩餘與實機（187/180）的全域亮度差與混合無關（所有版本
-// 皆然：貼圖抽取／模擬器亮度／未發現的 grade，待查），另案處理。
-// 開啟：URL hash 加 linearMix=1（另加 kivoFix=0 還原官方 additive 做對照）。
-const BA_LINEAR_MIX = /(?:^|&)linearMix=1/.test(location.hash + location.search);
+// ---- 線性混合（2026-09-28 起為預設；URL hash 加 linearMix=0 可關）-------
+// 遊戲真值（globalgamemanagers 實測：1.90＋1.93 版 PlayerSettings
+// m_ActiveColorSpace 皆為 1 = Linear）：線性空間混合＋輸出級 sRGB 編碼。
+// 實作：rgba16float RT ＋載入期 sRGB 貼圖（loadSpineAtlas）＋輸出級 lin2srgb
+// （uLinIn；grade=1 仍為實驗性 HDR grading，預設關）。
+// 驗證：6 大廳矩陣（Hanako/Airi0/Akari/Yuzu/Hoshino/Wakamo）全過、fps 61 無損、
+// 貼圖格式／blend／straight 複本探針全綠；臉部有層次（輸出級壓縮高光）。
+// 舊 linear 泛白肇因已除（載入期解碼＋alphaMode 誤切，見 loadSpineAtlas 註解）。
+const BA_LINEAR_MIX = !/(?:^|&)linearMix=0/.test(location.hash + location.search);
 let linearRT = null;
 let linearScene = null;    // 線性 RT 內的場景容器（spine/bg/scene/extras）
 let linearSprite = null;   // 顯示線性 RT，掛 baPostFilter 負責 linear→sRGB
