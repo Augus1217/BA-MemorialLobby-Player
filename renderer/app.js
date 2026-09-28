@@ -1,5 +1,5 @@
-import { Application, Assets, Texture, Sprite, MeshSimple, Container, BlurFilter, ColorMatrixFilter, Cache, UniformGroup, GlProgram, Filter, RenderTexture, UPDATE_PRIORITY } from 'pixi.js';
-import { Spine, ScaleTimeline } from '@esotericsoftware/spine-pixi-v8';
+import { Application, Assets, Texture, Sprite, MeshSimple, Container, BlurFilter, ColorMatrixFilter, Cache, UniformGroup, GlProgram, Filter, RenderTexture, UPDATE_PRIORITY, ImageSource } from 'pixi.js';
+import { Spine, ScaleTimeline, SpineTexture } from '@esotericsoftware/spine-pixi-v8';
 import { Vector2 } from '@esotericsoftware/spine-core';
 import { i as initClickFx } from '../assets/clickfx/clickFx.js';
 
@@ -1516,6 +1516,8 @@ async function playExtraSkeleton(skelName, clips, vis) {
       await loadSpineAtlas(atlasUrl);
       obj = Spine.from({ skeleton: skelUrl, atlas: atlasUrl });
       fixAdditiveSlots(obj);
+      obj.__atlasUrl = atlasUrl;
+      prepareStraightFlares(obj);
       obj.skelName = skelNorm(skRaw);
       applySkeletonMix(obj, skRaw);
       extras.push(obj);
@@ -3352,6 +3354,25 @@ window.ba_debug = {
       }
       return out;
     } catch (e) { return 'EXC: ' + String(e).slice(0, 120); }
+  },
+  dbgFlareState: () => {
+    try {
+      const out = [];
+      const objs = [spine, bg, scene];
+      if (typeof extras !== 'undefined' && extras?.length) objs.push(...extras);
+      for (const o of objs) {
+        if (!o?.skeleton) continue;
+        const fl = (o.__flareSlots || []).map(s => {
+          let att = null; try { att = s.getAttachment(); } catch {}
+          const rt = att?.region?.texture;
+          return { slot: s.data.name, att: att?.name || null,
+            regionTexUid: rt?.texture?.uid ?? null, regionTexSrc: rt?.texture?.source?.alphaMode || null,
+            blend: s.data.blendMode };
+        });
+        out.push({ skel: o.skelName || '?', flares: fl });
+      }
+      return out;
+    } catch (e) { return 'EXC: ' + String(e).slice(0, 160); }
   },
   dbgSlotBatch: (name) => {
     try {
@@ -5940,18 +5961,83 @@ let linearRT = null;
 let linearScene = null;    // 線性 RT 內的場景容器（spine/bg/scene/extras）
 let linearSprite = null;   // 顯示線性 RT，掛 baPostFilter 負責 linear→sRGB
 
-// 線性模式的 atlas 載入：頁貼圖必須在載入期就帶 sRGB 格式，GPU 首次上傳
-// 才會配 SRGB8_ALPHA8 自動解碼。pixi 貼圖的 internalFormat 只在首次上傳時
-// 決定，事後改 source.format 不會重建（舊 retargetTexturesLinear 的死因）；
-// 且舊碼還誤切 alphaMode → 已預乘資料配 PMA blend 重複計算，整體泛白。
-// 經 spine atlasLoader 的 imageMetadata 注入（其 assetsToLoadIn 原樣傳給
-// 貼圖 parser，見 loadTextures 的 ...asset.data）。只在 BA_LINEAR_MIX 用；
-// sRGB 預設路徑保持 RGBA8 原狀。alphaMode 维持 loader 預設（PMA 貼圖上傳預乘）。
+// atlas 載入：pixi 貼圖 internalFormat 只在首次上傳決定，故線性模式的 sRGB
+// 格式必須在載入期指定（舊 retargetTexturesLinear 死於事後改），經 spine
+// atlasLoader 的 imageMetadata 注入。只在 BA_LINEAR_MIX 用；sRGB 預設路徑
+// 保持 RGBA8 原狀（loader 預設上傳預乘＋PMA blend，normal 槽數學正確）。
 async function loadSpineAtlas(url) {
   if (BA_LINEAR_MIX) await Assets.load({ src: url, data: { imageMetadata: { format: 'rgba8unorm-srgb' } } });
   else await Assets.load(url);
 }
-// （已刪除：事後改格式不會重建 GPU 貼圖，見 loadSpineAtlas 註解）
+// （已刪除 retargetTexturesLinear：事後改格式不會重建 GPU 貼圖，見上註解）
+// 光槽 straight 貼圖複本（遊戲真值） --------------------------------------
+// 遊戲 PNG 是 straight alpha（亮 rgb＋低 alpha 分開存；全庫 743/780 頁含
+// 「亮＋半透明」texel，PMA 不可能），但 pixi loader 解碼＋上傳兩處都預乘
+// （createImageBitmap 預設＋UNPACK），把光槽 rgb 按 texel alpha 削弱
+// （Hanako flare 255→61，wash 只剩約 1/4）；normal 槽因 PMA 一致性不受影響，
+// 所以只有 additive 光是錯的（系統性偏暗 30~47 階，之前全算到曝光頭上）。
+// 修法：給官方 additive 的光槽（__blendOrig===1 且名含 light/flare，即 kivo
+// 同集合）換上 straight 複本（createImageBitmap premultiplyAlpha:'none'＋
+// 不預乘上傳＋標準 blend factor），normal 槽完全不動（眼睛/背景零風險）。
+// 複本掛在 attachmentCacheData 上（銷毀鏈自動處理）；attachment 切換由每幀
+// remapStraightFlares 補掛（冪等，開銷可忽略）。
+async function straightPageTexture(pageUrl) {
+  const blob = await (await fetchRetry(pageUrl)).blob();
+  const bmp = await createImageBitmap(blob, { premultiplyAlpha: 'none' });
+  const src = new ImageSource({
+    resource: bmp,
+    alphaMode: 'premultiply-alpha-in-shader',
+    format: BA_LINEAR_MIX ? 'rgba8unorm-srgb' : 'rgba8unorm',
+  });
+  try {
+    src.style.addressModeU = 'clamp-to-edge';
+    src.style.addressModeV = 'clamp-to-edge';
+  } catch {}
+  return new Texture({ source: src });
+}
+// 已 patch 過的 region（跨 skeleton 共享 atlas 時同一 region 只處理一次；
+// 貼圖被銷毀後（切 lobby）下次 prepare 會重建重掛）。
+const _straightPatchedRegions = new Set();
+async function prepareStraightFlares(obj) {
+  try {
+    if (!obj?.skeleton || !obj.__atlasUrl) return;
+    const flares = obj.skeleton.slots.filter(s =>
+      (obj.__blendOrig?.get(s.data.name) ?? s.data.blendMode) === 1 && /light|flare/i.test(s.data.name));
+    if (!flares.length) return;
+    obj.__flareSlots = flares;
+    const txt = await (await fetchRetry(obj.__atlasUrl)).text();
+    const lines = txt.split('\n');
+    const base = obj.__atlasUrl.slice(0, obj.__atlasUrl.lastIndexOf('/') + 1);
+    const pageSet = new Set();
+    for (let i = 0; i < lines.length; i++) {
+      if (/\.png\s*$/.test(lines[i]) && lines.slice(i + 1, i + 4).some(l => l.startsWith('size:'))) {
+        pageSet.add(lines[i].trim());
+      }
+    }
+    // region 直貼圖：直接換 attachment region 的 spine texture（唯一真相來源，
+    // transformAttachments 每幀從這裡取值——改 cacheData 會被每幀洗掉）。
+    // 同一 region 只掛一次；貼圖已銷毀則重建。
+    const clones = new Map();
+    for (const s of flares) {
+      let att = null;
+      try { att = s.getAttachment(); } catch { continue; }
+      const region = att?.region;
+      if (!region?.page?.name) continue;
+      const cur = region.texture?.texture;
+      if (_straightPatchedRegions.has(region) && cur && !cur.destroyed) continue;
+      const pn = region.page.name;
+      if (!clones.has(pn)) {
+        try { clones.set(pn, await straightPageTexture(base + pn)); }
+        catch (e) { log('[flare]直貼圖失敗 ' + pn + ': ' + (e?.message || e)); continue; }
+      }
+      const spineTex = SpineTexture.from(clones.get(pn).source);
+      region.texture = spineTex;
+      _straightPatchedRegions.add(region);
+      log('[flare]直掛 ' + s.data.name + ' <- ' + pn);
+    }
+    obj.__straightPages = [...pageSet];
+  } catch (e) { log('[flare]prepare 失敗: ' + (e?.message || e)); }
+}
 // pixi v8 的 RenderGroup 忽略 root stage 上的 filter（實測 built-in 亦無作用），
 // 故把動態場景全部掛到 stage 下的 wrapper，filter 綁在 wrapper 上。
 function ensurePostWrap() {
@@ -6147,6 +6233,8 @@ async function loadScene(entry) {
       await loadSpineAtlas(atlas);
       const obj = Spine.from({ skeleton: skel, atlas });
       fixAdditiveSlots(obj);
+      obj.__atlasUrl = atlas;
+      prepareStraightFlares(obj);
       obj.skelName = (res.skel.startsWith('./') ? res.skel.slice(2) : res.skel).replace(/\.(skel|json)$/i, '').toLowerCase();
       applySkeletonMix(obj, obj.skelName);
       // 不在此自動播放——由 startBgSequence 依 BA 時間軸統一驅動（避免搶在
@@ -6576,6 +6664,8 @@ async function loadLobby(name) {
     if (!alive()) return;   // 被超車：不可再建 spine，否則蓋掉新大廳
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
     fixAdditiveSlots(spine);
+    spine.__atlasUrl = charAssets[1];
+    prepareStraightFlares(spine);
     const sch = SCHEDULE?.lobbies?.[name];
     currentLobbyVoiceFolder = sch?.voiceFolder || null;
     voiceSkip.clear();
