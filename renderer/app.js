@@ -2250,6 +2250,7 @@ function playStart() {
   const introName = resolveStartClip();
   const hasStart = !!introName;
   if (!idleClip) idleClip = resolveIdleClip();
+  log(`[intro] playStart ${currentLobby} hasStart=${hasStart} idle=${idleClip} tracks=${spine.state.tracks.length}`);
   // ---- BA PlayableDirector 播放軌道（lobby_timelines.json）----
   // 有排程資料就精確照播：把「本體骨架」的 clips 依 start 排進 track 0
   // （delay 鏈），Idle_01 之後 loop。多段開場（體育服優香 Start_Idle_01 →
@@ -6704,15 +6705,28 @@ async function loadLobby(name) {
     : !!(entry.bg) || !!(entry.scene && entry.scene.skel && entry.scene.skel !== entry.skel);
   // 圖層順序：bg 最底 → spine（本體）中 → scene（特寫）最頂（前景）。其餘 UI/對話在互動時
   // 才 addChild，自然位於最上層。
-  if (bg && scene) {
-    app.stage.setChildIndex(bg, 0);
-    app.stage.setChildIndex(spine, 1);
-    app.stage.setChildIndex(scene, app.stage.children.length - 1);
-  } else if (scene) {
-    app.stage.setChildIndex(scene, app.stage.children.length - 1);
-    app.stage.setChildIndex(spine, app.stage.children.length - 2 >= 0 ? app.stage.children.length - 2 : 0);
-  } else {
-    app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 1));
+  // RACE 修復：UTILITY ticker 的 ensurePostWrap 可能已把三者搬進 postWrap/linearScene
+  // （await loadScene 期間必然 tick 數次），直接對 app.stage setChildIndex 會因
+  // 「child 不在該容器」而拋錯，導致整間 lobby 卡在載入中（Yuzu/Akari/Wakamo 等
+  // 有 scene/bg 的 lobby 必中）。先統一歸位到同一父層再排序。
+  const layerParent = (BA_LINEAR_MIX && linearScene)
+    ? linearScene
+    : (postWrap && (baPostOn || [bg, spine, scene].some(o => o && o.parent === postWrap)) ? postWrap : app.stage);
+  for (const o of [bg, spine, scene]) {
+    if (!o) continue;
+    if (o.parent && o.parent !== layerParent) o.parent.removeChild(o);
+    if (!o.parent) layerParent.addChild(o);
+  }
+  const onLayer = (o) => o && o.parent === layerParent;
+  if (onLayer(bg) && onLayer(scene)) {
+    layerParent.setChildIndex(bg, 0);
+    layerParent.setChildIndex(spine, 1);
+    layerParent.setChildIndex(scene, layerParent.children.length - 1);
+  } else if (onLayer(scene)) {
+    layerParent.setChildIndex(scene, layerParent.children.length - 1);
+    layerParent.setChildIndex(spine, Math.max(0, layerParent.children.length - 2));
+  } else if (onLayer(spine)) {
+    layerParent.setChildIndex(spine, Math.max(0, layerParent.children.length - 1));
   }
   fitted = false;
   // frame on the Idle pose (mesh geometry only exists after a render), then play the intro
