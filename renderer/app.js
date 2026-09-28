@@ -1517,7 +1517,7 @@ async function playExtraSkeleton(skelName, clips, vis) {
       obj = Spine.from({ skeleton: skelUrl, atlas: atlasUrl });
       fixAdditiveSlots(obj);
       obj.__atlasUrl = atlasUrl;
-      prepareStraightFlares(obj);
+      prepareStraightAdditives(obj);
       obj.skelName = skelNorm(skRaw);
       applySkeletonMix(obj, skRaw);
       extras.push(obj);
@@ -3363,7 +3363,7 @@ window.ba_debug = {
       if (typeof extras !== 'undefined' && extras?.length) objs.push(...extras);
       for (const o of objs) {
         if (!o?.skeleton) continue;
-        const fl = (o.__flareSlots || []).map(s => {
+        const fl = (o.__addSlots || []).map(s => {
           let att = null; try { att = s.getAttachment(); } catch {}
           const rt = att?.region?.texture;
           return { slot: s.data.name, att: att?.name || null,
@@ -5974,14 +5974,15 @@ async function loadSpineAtlas(url) {
 // 光槽 straight 貼圖複本（遊戲真值） --------------------------------------
 // 遊戲 PNG 是 straight alpha（亮 rgb＋低 alpha 分開存；全庫 743/780 頁含
 // 「亮＋半透明」texel，PMA 不可能），但 pixi loader 解碼＋上傳兩處都預乘
-// （createImageBitmap 預設＋UNPACK），把光槽 rgb 按 texel alpha 削弱
-// （Hanako flare 255→61，wash 只剩約 1/4）；normal 槽因 PMA 一致性不受影響，
-// 所以只有 additive 光是錯的（系統性偏暗 30~47 階，之前全算到曝光頭上）。
-// 修法：給官方 additive 的光槽（__blendOrig===1 且名含 light/flare，即 kivo
-// 同集合）換上 straight 複本（createImageBitmap premultiplyAlpha:'none'＋
-// 不預乘上傳＋標準 blend factor），normal 槽完全不動（眼睛/背景零風險）。
-// 複本掛在 attachmentCacheData 上（銷毀鏈自動處理）；attachment 切換由每幀
-// remapStraightFlares 補掛（冪等，開銷可忽略）。
+// （createImageBitmap 預設＋UNPACK），把 additive 槽 rgb 按 texel alpha 削弱
+// （Hanako flare 255→61，wash 只剩約 1/4）；normal 槽因 PMA 一致性不受影響。
+// 修法：給官方 additive 的槽（__blendOrig===1，含眼睛光點這類非 light 名者）
+// 換上 straight 複本（createImageBitmap premultiplyAlpha:'none'＋
+// 不預乘上傳＋標準 blend factor）。normal 槽完全不動。
+// blend 決策（kivo screen vs 官方 additive）是另一層，與貼圖正誤無關。
+// 複本直接換 attachment region 的 spine texture（transformAttachments 每幀從
+// 這裡取值，一次掛載永久有效；flare attachment 經靜態驗證不切換）。
+// 貼圖被銷毀後（切 lobby）下次 prepare 重建重掛。
 async function straightPageTexture(pageUrl) {
   const blob = await (await fetchRetry(pageUrl)).blob();
   const bmp = await createImageBitmap(blob, { premultiplyAlpha: 'none' });
@@ -5999,13 +6000,13 @@ async function straightPageTexture(pageUrl) {
 // 已 patch 過的 region（跨 skeleton 共享 atlas 時同一 region 只處理一次；
 // 貼圖被銷毀後（切 lobby）下次 prepare 會重建重掛）。
 const _straightPatchedRegions = new Set();
-async function prepareStraightFlares(obj) {
+async function prepareStraightAdditives(obj) {
   try {
     if (!obj?.skeleton || !obj.__atlasUrl) return;
     const flares = obj.skeleton.slots.filter(s =>
-      (obj.__blendOrig?.get(s.data.name) ?? s.data.blendMode) === 1 && /light|flare/i.test(s.data.name));
+      (obj.__blendOrig?.get(s.data.name) ?? s.data.blendMode) === 1);
     if (!flares.length) return;
-    obj.__flareSlots = flares;
+    obj.__addSlots = flares;
     const txt = await (await fetchRetry(obj.__atlasUrl)).text();
     const lines = txt.split('\n');
     const base = obj.__atlasUrl.slice(0, obj.__atlasUrl.lastIndexOf('/') + 1);
@@ -6235,7 +6236,7 @@ async function loadScene(entry) {
       const obj = Spine.from({ skeleton: skel, atlas });
       fixAdditiveSlots(obj);
       obj.__atlasUrl = atlas;
-      prepareStraightFlares(obj);
+      prepareStraightAdditives(obj);
       obj.skelName = (res.skel.startsWith('./') ? res.skel.slice(2) : res.skel).replace(/\.(skel|json)$/i, '').toLowerCase();
       applySkeletonMix(obj, obj.skelName);
       // 不在此自動播放——由 startBgSequence 依 BA 時間軸統一驅動（避免搶在
@@ -6666,7 +6667,7 @@ async function loadLobby(name) {
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
     fixAdditiveSlots(spine);
     spine.__atlasUrl = charAssets[1];
-    prepareStraightFlares(spine);
+    prepareStraightAdditives(spine);
     const sch = SCHEDULE?.lobbies?.[name];
     currentLobbyVoiceFolder = sch?.voiceFolder || null;
     voiceSkip.clear();
