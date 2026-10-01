@@ -1,5 +1,5 @@
-import { Application, Assets, Texture, Sprite, MeshSimple, Container, BlurFilter, ColorMatrixFilter, Cache, UniformGroup, GlProgram, Filter, RenderTexture, UPDATE_PRIORITY, ImageSource } from 'pixi.js';
-import { Spine, ScaleTimeline, SpineTexture } from '@esotericsoftware/spine-pixi-v8';
+import { Application, Assets, Texture, Sprite, MeshSimple, Container, BlurFilter, ColorMatrixFilter, Cache, UniformGroup, GlProgram, Filter } from 'pixi.js';
+import { Spine, ScaleTimeline } from '@esotericsoftware/spine-pixi-v8';
 import { Vector2 } from '@esotericsoftware/spine-core';
 import { i as initClickFx } from '../assets/clickfx/clickFx.js';
 
@@ -260,28 +260,15 @@ function applyCtlI18n() {
 // ---- 聊天/對話 UI 字體：不再寫死在 index.html @font-face（官方字體不 static
 // 散佈），改為 runtime 從 assets/fonts/（pack 安裝後由 SW 快取提供）動態
 // 註冊 FontFace。未載入前以系統字體 fallback，註冊成功後瀏覽器自動重繪。
-// 對話框字體遊戲真值 = Malgun Gothic（UseLocalizeFont=1，fonts bundle 實測）。
-// Malgun 13MB：Chromium 對 url() 大字體會用 Range 串流，而 dev/靜態伺服器
-// 可能忽略 Range 回 200 全檔 → FontFace 中止（實測 "network error"；同 URL
-// fetch 全檔正常，ArrayBuffer 註冊一次成功）。故 Malgun 走 fetch →
-// ArrayBuffer 註冊， bypass range 邏輯；小字體維持 url()。
 async function loadGameFonts() {
   const defs = [
-    { family: 'BA MalgunGothic', file: 'assets/fonts/BA-MalgunGothic.ttf',      viaBuffer: true },
-    { family: 'BA MalgunGothic', file: 'assets/fonts/BA-MalgunGothic-Bold.ttf', viaBuffer: true, weight: 'bold' },
     { family: 'BA MPlus1p',    file: 'assets/fonts/BA-MPLUS1p-Medium.ttf',      fmt: 'truetype' },
     { family: 'BA NotoSansTC', file: 'assets/fonts/BA-NotoSansTC-Medium.otf',   fmt: 'opentype' },
     { family: 'BA NotoSans',   file: 'assets/fonts/BA-NotoSans-Regular.ttf',    fmt: 'truetype' },
   ];
-  for (const { family, file, fmt, weight, viaBuffer } of defs) {
+  for (const { family, file, fmt } of defs) {
     try {
-      let face;
-      if (viaBuffer) {
-        const buf = await (await fetchRetry(assetUrl(file))).arrayBuffer();
-        face = new FontFace(family, buf, weight ? { weight } : {});
-      } else {
-        face = new FontFace(family, `url('${assetUrl(file)}') format('${fmt}')`, weight ? { weight } : {});
-      }
+      const face = new FontFace(family, `url('${assetUrl(file)}') format('${fmt}')`);
       await face.load();
       document.fonts.add(face);
     } catch {
@@ -350,27 +337,14 @@ const log = (s) => console.log('[lobby]', s);
  let ORDER = [];
  let STUDENT_ICONS = {};
 
-// kivo.wiki 的光線修復：Additive 槽且名含 light/flare → Screen 混色。
-// 2026-09-27 起預設開（還原 kivo；URL hash 加 kivoFix=0 可關回官方 additive）。
-//
-// 為何不用官方 additive（雖是資料真值）：Hanako Idle_01 整個循環 toplight
-// 槽 alpha 恆為 1.0（實測 20 點），additive 疊在亮部皮膚上硬 clip——臉部死白、
-// 手臂黃爆（使用者實機對比判定「變更糟了」）。screen 有 s+d-s·d 壓縮，峰值收斂。
-// 區亮度 stats 曾顯示 additive 較接近實機（flare 區 174 vs 156 vs 實機 187），
-// 但那是單相位採樣＋區域平均，藏不住 clip 觀感；以眼睛為準。
-// 資料真值備查（日後 linear 管線修好再回來）：官方 .skel 3 槽 additive、
-// SkeletonDataAsset blendModeMaterials 全空、PlayerSettings Linear 空間；
-// additive+linear 區 stats 最接近實機（183.7/187）但高光溢出，管線另有問題。
-// 量測陷阱：凍結幀（timeScale=0）下切 blend 像素差恆為 0——pixi 會快取靜態
-// 指令，blend 變更要下一幀重收才生效；一切換 A/B 必須在運行態做。
-// 本函式同時記錄 .skel 原值（obj.__blendOrig）供 A/B 與稽核使用。
-const KIVO_FIX_ON = !/(?:^|&)kivoFix=0/.test(location.hash + location.search);
+// kivo.wiki 光線修復公式：Additive 槽且名稱含 light/flare → Screen 混色。
+// 比對 kivo _fix skel 實證（Hanako 3/3、CH0220 8/8、Seia 1/1 個 Additive 槽全改）。
+// 不能「全部 Additive→Screen」：全庫 4296 個 Additive 槽中有眼睛/背景/光暈等
+// 非光效槽（kivo 未修角色在站上仍維持 Additive），名稱過濾才不會改壞眼睛。
 const fixAdditiveSlots = (obj) => {
   let n = 0;
   for (const slot of obj.skeleton.slots) {
-    if (!obj.__blendOrig) obj.__blendOrig = new Map();
-    if (!obj.__blendOrig.has(slot.data.name)) obj.__blendOrig.set(slot.data.name, slot.data.blendMode);
-    if (KIVO_FIX_ON && slot.data.blendMode === 1 && /light|flare/i.test(slot.data.name)) { slot.data.blendMode = 3; n++; }
+    if (slot.data.blendMode === 1 && /light|flare/i.test(slot.data.name)) { slot.data.blendMode = 3; n++; }
   }
   return n;
 };
@@ -488,6 +462,7 @@ function updateLetterbox() {
   set(bars.lbLeft, 0, 0, l, vh);
   set(bars.lbRight, vw - r, 0, r, vh);
 }
+let lastFitW = -1, lastFitH = -1;   // 上次 fitScene 實際套用的 renderer 尺寸
 function fitScene() {
   const vw = app.renderer.width, vh = app.renderer.height;
   updateLetterbox();
@@ -554,6 +529,7 @@ function fitScene() {
   cam.x = 0;
   cam.y = 0;
   fitted = true;
+  lastFitW = vw; lastFitH = vh;   // resize 自癒守衛用（見 ticker）
   applyCamera(1);
 }
 
@@ -1513,11 +1489,9 @@ async function playExtraSkeleton(skelName, clips, vis) {
       await Assets.load(skelUrl);
       // atlas 檔名與 skel 同名；png 由 atlas 文字列出（其上層載入會帶入）
       const atlasUrl = assetUrl(`${base}${skRaw}.atlas`);
-      await loadSpineAtlas(atlasUrl);
+      await Assets.load(atlasUrl);
       obj = Spine.from({ skeleton: skelUrl, atlas: atlasUrl });
       fixAdditiveSlots(obj);
-      obj.__atlasUrl = atlasUrl;
-      prepareStraightAdditives(obj);
       obj.skelName = skelNorm(skRaw);
       applySkeletonMix(obj, skRaw);
       extras.push(obj);
@@ -1787,10 +1761,8 @@ async function playTalk() {
     // exact clip name, but server doesn't expose MemorialLobby dialogs — the
     // closest determinism we can deliver is to filter to clips that actually
     // emit voice events. Falls back to all Talk_N_M if schedule is unavailable.
-    // Order is SEQUENTIAL per lobby (round-robin, persisted): taps cycle
-    // Talk_01 → 02 → … → N → 01. Verified behaviorally (20-tap test on the
-    // real client plays groups in order, never random). Group N ↔ Talk_%02d_M
-    // clip convention.
+    // Order is SEQUENTIAL per lobby (round-robin, persisted): the game cycles
+    // Talk_01 → 02 → … → N → 01 on successive taps, never random.
     const schAnim = SCHEDULE?.lobbies?.[currentLobby]?.animations || {};
     const withVoice = talks.filter(n => (schAnim[n]?.voice || []).length > 0);
     const pool = [...(withVoice.length ? withVoice : talks)].sort((a, b) =>
@@ -2096,25 +2068,6 @@ function flashCurves() {
   return t === null ? FALLBACK_FLASH_KEYS : null;
 }
 
-// Unity Volume 以 weight 在「預設值」與「override 值」之間 lerp：postExposure 只在
-// _C profile 的 weight>0 時生效，而 weight 由 flash_curves 的 exposure 曲線驅動。
-// 舊碼在 faithful 模式直接套 cfg.e（= 2^postExposure，花子 45.25），LogC 頂到 [0,1]
-// → 高於中灰的像素全變純白。改為 cfg.e ** weight。
-//
-// 開場窗口外一律取 weight=0（倍率 1.0），不採曲線收尾值。理由：
-//   * 曲線描述的是 intro timeline，窗口外該 volume override 不再被驅動；
-//   * 全庫 183+/266 間收尾值確為 0，與此一致；
-//   * 少數非零尾值不可信：nonomi_home(1.0×e64 → 64 倍)、ch0080_home(0.7547 → 17.8 倍)
-//     會把畫面推到全白，且 asuna/hiyori 出現 450、-50000 等 float32 溢位的損毀值。
-// 開場期間仍用曲線實值（那段資料可靠，且白閃疊層本就主導觀感）。
-function exposureVolumeWeight() {
-  const t = introFlashTime();
-  if (t < 0) return 0;
-  const c = flashCurves();
-  if (!c || !c.exposure) return 0;
-  return clamp(cubicAt(c.exposure, t), 0, 1);
-}
-
 // Net screen whiteness (0..1): the exposure volume and the white sprite both
 // white-out the frame, so take their max (Unity post-process + sprite overlay).
 function whiteFlashAlpha(t) {
@@ -2195,6 +2148,19 @@ let lastFlashTick = null;   // debug: last (t, alpha) seen inside tickWhiteFlash
 // added/removed rather than kept at 0.
 const flashBlur = new BlurFilter({ strength: 0, quality: 3 });
 let flashBlurOn = false;
+// DOF 模糊的 filter 掛載點：pixi v8 的 RenderGroup 會忽略 root stage filter，
+// 必須掛 postWrap，且與 baPostFilter 共存（順序 [flashBlur, baPostFilter]＝
+// 先模糊、後 CA/調色，對應 URP 的 DOF-before-post）。所有異動走 syncFlashFilters。
+// URP gaussianMaxRadius 是 UV 單位，換算像素需乘解析度；dofScale 可調（hash dofScale=）。
+const dofScaleHash = Number((/(?:^|&)dofScale=(\d+(?:\.\d+)?)/.exec(location.hash + location.search) || [])[1]) || 8;
+const dofScale = () => dofScaleHash * ((app.renderer && app.renderer.height) / 1080 || 1);
+function syncFlashFilters() {
+  if (!postWrap) return;
+  const fs = [];
+  if (flashBlurOn && flashBlur) fs.push(flashBlur);
+  if (baPostOn && baPostFilter) fs.push(baPostFilter);
+  postWrap.filters = fs;
+}
 // Drive the #whiteflash DOM overlay (live view) + keep it in sync each frame.
 function tickWhiteFlash() {
   // 特寫壽司退場：本體進場（introDelay 到，白閃起）時移除 scene 物件
@@ -2214,16 +2180,17 @@ function tickWhiteFlash() {
   const on = dof > 0.01;
   if (on !== flashBlurOn) {
     flashBlurOn = on;
-    app.stage.filters = on ? [flashBlur] : null;
+    if (on) ensurePostWrap();   // flashBlur 需 postWrap（v8 root stage filter 無效）
+    syncFlashFilters();
   }
-  if (on) flashBlur.strength = clamp(dof * 1.5, 0, 1.5);   // 1.5 = game gaussianMaxRadius
+  if (on) flashBlur.strength = clamp(dof * 1.5 * dofScale(), 0, 200);   // 1.5=game gaussianMaxRadius(UV)，×dofScale 換算像素
 }
 function resetWhiteFlash() {
   lastFlashAlpha = -1;
   whiteFlashEl.style.opacity = '0';
   if (flashBlurOn) {
     flashBlurOn = false;
-    app.stage.filters = null;
+    syncFlashFilters();
   }
 }
 
@@ -2247,7 +2214,6 @@ function playStart() {
   const introName = resolveStartClip();
   const hasStart = !!introName;
   if (!idleClip) idleClip = resolveIdleClip();
-  log(`[intro] playStart ${currentLobby} hasStart=${hasStart} idle=${idleClip} tracks=${spine.state.tracks.length}`);
   // ---- BA PlayableDirector 播放軌道（lobby_timelines.json）----
   // 有排程資料就精確照播：把「本體骨架」的 clips 依 start 排進 track 0
   // （delay 鏈），Idle_01 之後 loop。多段開場（體育服優香 Start_Idle_01 →
@@ -2618,68 +2584,10 @@ window.ba_debug = {
     return out;
   },
   post: {
-    linear: () => {
-      const f = postWrap?.filters?.[0];
-      const u = f?.resources?.baPostUniforms?.uniforms;
-      let tex = null;
-      try {
-        const cache = spine?.attachmentCacheData || {};
-        for (const si of Object.keys(cache)) for (const an of Object.keys(cache[si] || {})) {
-          const t = cache[si][an]?.texture; const src = t?.source || t;
-          if (src) { tex = { format: src.format, alphaMode: src.alphaMode, w: src.width, h: src.height }; break; }
-        }
-        if (!tex) for (const si of Object.keys(cache)) for (const an of Object.keys(cache[si] || {})) {
-          const t = cache[si][an]?.texture; if (t) { tex = { format: t.format, alphaMode: t.alphaMode, w: t.width, h: t.height }; break; }
-        }
-      } catch (e) { tex = { err: e.message }; }
-      return {
-        BA_LINEAR_MIX, hasRT: !!linearRT,
-        rt: linearRT ? { w: linearRT.width, h: linearRT.height, fmt: linearRT.source?.format } : null,
-        hasScene: !!linearScene, hasSprite: !!linearSprite,
-        uLinIn: u?.uLinIn ?? null, uGrade: u?.uGrade ?? null, uOn: u?.uOn ?? null,
-        filterOn: !!(postWrap && postWrap.filters && postWrap.filters.length),
-        sceneChildren: linearScene ? linearScene.children.length : -1,
-        sampleTex: tex,
-      };
-    },
-    // 逐項隔離量測：依名稱規則把槽 alpha 設為 0（或還原），用於驗證各光效的實際貢獻。
-    // pattern 傳 null 代表全部還原。內建對照組：hide=backgrund 會讓畫面劇變，
-    // 用來確認「執行期改 alpha 真的會重繪」，否則整套量測無效。
-    hideSlots: (pattern) => {
-      try {
-        const rx = pattern ? new RegExp(pattern, 'i') : null;
-        const rep = { hidden: 0, restored: 0 };
-        for (const o of [spine, bg, scene, ...extras]) {
-          if (!o?.skeleton) continue;
-          for (const s of o.skeleton.slots) {
-            if (rx && !rx.test(s.data.name)) continue;
-            const c = s.color || s.getColor?.();
-            if (!c) continue;
-            if (rx) { if (c.a !== 0) { s.__prevA = c.a; c.a = 0; rep.hidden++; } }
-            else if (s.__prevA !== undefined && s.__prevA !== null) { c.a = s.__prevA; s.__prevA = null; rep.restored++; }
-          }
-        }
-        return rep;
-      } catch (e) { return 'EXC: ' + String(e); }
-    },
-    // 線性 RT 的 alpha 行為（懷疑雙重疊加的來源之一）
-    rtAlpha: () => {
-      try {
-        if (!linearRT) return 'no linearRT';
-        app.renderer.render({ container: linearScene, target: linearRT, clear: true });
-        const gl = app.canvas.getContext('webgl2') || app.canvas.getContext('webgl');
-        const w = linearRT.width, h = linearRT.height;
-        const buf = new Float32Array(w * h * 4);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);   // 讀回的是畫布，非 RT
-        return { note: '讀不到 RT 內容，改以 sprite 設定推斷', spriteBlend: linearSprite?.blendMode, rtFormat: linearRT.source?.format, clearColor: app.renderer.background?.colorRgba };
-      } catch (e) { return 'EXC: ' + String(e); }
-    },
     on: () => { baPostOn = true; try { localStorage.setItem('ba_post', '1'); } catch {} applyPostGrade(currentLobby); return baPostOn; },
-    off: () => { baPostOn = false; try { localStorage.setItem('ba_post', '0'); } catch {} if (postWrap) postWrap.filters = []; return baPostOn; },
+    off: () => { baPostOn = false; try { localStorage.setItem('ba_post', '0'); } catch {} syncFlashFilters(); return baPostOn; },
     mode: (m) => { if (m === 'faithful' || m === 'mild') { POST_MODE = m; try { localStorage.setItem('ba_post_mode', m); } catch {} applyPostGrade(currentLobby); } return POST_MODE; },
-    // cfg／uExp 都要可序列化：Runtime.evaluate(returnByValue) 遇到非純資料會整個回
-    // undefined（除錯時踩過），故轉成 JSON 字串／純數。
-    get status() { const c = baPostCfgFor(currentLobby); const u = postWrap?.filters?.[0]?.resources?.baPostUniforms?.uniforms; return { on: baPostOn, mode: POST_MODE, cfg: c ? JSON.parse(JSON.stringify(c)) : null, filter: !!baPostFilter, uExp: u?.uExp ?? null, expWeight: exposureVolumeWeight(), introT: introFlashTime() }; },
+    get status() { return { on: baPostOn, mode: POST_MODE, cfg: baPostCfgFor(currentLobby), filter: !!baPostFilter, stageF: app?.stage?.filters?.length ?? 0, onStage: !!(baPostFilter && app?.stage?.filters?.some(f => f === baPostFilter)) }; },
     apply: (lobby) => applyPostGrade(lobby || currentLobby),
     cpu: (rgb, lobby) => baPostCpu(rgb, baPostCfgFor(lobby || currentLobby)),
     test: (rgb, lobby) => { const c = baPostCfgFor(lobby || currentLobby); return c ? { in: rgb, cfg: c, out: baPostCpu(rgb, c) } : null; },
@@ -2698,8 +2606,6 @@ window.ba_debug = {
         postWrapScale: w ? [w.scale.x, w.scale.y] : null,
         filterOn: !!(w && w.filters && w.filters.length),
         uChroma: f ? f.resources.baPostUniforms.uniforms.uChroma : null,
-        uExp: f ? f.resources.baPostUniforms.uniforms.uExp : null,
-        uTone: f ? f.resources.baPostUniforms.uniforms.uTone : null,
         uPanini: f ? Array.from(f.resources.baPostUniforms.uniforms.uPanini ?? []) : null,
         gUOutputFrame: Array.from(app.renderer.filter._filterGlobalUniforms.uniforms.uOutputFrame ?? []),
         gUInputSize: Array.from(app.renderer.filter._filterGlobalUniforms.uniforms.uInputSize ?? []),
@@ -3338,56 +3244,6 @@ window.ba_debug = {
       };
     } catch (e) { return 'EXC: ' + String(e); }
   },
-  dbgTexFormat: () => {
-    try {
-      const out = [];
-      const seen = new Set();
-      for (const o of [spine, bg, scene]) {
-        const cache = o?.attachmentCacheData || {};
-        for (const si of Object.keys(cache)) for (const an of Object.keys(cache[si] || {})) {
-          const t = cache[si][an]?.texture;
-          const src = t?.source;
-          if (src && !seen.has(src.uid)) { seen.add(src.uid); out.push({ fmt: src.format, alpha: src.alphaMode, w: src.width, h: src.height }); }
-        }
-      }
-      return out;
-    } catch (e) { return 'EXC: ' + String(e).slice(0, 120); }
-  },
-  dbgFlareState: () => {
-    try {
-      const out = [];
-      const objs = [spine, bg, scene];
-      if (typeof extras !== 'undefined' && extras?.length) objs.push(...extras);
-      for (const o of objs) {
-        if (!o?.skeleton) continue;
-        const fl = (o.__addSlots || []).map(s => {
-          let att = null; try { att = s.getAttachment(); } catch {}
-          const rt = att?.region?.texture;
-          return { slot: s.data.name, att: att?.name || null,
-            regionTexUid: rt?.texture?.uid ?? null, regionTexSrc: rt?.texture?.source?.alphaMode || null,
-            blend: s.data.blendMode };
-        });
-        out.push({ skel: o.skelName || '?', flares: fl });
-      }
-      return out;
-    } catch (e) { return 'EXC: ' + String(e).slice(0, 160); }
-  },
-  dbgSlotBatch: (name) => {
-    try {
-      const pipe = app.renderer.renderPipes.spine;
-      const gpu = pipe?.gpuSpineData?.[spine.uid];
-      if (!gpu) return 'no-gpu-data';
-      const slot = spine.skeleton.findSlot(name);
-      if (!slot) return 'no-slot';
-      const at = slot.getAttachment();
-      const cd = at && spine.attachmentCacheData[slot.data.index]?.[at.name];
-      if (!cd) return { dataBlend: slot.data.blendMode, att: at?.name || null, cache: 'MISS' };
-      const b = gpu.slotBatches[cd.id];
-      return { dataBlend: slot.data.blendMode, att: at.name, cacheId: cd.id,
-        skipRender: cd.skipRender, batchBlend: b?.blendMode || null,
-        batcher: b?.batcherName || null, idxSize: b?.indexSize || null };
-    } catch (e) { return 'EXC: ' + String(e).slice(0, 160); }
-  },
   dbgBatchState: () => {
     try {
       const pipe = app.renderer.renderPipes.spine;
@@ -3501,70 +3357,17 @@ window.ba_debug = {
   },
   dbgTexAlphaMode: () => {
     try {
-      // 舊版寫死 'top_light'，但多數 lobby 槽名是 'toplight'（無底線），
-      // 查不到 slot 就整個函式擲掉。改為掃描第一個有 attachment 的槽。
-      let cd = null, hitSlot = null;
-      for (const s of spine.skeleton.slots) {
-        const a = s.getAttachment();
-        if (!a || !a.region) continue;
-        const c = spine.attachmentCacheData[s.data.index]?.[a.name];
-        if (c?.texture) { cd = c; hitSlot = s.data.name; break; }
-      }
-      if (!cd) return { err: 'no slot with cached texture', slots: spine.skeleton.slots.length };
-      const out = { slot: hitSlot, light: { uid: cd.texture.uid, alphaMode: cd.texture.alphaMode, srcAlphaMode: cd.texture.source.alphaMode } };
+      const slot = spine.skeleton.findSlot('top_light');
+      const at = slot.getAttachment();
+      const cd = spine.attachmentCacheData[slot.data.index][at.name];
+      const out = { light: { uid: cd.texture.uid, alphaMode: cd.texture.alphaMode, srcAlphaMode: cd.texture.source.alphaMode } };
       const pipe = app.renderer.renderPipes.spine;
       const gpu = pipe.gpuSpineData[spine.uid];
-      const others = Object.values(gpu.slotBatches).map(b => ({ uid: b.texture?.uid, alphaMode: b.texture?.alphaMode, srcAlphaMode: b.texture?.source?.alphaMode, w: b.texture?.width, n: b.start?.length ?? b.slots?.length }));
+      const others = Object.values(gpu.slotBatches).map(b => ({ uid: b.texture?.uid, alphaMode: b.texture?.alphaMode, srcAlphaMode: b.texture?.source?.alphaMode, w: b.texture?.width }));
       const unique = {};
       for (const o of others) { const k = o.uid + '|' + o.srcAlphaMode + '|' + o.w; unique[k] = o; }
       out.all = Object.values(unique).slice(0, 20);
       return out;
-    } catch (e) { return 'EXC: ' + String(e); }
-  },
-  // 光效槽渲染稽核：.skel 裡有 attachment、setup alpha=1 的槽，是否真的進了 GPU 批次。
-  // 用途：抓「素材在但畫不出來」（atlas 第 2 頁沒載 / blend 被改 / 批次缺頁）。
-  dbgEffectSlots: (re) => {
-    try {
-      const rx = re || /light|flare|star|spark|fountain|water|splash|mist/i;
-      const pipe = app.renderer.renderPipes.spine;
-      const gpu = pipe.gpuSpineData[spine.uid];
-      // slotBatches 結構未經文件確認：先印 keys 再決定如何攤平，避免誤判 notBatched。
-      const batches = Object.values(gpu.slotBatches || {});
-      const shape = batches.length ? Object.keys(batches[0]) : [];
-      const batched = new Set();
-      for (const b of batches) {
-        const arr = b.slots || b.slotIndices || b.start || b.indices || [];
-        for (const s of arr) batched.add(typeof s === 'object' && s ? (s.data?.index ?? s) : s);
-      }
-      const rows = [];
-      for (const s of spine.skeleton.slots) {
-        if (!rx.test(s.data.name)) continue;
-        const a = s.getAttachment();
-        const cd = a ? spine.attachmentCacheData[s.data.index]?.[a.name] : null;
-        rows.push({
-          name: s.data.name,
-          blend: s.data.blendMode,
-          att: a ? a.constructor.name : null,
-          tex: !!cd?.texture,
-          batched: batched.has(s),
-          srcAlpha: cd?.texture?.source?.alphaMode ?? null,
-          w: cd?.texture?.width ?? null,
-        });
-      }
-      const sum = {
-        total: rows.length,
-        noAttachment: rows.filter(r => !r.att).length,
-        noTexture: rows.filter(r => r.att && !r.tex).length,
-        notBatched: rows.filter(r => r.att && r.tex && !r.batched).length,
-        blends: [...new Set(rows.map(r => r.blend))],
-        alphaModes: [...new Set(rows.map(r => r.srcAlpha))],
-        pages: [...new Set(rows.map(r => r.w))],
-        batchCount: batches.length,
-        batchShape: shape,
-        batchedTotal: batched.size,
-        allSlots: spine.skeleton.slots.length,
-      };
-      return { sum, sample: rows.filter(r => !r.batched || !r.tex).slice(0, 12) };
     } catch (e) { return 'EXC: ' + String(e); }
   },
   dbgShowTex: () => {
@@ -4579,9 +4382,8 @@ async function mixVoicePcm(timeline, duration) {
 // 的 CSS 規則（9-slice Lobby_balloon/2.png、padding、min-height、字體/行高/間距、
 // positionChat 錨點 + flip）把氣泡直接畫上輸出畫布。
 function balloonFont(lang) {
-  if (lang === 'ja' || lang === 'jp') return `'BA MalgunGothic','Malgun Gothic','M PLUS 1p','Noto Sans JP','Noto Sans TC',sans-serif`;
-  if (lang === 'kr') return `'BA MalgunGothic','Malgun Gothic','Noto Sans KR','Noto Sans TC',sans-serif`;
-  if (lang === 'en') return `'BA MalgunGothic','Malgun Gothic','Noto Sans','Segoe UI',sans-serif`;
+  if (lang === 'ja' || lang === 'jp') return `'BA MPlus1p','M PLUS 1p','Noto Sans JP','Noto Sans TC',sans-serif`;
+  if (lang === 'en') return `'BA NotoSans','Noto Sans','Segoe UI',sans-serif`;
   return `'BA NotoSansTC','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif`;
 }
 function wrapCanvasText(ctx, text, maxW) {
@@ -4826,7 +4628,6 @@ async function startAnimExport() {
     try {
       await document.fonts.ready;
       await Promise.all([
-        document.fonts.load('52px "BA MalgunGothic"'),
         document.fonts.load('52px "BA NotoSansTC"'),
         document.fonts.load('52px "BA MPlus1p"'),
         document.fonts.load('52px "BA NotoSans"'),
@@ -5850,13 +5651,6 @@ uniform highp vec4 uInputSize;
 uniform highp vec4 uOutputFrame;
 uniform float uOn;
 uniform float uExp;
-// uLinIn：1 = 輸入已是線性（線性 RenderTexture），須跳過 srgb2lin 並在輸出做
-//          linear→sRGB。0 = 傳統 sRGB 輸入。
-// uGrade：URP pipeline asset 的 m_ColorGradingMode = 0 (None) → 遊戲根本不跑 LUT
-//         調色，故 exposure / LogC / contrast / colorFilter / LGG / saturation 全部
-//         無效。線性模式預設關閉（0），可用 URL hash grade=1 強制開啟做 A/B。
-uniform float uLinIn;
-uniform float uGrade;
 uniform float uCon;
 uniform float uSat;
 uniform float uChroma;
@@ -5899,19 +5693,10 @@ vec3 sampleWarp(vec2 tcoord) {
 }
 void main() {
   vec4 c = texture(uTexture, vTextureCoord);
-  bool linIn = uLinIn > 0.5;
-  bool fx = uOn > 0.5;
-  bool hasA = c.a > 0.003;
-  if (!linIn && (!fx || !hasA)) { finalColor = c; return; }
-  vec3 rgb = (fx && hasA) ? sampleWarp(vTextureCoord) : max(c.rgb, vec3(0.0));
-  // 線性模式輸入已是線性值，不可再 srgb2lin（否則二次轉換會整體變暗）
-  vec3 lin = linIn ? rgb : vec3(srgb2lin(max(rgb.r, 0.0)), srgb2lin(max(rgb.g, 0.0)), srgb2lin(max(rgb.b, 0.0)));
-  vec3 outc;
-  if (uGrade < 0.5) {
-    // ColorGradingMode = None：遊戲只做 CA + Panini，直接線性→sRGB
-    outc = vec3(lin2srgb(clamp(lin.r, 0.0, 1.0)), lin2srgb(clamp(lin.g, 0.0, 1.0)), lin2srgb(clamp(lin.b, 0.0, 1.0)));
-  } else {
+  if (uOn <= 0.5 || c.a <= 0.003) { finalColor = c; return; }
+  vec3 rgb = sampleWarp(vTextureCoord);
   // === URP LutBuilderHdr（HDR grading）+ UberPost 等價管線 ===
+  vec3 lin = vec3(srgb2lin(max(rgb.r, 0.0)), srgb2lin(max(rgb.g, 0.0)), srgb2lin(max(rgb.b, 0.0)));
   // uber：input *= postExposure（線性）；LUT 索引前 saturate(LinearToLogC(input))
   lin *= uExp;
   vec3 lg = vec3(0.241514 * log10f(max(5.555556 * lin.r, 1e-6)) + 0.584878,
@@ -5931,136 +5716,16 @@ void main() {
   float luma = dot(lin, vec3(0.2126, 0.7152, 0.0722));
   lin = vec3(luma) + uSat * (lin - vec3(luma));
   // uber：LinearToSRGB 輸出
-  outc = vec3(lin2srgb(clamp(lin.r, 0.0, 1.0)), lin2srgb(clamp(lin.g, 0.0, 1.0)), lin2srgb(clamp(lin.b, 0.0, 1.0)));
-  }
+  vec3 outc = vec3(lin2srgb(clamp(lin.r, 0.0, 1.0)), lin2srgb(clamp(lin.g, 0.0, 1.0)), lin2srgb(clamp(lin.b, 0.0, 1.0)));
   finalColor = vec4(outc * c.a, c.a);
 }
 `;
 let baPostFilter = null;
 let postWrap = null;
-
-// ---- 線性混合（實驗性，預設關閉）--------------------------------------
-// 動機：globalgamemanagers 的 PlayerSettings.m_ActiveColorSpace = 1 (Linear)，
-// 遊戲在線性空間做 alpha 混合，我們原本在 sRGB 空間混合，理論上會在所有半透明
-// 重疊處偏亮。實作：rgba16float RT + 載入期 sRGB 貼圖（loadSpineAtlas）+
-// 輸出級 lin2srgb（uLinIn，見下方 shader）。
-//
-// 2026-09-27 修復：舊 retargetTexturesLinear 在首次上傳後才改 source.format
-// （pixi internalFormat 只在首次上傳決定 → sRGB 解碼從未發生）又誤切
-// alphaMode（已預乘資料重複預乘）→ 輸出級再 lin2srgb = 重複轉換，整圖泛白
-// （Hanako 天光區 184 vs 實機 187 看似接近，實為高光溢出＋全圖 +12.5 階）。
-// 修後（Hanako，同條件）：天光區 151、純背景 139，无高光溢出，臉部有層次；
-// 與 kivo screen 版（156/139）幾乎一致——理論上就該如此（screen ≈ 線性加算
-// 再編碼的近似）。剩餘與實機（187/180）的全域亮度差與混合無關（所有版本
-// 皆然：貼圖抽取／模擬器亮度／未發現的 grade，待查），另案處理。
-// 開啟：URL hash 加 linearMix=1（另加 kivoFix=0 還原官方 additive 做對照）。
-const BA_LINEAR_MIX = /(?:^|&)linearMix=1/.test(location.hash + location.search);
-let linearRT = null;
-let linearScene = null;    // 線性 RT 內的場景容器（spine/bg/scene/extras）
-let linearSprite = null;   // 顯示線性 RT，掛 baPostFilter 負責 linear→sRGB
-
-// atlas 載入：pixi 貼圖 internalFormat 只在首次上傳決定，故線性模式的 sRGB
-// 格式必須在載入期指定（舊 retargetTexturesLinear 死於事後改），經 spine
-// atlasLoader 的 imageMetadata 注入。只在 BA_LINEAR_MIX 用；sRGB 預設路徑
-// 保持 RGBA8 原狀（loader 預設上傳預乘＋PMA blend，normal 槽數學正確）。
-async function loadSpineAtlas(url) {
-  if (BA_LINEAR_MIX) await Assets.load({ src: url, data: { imageMetadata: { format: 'rgba8unorm-srgb' } } });
-  else await Assets.load(url);
-}
-// （已刪除 retargetTexturesLinear：事後改格式不會重建 GPU 貼圖，見上註解）
-// 光槽 straight 貼圖複本（遊戲真值） --------------------------------------
-// 遊戲 PNG 是 straight alpha（亮 rgb＋低 alpha 分開存；全庫 743/780 頁含
-// 「亮＋半透明」texel，PMA 不可能），但 pixi loader 解碼＋上傳兩處都預乘
-// （createImageBitmap 預設＋UNPACK），把 additive 槽 rgb 按 texel alpha 削弱
-// （Hanako flare 255→61，wash 只剩約 1/4）；normal 槽因 PMA 一致性不受影響。
-// 修法：給官方 additive 的槽（__blendOrig===1，含眼睛光點這類非 light 名者）
-// 換上 straight 複本（createImageBitmap premultiplyAlpha:'none'＋
-// 不預乘上傳＋標準 blend factor）。normal 槽完全不動。
-// blend 決策（kivo screen vs 官方 additive）是另一層，與貼圖正誤無關。
-// 複本直接換 attachment region 的 spine texture（transformAttachments 每幀從
-// 這裡取值，一次掛載永久有效；flare attachment 經靜態驗證不切換）。
-// 貼圖被銷毀後（切 lobby）下次 prepare 重建重掛。
-async function straightPageTexture(pageUrl) {
-  const blob = await (await fetchRetry(pageUrl)).blob();
-  const bmp = await createImageBitmap(blob, { premultiplyAlpha: 'none' });
-  const src = new ImageSource({
-    resource: bmp,
-    alphaMode: 'premultiply-alpha-in-shader',
-    format: BA_LINEAR_MIX ? 'rgba8unorm-srgb' : 'rgba8unorm',
-  });
-  try {
-    src.style.addressModeU = 'clamp-to-edge';
-    src.style.addressModeV = 'clamp-to-edge';
-  } catch {}
-  return new Texture({ source: src });
-}
-// 已 patch 過的 region（跨 skeleton 共享 atlas 時同一 region 只處理一次；
-// 貼圖被銷毀後（切 lobby）下次 prepare 會重建重掛）。
-const _straightPatchedRegions = new Set();
-async function prepareStraightAdditives(obj) {
-  try {
-    if (!obj?.skeleton || !obj.__atlasUrl) return;
-    const flares = obj.skeleton.slots.filter(s =>
-      (obj.__blendOrig?.get(s.data.name) ?? s.data.blendMode) === 1);
-    if (!flares.length) return;
-    obj.__addSlots = flares;
-    const txt = await (await fetchRetry(obj.__atlasUrl)).text();
-    const lines = txt.split('\n');
-    const base = obj.__atlasUrl.slice(0, obj.__atlasUrl.lastIndexOf('/') + 1);
-    const pageSet = new Set();
-    for (let i = 0; i < lines.length; i++) {
-      if (/\.png\s*$/.test(lines[i]) && lines.slice(i + 1, i + 4).some(l => l.startsWith('size:'))) {
-        pageSet.add(lines[i].trim());
-      }
-    }
-    // region 直貼圖：直接換 attachment region 的 spine texture（唯一真相來源，
-    // transformAttachments 每幀從這裡取值——改 cacheData 會被每幀洗掉）。
-    // 同一 region 只掛一次；貼圖已銷毀則重建。
-    const clones = new Map();
-    for (const s of flares) {
-      let att = null;
-      try { att = s.getAttachment(); } catch { continue; }
-      const region = att?.region;
-      if (!region?.page?.name) continue;
-      const cur = region.texture?.texture;
-      if (_straightPatchedRegions.has(region) && cur && !cur.destroyed) continue;
-      const pn = region.page.name;
-      if (!clones.has(pn)) {
-        try { clones.set(pn, await straightPageTexture(base + pn)); }
-        catch (e) { log('[flare]直貼圖失敗 ' + pn + ': ' + (e?.message || e)); continue; }
-      }
-      const spineTex = SpineTexture.from(clones.get(pn).source);
-      region.texture = spineTex;
-      _straightPatchedRegions.add(region);
-      log('[flare]直掛 ' + s.data.name + ' <- ' + pn);
-    }
-    obj.__straightPages = [...pageSet];
-  } catch (e) { log('[flare]prepare 失敗: ' + (e?.message || e)); }
-}
 // pixi v8 的 RenderGroup 忽略 root stage 上的 filter（實測 built-in 亦無作用），
 // 故把動態場景全部掛到 stage 下的 wrapper，filter 綁在 wrapper 上。
 function ensurePostWrap() {
   if (!postWrap) { postWrap = new Container(); postWrap.name = 'postWrap'; app.stage.addChild(postWrap); }
-  // 線性混合模式：場景收進「不掛在 stage 上」的 linearScene（只當線性 RT 的渲染
-  // 來源），postWrap 只放顯示該 RT 的 linearSprite。絕不能讓 linearScene 仍是
-  // postWrap 的子節點 —— 那會讓場景被畫兩次（一次進 RT、一次直接上 stage），
-  // 半透明區域重複疊加造成整片泛白。
-  if (BA_LINEAR_MIX) {
-    if (!linearScene) { linearScene = new Container(); linearScene.name = 'linearScene'; }
-    if (linearScene.parent) linearScene.parent.removeChild(linearScene);
-    if (!linearSprite) { linearSprite = new Sprite(Texture.EMPTY); linearSprite.name = 'linearRTView'; postWrap.addChild(linearSprite); }
-    for (const c of [...app.stage.children]) {
-      if (c === postWrap) continue;
-      app.stage.removeChild(c);
-      linearScene.addChild(c);
-    }
-    for (const c of [...postWrap.children]) {
-      if (c === linearSprite) continue;
-      postWrap.removeChild(c);
-      linearScene.addChild(c);
-    }
-    return postWrap;
-  }
   for (const c of [...app.stage.children]) {
     if (c === postWrap) continue;
     app.stage.removeChild(c);
@@ -6068,30 +5733,12 @@ function ensurePostWrap() {
   }
   return postWrap;
 }
-
-// 依畫布尺寸建立/更新線性 RenderTexture，並把 linearSprite 對齊到全螢幕。
-function ensureLinearRT() {
-  if (!BA_LINEAR_MIX || !linearSprite) return null;
-  const w = Math.max(1, app.renderer.width), h = Math.max(1, app.renderer.height);
-  if (!linearRT) {
-    linearRT = RenderTexture.create({ width: w, height: h, format: 'rgba16float', scaleMode: 'linear', antialias: false });
-    linearSprite.texture = linearRT;
-  } else if (linearRT.width !== w || linearRT.height !== h) {
-    linearRT.resize(w, h);
-  }
-  linearSprite.width = w; linearSprite.height = h;
-  // 線性模式下濾鏡必須常駐：它同時是 linear→sRGB 的輸出級。
-  if (baPostFilter && !postWrap.filters.includes(baPostFilter)) postWrap.filters = [baPostFilter];
-  return linearRT;
-}
 function ensurePostFilter() {
   if (baPostFilter) return baPostFilter;
   try {
     const baPostUniforms = new UniformGroup({
       uOn: { value: 0, type: 'f32' },
       uExp: { value: 1, type: 'f32' },
-      uLinIn: { value: BA_LINEAR_MIX ? 1 : 0, type: 'f32' },
-      uGrade: { value: /(?:^|&)grade=1/.test(location.hash + location.search) ? 1 : 0, type: 'f32' },
       uCon: { value: 1, type: 'f32' },
       uSat: { value: 1, type: 'f32' },
       uChroma: { value: 0, type: 'f32' },
@@ -6167,21 +5814,20 @@ function applyPostGrade(lobby) {
   if (!ensurePostFilter()) return null;
   const cfg = baPostOn ? baPostCfgFor(lobby) : null;
   const w = ensurePostWrap();
-  // 線性混合：濾鏡同時是 linear→sRGB 輸出級，即使關閉後製也必須常駐
-  if (!cfg && !BA_LINEAR_MIX) { w.filters = []; return null; }
+  if (!cfg) { syncFlashFilters(); return null; }
   const u = baPostFilter.resources.baPostUniforms.uniforms;
-  u.uOn = cfg ? 1 : 0;
-  u.uExp = POST_MODE === 'mild' ? 1 : Math.pow(cfg.e ?? 1, exposureVolumeWeight());
-  u.uCon = cfg?.c ?? 1;
-  u.uSat = cfg?.s ?? 1;
-  u.uChroma = cfg?.ch ?? 0;
-  u.uGain = cfg?.g || [1, 1, 1];
-  u.uLift = cfg?.l || [0, 0, 0];
-  u.uGam = cfg?.gm || [1, 1, 1];
-  u.uCF = cfg?.cf || [1, 1, 1];
-  u.uPanini = postPaniniParams(cfg || { p: [0, 0] });
+  u.uOn = 1;
+  u.uExp = POST_MODE === 'mild' ? 1 : (cfg.e ?? 1);
+  u.uCon = cfg.c ?? 1;
+  u.uSat = cfg.s ?? 1;
+  u.uChroma = cfg.ch ?? 0;
+  u.uGain = cfg.g || [1, 1, 1];
+  u.uLift = cfg.l || [0, 0, 0];
+  u.uGam = cfg.gm || [1, 1, 1];
+  u.uCF = cfg.cf || [1, 1, 1];
+  u.uPanini = postPaniniParams(cfg);
   baPostFilter.resources.baPostUniforms.update();
-  w.filters = [baPostFilter];
+  syncFlashFilters();   // flashBlur（DOF）需與 baPostFilter 共存，統一走 sync
   return { lobby, mode: POST_MODE };
 }
 // CPU 對照版：與 shader 完全同序（空間效果 chroma/panini 不在內，驗證時 config 需拿掉 ch/p）
@@ -6189,7 +5835,7 @@ function baPostCpu(rgb, cfg) {
   const G2L = c => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
   const L2G = c => c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
   const MID = 0.4135884;
-  const e = POST_MODE === 'mild' ? 1 : Math.pow(cfg.e ?? 1, exposureVolumeWeight());
+  const e = POST_MODE === 'mild' ? 1 : (cfg.e ?? 1);
   let lin = rgb.map(v => G2L(Math.max(v, 0)));
   lin = lin.map(v => v * e);
   let lg = lin.map(v => 0.241514 * Math.log10(Math.max(5.555556 * v, 1e-6)) + 0.584878);
@@ -6229,11 +5875,9 @@ async function loadScene(entry) {
       const base = `assets/scene/${currentLobby}/`;
       const skel = assetUrl(base + res.skel), atlas = assetUrl(base + res.atlas);
       await Assets.load(skel);
-      await loadSpineAtlas(atlas);
+      await Assets.load(atlas);
       const obj = Spine.from({ skeleton: skel, atlas });
       fixAdditiveSlots(obj);
-      obj.__atlasUrl = atlas;
-      prepareStraightAdditives(obj);
       obj.skelName = (res.skel.startsWith('./') ? res.skel.slice(2) : res.skel).replace(/\.(skel|json)$/i, '').toLowerCase();
       applySkeletonMix(obj, obj.skelName);
       // 不在此自動播放——由 startBgSequence 依 BA 時間軸統一驅動（避免搶在
@@ -6656,15 +6300,10 @@ async function loadLobby(name) {
     const charAssets = entry.skel && entry.atlas
       ? [assetUrl(`assets/spine/${name}/${entry.skel}`), assetUrl(`assets/spine/${name}/${entry.atlas}`)]
       : [];
-    if (charAssets.length) {
-      await Assets.load(charAssets[0]);
-      await loadSpineAtlas(charAssets[1]);
-    }
+    await Promise.all(charAssets.map(a => Assets.load(a)));
     if (!alive()) return;   // 被超車：不可再建 spine，否則蓋掉新大廳
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
     fixAdditiveSlots(spine);
-    spine.__atlasUrl = charAssets[1];
-    prepareStraightAdditives(spine);
     const sch = SCHEDULE?.lobbies?.[name];
     currentLobbyVoiceFolder = sch?.voiceFolder || null;
     voiceSkip.clear();
@@ -6703,28 +6342,15 @@ async function loadLobby(name) {
     : !!(entry.bg) || !!(entry.scene && entry.scene.skel && entry.scene.skel !== entry.skel);
   // 圖層順序：bg 最底 → spine（本體）中 → scene（特寫）最頂（前景）。其餘 UI/對話在互動時
   // 才 addChild，自然位於最上層。
-  // RACE 修復：UTILITY ticker 的 ensurePostWrap 可能已把三者搬進 postWrap/linearScene
-  // （await loadScene 期間必然 tick 數次），直接對 app.stage setChildIndex 會因
-  // 「child 不在該容器」而拋錯，導致整間 lobby 卡在載入中（Yuzu/Akari/Wakamo 等
-  // 有 scene/bg 的 lobby 必中）。先統一歸位到同一父層再排序。
-  const layerParent = (BA_LINEAR_MIX && linearScene)
-    ? linearScene
-    : (postWrap && (baPostOn || [bg, spine, scene].some(o => o && o.parent === postWrap)) ? postWrap : app.stage);
-  for (const o of [bg, spine, scene]) {
-    if (!o) continue;
-    if (o.parent && o.parent !== layerParent) o.parent.removeChild(o);
-    if (!o.parent) layerParent.addChild(o);
-  }
-  const onLayer = (o) => o && o.parent === layerParent;
-  if (onLayer(bg) && onLayer(scene)) {
-    layerParent.setChildIndex(bg, 0);
-    layerParent.setChildIndex(spine, 1);
-    layerParent.setChildIndex(scene, layerParent.children.length - 1);
-  } else if (onLayer(scene)) {
-    layerParent.setChildIndex(scene, layerParent.children.length - 1);
-    layerParent.setChildIndex(spine, Math.max(0, layerParent.children.length - 2));
-  } else if (onLayer(spine)) {
-    layerParent.setChildIndex(spine, Math.max(0, layerParent.children.length - 1));
+  if (bg && scene) {
+    app.stage.setChildIndex(bg, 0);
+    app.stage.setChildIndex(spine, 1);
+    app.stage.setChildIndex(scene, app.stage.children.length - 1);
+  } else if (scene) {
+    app.stage.setChildIndex(scene, app.stage.children.length - 1);
+    app.stage.setChildIndex(spine, app.stage.children.length - 2 >= 0 ? app.stage.children.length - 2 : 0);
+  } else {
+    app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 1));
   }
   fitted = false;
   // frame on the Idle pose (mesh geometry only exists after a render), then play the intro
@@ -7539,22 +7165,16 @@ async function init() {
 
   // camera smoothing
   app.ticker.add(() => {
-    if (baPostOn || BA_LINEAR_MIX) ensurePostWrap();
+    if (baPostOn) ensurePostWrap();
     if (spine && fitted) applyCamera(CAMERA.weight);
+    // resize 自癒守衛：resize 事件後 fitScene 走 80ms debounce，pixi 的
+    // renderer.resize 走 rAF 佇列——rAF 晚於 debounce 時 fit 讀到舊尺寸且無人補救。
+    // 每 tick 比對尺寸，任何漏掉的 resize 一個 tick 內補 fit。
+    if (spine && fitted && !exporting
+        && (app.renderer.width !== lastFitW || app.renderer.height !== lastFitH)) fitScene();
     tickWhiteFlash();
     tickExtraVisibility();
-  }, null, UPDATE_PRIORITY.UTILITY);
-  // 線性混合：場景先渲染進 rgba16float RT（Priority.UTILITY 先於 Application
-  // 自己的 LOW 渲染），再由 postWrap 的濾鏡做 linear→sRGB 輸出到畫布。
-  if (BA_LINEAR_MIX) {
-    app.ticker.add(() => {
-      if (!linearScene || !app.renderer) return;
-      const rt = ensureLinearRT();
-      if (!rt) return;
-      try { app.renderer.render({ container: linearScene, target: rt, clear: true }); }
-      catch (e) { if (!app.__linErr) { app.__linErr = 1; console.warn('[linearMix] render failed:', e && e.message); } }
-    }, null, UPDATE_PRIORITY.UTILITY + 1);
-  }
+  });
   // Re-fit on window resize (resizeTo resizes the canvas, but charScale/sceneScale
   // are only recomputed in fitScene — re-run it so the layout doesn't go stale
   // until the next character switch).
@@ -7629,7 +7249,7 @@ async function init() {
     if (baPostOn) {
       baPostOn = false;
       try { localStorage.setItem('ba_post', '0'); } catch {}
-      if (postWrap) postWrap.filters = [];
+      syncFlashFilters();
     } else {
       baPostOn = true;
       try { localStorage.setItem('ba_post', '1'); } catch {}
