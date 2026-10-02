@@ -1,0 +1,670 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>hdr unit</title>
+</head>
+<body style="margin:0">
+<!--
+  受控單元測試：docs/game_shader_ref/README.md 的像素級公式在 pixi v8/spine-pixi 上的各環節。
+  只用 readPixels 對比 CPU 黃金模型，不經截圖/視窗合成，完全確定性。
+    T0 環境＋readPixels 冒煙
+    T1 rgba16float BufferImageSource 上傳保真（黑底 out=src 直看摺疊）
+    T2 blend 慣例：PMA 資料 + 'normal' = ONE, OneMinusSrcAlpha（遊戲 blend）
+    T2b 同資料宣告 straight 時的行為（NPM 基準）
+    T3 真實 toplight region 烘焙 vs CPU 黃金模型（attA=0.302；僅畫布內取樣）
+    T4 v8 Sprite tint alpha 行為（資訊性）＋T4c sprite.alpha 摺疊測量
+    T5 float RT 線性合成＋HDR 持續性＋自訂 shader sRGB encode（bilinear 感知黃金模型）
+    T6 真實 Spine（spine-pixi darkTint batcher）：toplight 烘焙後 attachment alpha
+       1.0 vs 0.302 的逐像素比值 —— colorBit PMA 摺疊假說的決定性測試（黑底 dst=0）；
+       並檢查 sp.update(0) 後 att.color.a 是否被 runtime 覆寫
+  結果：每測試一行 UNIT ...，最後一行 UNIT_SUMMARY {json}
+-->
+<script type="module">
+import {
+  Application, Sprite, Texture, BufferImageSource, Color, Assets,
+  RenderTexture, Mesh, MeshGeometry, Shader, GlProgram,
+} from 'pixi.js';
+import { Spine, SpineTexture } from '@esotericsoftware/spine-pixi-v8';
+
+const GAMMA_TO_LINEAR = (x) => x <= 0.04045 ? x/12.92 : Math.pow((x+0.055)/1.055, 2.4);
+const LINEAR_TO_GAMMA = (x) => x <= 0.0031308 ? x*12.92 : 1.055*Math.pow(x, 1/2.4) - 0.055;
+
+const _f32 = new Float32Array(1), _i32 = new Int32Array(_f32.buffer);
+const toHalf = (val) => {
+  _f32[0] = val; const x = _i32[0];
+  let bits = (x >> 16) & 0x8000;
+  let m = (x >> 12) & 0x07ff; const e = (x >> 23) & 0xff;
+  if (e < 103) return bits;
+  if (e > 142) { bits |= 0x7c00; return bits; }
+  if (e === 142) { bits |= ((x & 0x007fffff) | 0x00800000) >> 13; return bits; }
+  bits |= ((e - 112) << 10) | (m >> 1); bits += (m & 1); return bits;
+};
+const fromHalf = (h) => {
+  const s = (h & 0x8000) >> 15, e = (h & 0x7c00) >> 10, m = h & 0x03ff;
+  if (e === 0) return (m ? (m / 1024) * Math.pow(2, -14) : 0) * (s ? -1 : 1);
+  if (e === 31) return NaN;
+  return Math.pow(2, e - 15) * (1 + m / 1024) * (s ? -1 : 1);
+};
+
+const W = 128, H = 128;
+let gl = null;
+let pass = 0, fail = 0, skip = 0;
+const results = [];
+
+function report(id, ok, detail) {
+  results.push({ id, ok, detail });
+  if (ok) pass++; else fail++;
+  console.log(`UNIT ${id} ${ok ? 'PASS' : 'FAIL'} :: ${detail}`);
+}
+function info(id, detail) {
+  results.push({ id, ok: true, detail });
+  pass++;
+  console.log(`UNIT ${id} INFO :: ${detail}`);
+}
+function skipTest(id, why) {
+  results.push({ id, ok: null, detail: why });
+  skip++;
+  console.log(`UNIT ${id} SKIP :: ${why}`);
+}
+
+function readCanvas() {
+  const buf = new Uint8Array(W * H * 4);
+  gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+  const out = new Uint8Array(W * H * 4);
+  for (let y = 0; y < H; y++) out.set(buf.subarray((H - 1 - y) * W * 4, (H - y) * W * 4), y * W * 4);
+  return out;
+}
+const px = (img, x, y) => { const i = (y * W + x) * 4; return [img[i], img[i+1], img[i+2], img[i+3]]; };
+const close = (a, b, tol) => Math.abs(a - b) <= tol;
+const median = (arr) => { if (!arr.length) return NaN; const s = [...arr].sort((a, b) => a - b); return s[s.length >> 1]; };
+
+const app = new Application();
+await app.init({
+  preference: 'webgl', width: W, height: H,
+  backgroundColor: 0x000000, backgroundAlpha: 1,
+  antialias: false, preserveDrawingBuffer: true, autoStart: false,
+});
+document.body.appendChild(app.canvas);
+gl = app.renderer.gl;
+const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+console.log('UNIT T0 renderer=' + app.renderer.type +
+  ' gl=' + gl.getParameter(gl.VERSION) +
+  ' gpu=' + (dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '?'));
+app.render();
+{
+  const c = px(readCanvas(), 64, 64);
+  report('T0-smoke', c[0] === 0 && c[1] === 0 && c[2] === 0 && c[3] === 255, `clear black -> ${c}`);
+}
+
+// ---------- 共用：合成 8x8 來源（每列一個 (rgb,a) 案例）＋烘焙函式 ----------
+const CASES = [
+  [0.5, 1.0], [0.5, 0.5], [0.25, 0.75], [0.0, 0.5],
+  [0.9, 0.25], [0.302, 0.302], [0.75, 1.0], [0.05, 0.05],
+];
+function syntheticSource(alphaMode) {
+  const data = new Uint16Array(8 * 8 * 4);
+  for (let y = 0; y < 8; y++) {
+    const [v, a] = CASES[y];
+    for (let x = 0; x < 8; x++) {
+      const j = (y * 8 + x) * 4;
+      data[j] = toHalf(v); data[j+1] = toHalf(v); data[j+2] = toHalf(v); data[j+3] = toHalf(a);
+    }
+  }
+  return new BufferImageSource({
+    resource: data, width: 8, height: 8, format: 'rgba16float', alphaMode,
+  });
+}
+function renderScene(list) {
+  app.stage.removeChildren();
+  for (const c of list) app.stage.addChild(c);
+  app.render();
+}
+
+// T1
+{
+  const tex = new Texture({ source: syntheticSource('premultiplied-alpha') });
+  const spr = new Sprite(tex); spr.position.set(8, 8);
+  renderScene([spr]);
+  const img = readCanvas();
+  let ok = true; const rows = [];
+  for (let y = 0; y < 8; y++) {
+    const [v] = CASES[y];
+    const got = px(img, 12, 8 + y)[0] / 255;
+    const okRow = close(got, v, 0.006);
+    if (!okRow) ok = false;
+    rows.push(`r${y}(a${CASES[y][1]}):got${got.toFixed(4)},exp${v}`);
+  }
+  report('T1-upload-pma', ok, rows.join(' | '));
+}
+
+// T2
+{
+  const g = 0x80 / 255;
+  const bg = new Sprite(Texture.WHITE);
+  bg.tint = new Color([g, g, g, 1]); bg.width = W; bg.height = H;
+  const tex = new Texture({ source: syntheticSource('premultiplied-alpha') });
+  const spr = new Sprite(tex); spr.position.set(8, 8);
+  renderScene([bg, spr]);
+  const img = readCanvas();
+  const dstGot = px(img, 8, 100)[0] / 255;
+  let ok = true; const rows = [];
+  for (let y = 0; y < 8; y++) {
+    const [v, a] = CASES[y];
+    const got = px(img, 12, 8 + y)[0] / 255;
+    const exp = Math.min(1, v + dstGot * (1 - a));
+    const okRow = close(got, exp, 0.006);
+    if (!okRow) ok = false;
+    rows.push(`r${y}:got${got.toFixed(4)},PMA${exp.toFixed(4)}`);
+  }
+  report('T2-blend-pma', ok, `dst=${dstGot.toFixed(4)} | ` + rows.join(' | '));
+}
+
+// T2b
+{
+  const g = 0x80 / 255;
+  const bg = new Sprite(Texture.WHITE);
+  bg.tint = new Color([g, g, g, 1]); bg.width = W; bg.height = H;
+  const tex = new Texture({ source: syntheticSource('no-premultiply-alpha') });
+  const spr = new Sprite(tex); spr.position.set(40, 8);
+  renderScene([bg, spr]);
+  const img = readCanvas();
+  const dstGot = px(img, 8, 100)[0] / 255;
+  const got = px(img, 44, 8 + 1)[0] / 255;
+  const expPMA = Math.min(1, 0.5 + dstGot * 0.5);
+  const expNPM = Math.min(1, 0.5 * 0.5 + dstGot * 0.5);
+  const like = close(got, expPMA, 0.006) ? 'PMA-like' : close(got, expNPM, 0.006) ? 'NPM-like' : 'OTHER';
+  report('T2b-npm-baseline', true, `straight-declared row1: got${got.toFixed(4)} PMA${expPMA.toFixed(4)} NPM${expNPM.toFixed(4)} => ${like}`);
+}
+
+// T3：真實 toplight region（attA=0.302）烘焙 vs CPU；僅在畫布 128x128 內取樣
+{
+  try {
+    const atlasText = await (await fetch('/assets/spine/Hanako_home/Hanako_home.atlas')).text();
+    const lines = atlasText.split(/\r?\n/);
+    let region = null;
+    const i0 = lines.findIndex((l) => l.trim() === 'Hanako_home.png');
+    for (let i = i0 + 1; i < lines.length; i++) {
+      const l = lines[i];
+      if (!l.trim()) continue;
+      if (!/^\s/.test(l)) {
+        if (/\.png$/.test(l.trim())) break;
+        if (l.trim() === 'toplight') {
+          const props = {};
+          for (let k = i + 1; k <= i + 6; k++) {
+            const m = (lines[k] || '').trim().match(/^(\w+):\s*(.+)$/);
+            if (m) props[m[1]] = m[2];
+          }
+          region = props; break;
+        }
+      }
+    }
+    if (!region) throw new Error('toplight region 未找到');
+    const [rx, ry] = region.xy.split(',').map(Number);
+    const [rw, rh] = region.size.split(',').map(Number);
+    const attA = 0.302;
+    const F = GAMMA_TO_LINEAR(1 / attA) * attA;
+    console.log(`UNIT T3-region rotate=${region.rotate} xy=${rx},${ry} size=${rw}x${rh} F=${F.toFixed(4)}`);
+
+    const bmp = await createImageBitmap(await (await fetch('/assets/spine/Hanako_home/Hanako_home.png')).blob(), { premultiplyAlpha: 'none' });
+    const cnv = document.createElement('canvas'); cnv.width = rw; cnv.height = rh;
+    const c2 = cnv.getContext('2d', { willReadFrequently: true });
+    c2.drawImage(bmp, rx, ry, rw, rh, 0, 0, rw, rh);
+    const d = c2.getImageData(0, 0, rw, rh).data;
+
+    const gold = new Uint16Array(rw * rh * 4);
+    for (let i = 0, j = 0; i < d.length; i += 4, j += 4) {
+      const a = d[i+3] / 255;
+      gold[j]   = toHalf(GAMMA_TO_LINEAR(d[i]/255) * a * F);
+      gold[j+1] = toHalf(GAMMA_TO_LINEAR(d[i+1]/255) * a * F);
+      gold[j+2] = toHalf(GAMMA_TO_LINEAR(d[i+2]/255) * a * F);
+      gold[j+3] = toHalf(a * attA);
+    }
+    const src = new BufferImageSource({
+      resource: gold, width: rw, height: rh,
+      format: 'rgba16float', alphaMode: 'premultiplied-alpha',
+    });
+    try { src.style.addressModeU = 'clamp-to-edge'; src.style.addressModeV = 'clamp-to-edge'; } catch {}
+    const spr = new Sprite(new Texture({ source: src })); spr.position.set(0, 0);
+    renderScene([spr]);
+    const img = readCanvas();
+
+    const stride = 4;
+    let n = 0, sumErr = 0, maxErr = 0, bad = 0, clamped = 0, leak = 0, nan = 0, worst = null;
+    for (let y = 0; y < Math.min(rh, H); y += stride) {
+      for (let x = 0; x < Math.min(rw, W); x += stride) {
+        const j = (y * rw + x) * 4;
+        const gLin = fromHalf(gold[j]);
+        if (!Number.isFinite(gLin)) { nan++; continue; }
+        const exp = Math.min(1, gLin);
+        const got = px(img, x, y);
+        const err = Math.abs(got[0] / 255 - exp);
+        n++; sumErr += err;
+        if (err > maxErr) { maxErr = err; worst = { x, y, got: got[0], exp: +exp.toFixed(4) }; }
+        if (err > 0.02) bad++;
+        if (gLin > 1) clamped++;
+        if (fromHalf(gold[j+3]) === 0 && gLin > 0) leak++;
+      }
+    }
+    const meanErr = sumErr / n;
+    report('T3-bake-fidelity', nan === 0 && meanErr < 0.004 && bad / n < 0.01,
+      `n=${n} mean=${meanErr.toFixed(5)} max=${maxErr.toFixed(4)} bad>0.02:${bad}(${(100*bad/n).toFixed(1)}%) hdrClamp=${(100*clamped/n).toFixed(1)}% zeroA-leakTexels=${leak} nan=${nan} worst=${JSON.stringify(worst)}`);
+  } catch (e) {
+    skipTest('T3-bake-fidelity', 'exception: ' + (e?.message || e));
+  }
+}
+
+// T4：v8 Sprite tint alpha（資訊性——plain batcher 不摺疊 tint Color alpha）＋T4c sprite.alpha
+{
+  const g = 0x80 / 255;
+  const bg = new Sprite(Texture.WHITE);
+  bg.tint = new Color([g, g, g, 1]); bg.width = W; bg.height = H;
+  const tex = new Texture({ source: syntheticSource('premultiplied-alpha') });
+  const spr = new Sprite(tex); spr.position.set(8, 8);
+  spr.tint = new Color([1, 1, 1, 0.302]);
+  const spr2 = new Sprite(tex); spr2.position.set(60, 8);
+  spr2.tint = new Color([1, 1, 1, 0]);
+  const spr3 = new Sprite(tex); spr3.position.set(60, 40);
+  spr3.alpha = 0.302;                       // T4c：view alpha（確定會進 groupAlpha）
+  renderScene([bg, spr, spr2, spr3]);
+  const img = readCanvas();
+  const dstGot = px(img, 8, 100)[0] / 255;
+  const [v, a] = CASES[6];                  // rgb0.75 a1.0
+  const got = px(img, 12, 8 + 6)[0] / 255;
+  const expFold = Math.min(1, (v * 0.302) + dstGot * (1 - a * 0.302));
+  const expNoFold = Math.min(1, v + dstGot * (1 - a));
+  const like = close(got, expFold, 0.006) ? 'FOLDED(x0.302)' : close(got, expNoFold, 0.006) ? 'NO-FOLD' : 'OTHER';
+  const got2 = px(img, 64, 12)[0] / 255;
+  const got3 = px(img, 64, 40 + 6)[0] / 255;
+  const exp3 = Math.min(1, v * 0.302 + dstGot * (1 - 0.302));
+  info('T4-tint-vs-view-alpha',
+    `tint.a=0.302: got${got.toFixed(4)} => ${like} | tint.a=0: got${got2.toFixed(4)}(${got2 < 0.01 ? 'gone' : 'visible'}) | view alpha=0.302: got${got3.toFixed(4)} fold-model${exp3.toFixed(4)} => ${close(got3, exp3, 0.006) ? 'FOLDED' : 'OTHER'}`);
+}
+
+// T5：float RT 合成 + HDR 持續性 + 自訂 shader encode（bilinear 感知黃金模型）
+{
+  try {
+    const rt = RenderTexture.create({ width: 32, height: 32, format: 'rgba16float' });
+    const bgData = new Uint16Array(4);
+    bgData[0] = bgData[1] = bgData[2] = toHalf(0.25); bgData[3] = toHalf(1);
+    const bgSpr = new Sprite(new Texture({ source: new BufferImageSource({ resource: bgData, width: 1, height: 1, format: 'rgba16float', alphaMode: 'premultiplied-alpha' }) }));
+    bgSpr.width = 32; bgSpr.height = 32;
+    const sData = new Uint16Array(2 * 2 * 4);
+    const set = (i, r, a) => { sData[i*4] = toHalf(r); sData[i*4+1] = toHalf(r); sData[i*4+2] = toHalf(r); sData[i*4+3] = toHalf(a); };
+    set(0, 0.5, 0.5); set(1, 1.13, 0.87); set(2, 0.5, 0.5); set(3, 1.13, 0.87);
+    const sSpr = new Sprite(new Texture({ source: new BufferImageSource({ resource: sData, width: 2, height: 2, format: 'rgba16float', alphaMode: 'premultiplied-alpha' }) }));
+    sSpr.position.set(4, 4); sSpr.width = 2; sSpr.height = 2;
+
+    app.stage.removeChildren();
+    app.stage.addChild(bgSpr); app.stage.addChild(sSpr);
+    app.renderer.render({ container: app.stage, target: rt, clear: true });
+
+    const kData = new Uint16Array(4); kData[3] = toHalf(0.1);
+    const kSpr = new Sprite(new Texture({ source: new BufferImageSource({ resource: kData, width: 1, height: 1, format: 'rgba16float', alphaMode: 'premultiplied-alpha' }) }));
+    kSpr.width = 32; kSpr.height = 32;
+    app.stage.removeChildren(); app.stage.addChild(kSpr);
+    app.renderer.render({ container: app.stage, target: rt, clear: false });
+
+    // 黃金 rt 場（線性）：texel x=4 → A=0.5625；x=5 → B=1.04625；其餘 bg=0.225
+    const GOLD = (tx, ty) => {
+      if (tx === 4) return (0.5 + 0.25 * (1 - 0.5)) * 0.9;
+      if (tx === 5) return Math.max(0.225, Math.min(65504, (1.13 + 0.25 * (1 - 0.87)) * 0.9));
+      return 0.25 * 0.9;
+    };
+    const u8Rt = (tx) => tx === 5 ? Math.min(1, 1.13 + 0.25 * (1 - 0.87)) * 0.9 : GOLD(tx, 0);
+    // 對 rt 的 bilinear 取樣（同 GPU LINEAR 濾器，非冪等座標）
+    const sampleGold = (fx, fy, fld) => {
+      const x0 = Math.floor(fx - 0.5), y0 = Math.floor(fy - 0.5);
+      const wx = (fx - 0.5) - x0, wy = (fy - 0.5) - y0;
+      const cl = (v) => Math.max(0, Math.min(31, v));
+      let acc = 0;
+      for (const [dy, wy2] of [[0, 1 - wy], [1, wy]]) {
+        for (const [dx, wx2] of [[0, 1 - wx], [1, wx]]) {
+          acc += fld(cl(x0 + dx), cl(y0 + dy)) * wx2 * wy2;
+        }
+      }
+      return acc;
+    };
+    const encode = (lin) => Math.min(1, LINEAR_TO_GAMMA(lin));
+
+    const vert = `in vec2 aPosition; in vec2 aUV; out vec2 vUV;
+      void main(void){ vUV = vec2(aUV.x, 1.0 - aUV.y); gl_Position = vec4(aPosition, 0.0, 1.0); }`;
+    const frag = `precision highp float;
+      in vec2 vUV; out vec4 finalColor; uniform sampler2D uTexture;
+      vec3 l2s(vec3 c){ return mix(c * 12.92, 1.055 * pow(max(c, vec3(0.0)), vec3(1.0/2.4)) - 0.055, step(0.0031308, c)); }
+      void main(void){ vec4 c = texture(uTexture, vUV); finalColor = vec4(l2s(c.rgb), 1.0); }`;
+    const geo = new MeshGeometry({
+      positions: new Float32Array([-1,-1, 1,-1, 1,1, -1,1]),
+      uvs: new Float32Array([0,0, 1,0, 1,1, 0,1]),
+      indices: new Uint32Array([0,1,2, 0,2,3]),
+    });
+    const shader = new Shader({
+      glProgram: GlProgram.from({ vertex: vert, fragment: frag }),
+      resources: { uTexture: rt.source },
+    });
+    const quad = new Mesh({ geometry: geo, shader });
+    renderScene([quad]);
+    const img = readCanvas();
+
+    let ok = true; const rows = [];
+    for (const [sx, sy, tag] of [[18, 18, 'A/B-mix'], [21, 18, 'B/bg-mix'], [100, 100, 'bg']]) {
+      const fx = (sx + 0.5) / W * 32, fy = (sy + 0.5) / H * 32;
+      const got = px(img, sx, sy)[0] / 255;
+      const expF = encode(sampleGold(fx, fy, GOLD));
+      const exp8 = encode(sampleGold(fx, fy, u8Rt));
+      const okF = close(got, expF, 0.008);
+      if (!okF) ok = false;
+      rows.push(`${tag}: got${got.toFixed(4)} floatRt${expF.toFixed(4)} u8Rt${exp8.toFixed(4)}`);
+    }
+    report('T5-rt-encode', ok, rows.join(' | ') + ` => floatRT=${ok ? 'YES' : 'NO'}`);
+  } catch (e) {
+    skipTest('T5-rt-encode', 'exception: ' + (e?.message || e));
+  }
+}
+
+// T6：真實 Spine + darkTint batcher —— toplight 烘焙＋attachment alpha A/B 摺疊比值（黑底）
+{
+  try {
+    const skelUrl = '/assets/spine/Hanako_home/Hanako_home.skel';
+    const atlasUrl = '/assets/spine/Hanako_home/Hanako_home.atlas';
+    await Assets.load(skelUrl);
+    await Assets.load(atlasUrl);
+    const base = atlasUrl.slice(0, atlasUrl.lastIndexOf('/') + 1);
+    const sp = Spine.from({ skeleton: skelUrl, atlas: atlasUrl, scale: 0.05 });
+
+    // 烘焙 toplight（其餘全隱藏）
+    let toplight = null, attA = 1, att = null, F = 1;
+    for (const slot of sp.skeleton.slots) {
+      if (slot.data.name === 'toplight') {
+        att = slot.getAttachment();
+        const region = att?.region;
+        if (!region || !region.page) throw new Error('toplight 無 region');
+        attA = att.color?.a ?? 1;
+        const blob = await (await fetch(base + region.page.name)).blob();
+        const bmp = await createImageBitmap(blob, { premultiplyAlpha: 'none' });
+        const [rx, ry2] = [region.x, region.y];
+        const rw = region.width, rh = region.height;
+        const cnv = document.createElement('canvas'); cnv.width = rw; cnv.height = rh;
+        const c2 = cnv.getContext('2d', { willReadFrequently: true });
+        c2.drawImage(bmp, rx, ry2, rw, rh, 0, 0, rw, rh);
+        const d = c2.getImageData(0, 0, rw, rh).data;
+        F = GAMMA_TO_LINEAR(1 / attA) * attA;
+        const out = new Uint16Array(rw * rh * 4);
+        for (let i = 0, j = 0; i < d.length; i += 4, j += 4) {
+          const a = d[i+3] / 255;
+          out[j]   = toHalf(GAMMA_TO_LINEAR(d[i]/255) * a * F);
+          out[j+1] = toHalf(GAMMA_TO_LINEAR(d[i+1]/255) * a * F);
+          out[j+2] = toHalf(GAMMA_TO_LINEAR(d[i+2]/255) * a * F);
+          out[j+3] = toHalf(a * attA);
+        }
+        const bsrc = new BufferImageSource({
+          resource: out, width: rw, height: rh, format: 'rgba16float', alphaMode: 'premultiplied-alpha',
+        });
+        try { bsrc.style.addressModeU = 'clamp-to-edge'; bsrc.style.addressModeV = 'clamp-to-edge'; } catch {}
+        region.texture = SpineTexture.from(new Texture({ source: bsrc }).source);
+        if (att.color) att.color.a = 1;
+        slot.data.blendMode = 0;
+        toplight = slot;
+      } else {
+        slot.color.a = 0;
+      }
+    }
+    if (!toplight) throw new Error('toplight slot 未找到');
+    const litRatioThreshold = 0.05;
+
+    // 置中：先渲染一次取 bounds
+    try { sp.state.setAnimation(0, 'Idle_01', true); } catch { console.log('UNIT T6 no Idle_01, setup pose'); }
+    sp.update(0);
+    app.stage.removeChildren(); app.stage.addChild(sp);
+    app.render();
+    const b = sp.getBounds();
+    sp.position.set(64 - (b.x + b.width / 2) + sp.position.x, 64 - (b.y + b.height / 2) + sp.position.y);
+    if (b.width > 400) sp.scale.set(sp.scale.x * 300 / b.width);
+    sp.update(0);
+
+    const grab = () => {
+      app.renderer.render({ container: app.stage, clear: true });
+      const img = readCanvas();
+      const A = [], B = [];
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const c = px(img, x, y);
+        A.push(c[0]); B.push(c[1]);
+      }
+      return { img, A, B };
+    };
+
+    // A：att.color.a=1（烘焙中和態）
+    if (att.color) att.color.a = 1;
+    sp.update(0);
+    const afterUpdateA = att.color?.a;
+    const gA = grab();
+    const imgA = gA.A;
+
+    // B：att.color.a=0.302（未中和）
+    if (att.color) att.color.a = attA;
+    sp.update(0);
+    const afterUpdateB = att.color?.a;
+    const gB = grab();
+    const imgB = gB.A;
+
+    // 診斷：角落值（clear 驗證）、A 直方圖、B=slope 擬合
+    const corner = (g) => `(${g.img ? px(g.img, 2, 2)[0] : '?'},${px(g.img, 125, 2)[0]},${px(g.img, 64, 64)[0]})`;
+    const hist = [0, 0, 0, 0, 0, 0];
+    for (const v of imgA) hist[v <= 10 ? 0 : v <= 50 ? 1 : v <= 120 ? 2 : v <= 200 ? 3 : v < 250 ? 4 : 5]++;
+    let sab = 0, sa2 = 0, nfit = 0;
+    const ratios = [];
+    for (let i = 0; i < imgA.length; i++) {
+      const a = imgA[i], bv = imgB[i];
+      if (a > 10 && a < 242) { ratios.push(bv / a); sab += a * bv; sa2 += a * a; nfit++; }
+    }
+    const slope = sab / sa2;
+    const med = median(ratios);
+    const q1 = median(ratios.filter((r) => r < med));
+    const q3 = median(ratios.filter((r) => r >= med));
+    const verdict = Math.abs(med - 0.302) < 0.03 ? 'FOLDED(x0.302)' :
+      Math.abs(med - 1) < 0.03 ? 'NO-FOLD' : 'OTHER';
+    report('T6-spine-att-alpha', true,
+      `attA=${attA.toFixed(3)} afterUpdate(a)=${afterUpdateA?.toFixed(3)}/${afterUpdateB?.toFixed(3)} cornersA/B=${corner(gA)}/${corner(gB)} hist=${hist.join(',')} litPx=${nfit} slope=${slope?.toFixed(4)} ratio median=${med?.toFixed(4)} IQR=[${q1?.toFixed(4)},${q3?.toFixed(4)}] => ${verdict}`);
+
+    // T6c：同烘焙貼圖以 plain Sprite 畫黑底 —— 分離 spine 路徑 vs plain 路徑
+    // （幾何/縮放不同，不能逐像素比；改比 R 值分布：若 spine 路徑多摺了 k，分位數比≈k）
+    const spTex = toplight.getAttachment().region.texture.texture;
+    const plain = new Sprite(spTex);
+    renderScene([plain]);
+    const imgS = readCanvas();
+    const qs = (arr, p) => {
+      const s = arr.filter((v) => v > 2).sort((a, b) => a - b);
+      if (!s.length) return NaN;
+      return s[Math.min(s.length - 1, Math.floor(s.length * p))];
+    };
+    const aL = [], sL = [];
+    for (let i = 0; i < imgA.length; i++) { aL.push(imgA[i]); sL.push(imgS[i * 4]); }
+    const pr = [0.1, 0.5, 0.9].map((p) => (qs(sL, p) / qs(aL, p)).toFixed(3)).join(',');
+    report('T6c-plain-vs-spine', true,
+      `plain/spine R p10,p50,p90 ratio=${pr} (plain p50=${qs(sL, 0.5)}, spine p50=${qs(aL, 0.5)}) => ${(() => { const r = qs(sL, 0.5) / qs(aL, 0.5); return Math.abs(r - 1) < 0.1 ? 'SAME' : r > 1.5 ? 'SPINE-DARKER' : 'OTHER'; })()}`);
+
+    // 視覺診斷：dump A/B/S 畫布為 PNG dataURL，runner 存檔供目視
+    const dump = (canvasImg, tag) => {
+      const cn = document.createElement('canvas'); cn.width = W; cn.height = H;
+      const cx = cn.getContext('2d');
+      const id = cx.createImageData(W, H);
+      for (let i = 0; i < W * H * 4; i += 4) {
+        id.data[i] = canvasImg[i]; id.data[i+1] = canvasImg[i+1]; id.data[i+2] = canvasImg[i+2]; id.data[i+3] = 255;
+      }
+      cx.putImageData(id, 0, 0);
+      console.log('UNIT T6-DUMP ' + tag + ' ' + cn.toDataURL('image/png'));
+    };
+    dump(gA.img, 'A_attA1');
+    dump(gB.img, 'B_attA0302');
+    dump(imgS, 'S_plain');
+    // T6d：slot.a=0.01 探針——alpha 是否真的驅動 frag 輸出
+    if (att.color) att.color.a = 1;
+    toplight.color.a = 0.01;
+    sp.update(0);
+    app.stage.removeChildren(); app.stage.addChild(sp);
+    const gE = grab();
+    const ratiosE = [];
+    for (let i = 0; i < imgA.length; i++) {
+      if (imgA[i] > 10 && imgA[i] < 242) ratiosE.push(gE.A[i] / imgA[i]);
+    }
+    const medE = median(ratiosE);
+    dump(gE.img, 'E_slotA001');
+    report('T6d-slot-alpha-0.01', true,
+      `slot.a=0.01 ratio median=${medE?.toFixed(4)} => ${medE < 0.1 ? 'alpha-drives-frag' : medE > 0.9 ? 'alpha-ignored' : 'partial'}`);
+    toplight.color.a = 1;
+
+    // T6b（sp 重新上舞台）：slot.color.a 摺疊（att 回 1、slot a=0.302）
+    toplight.color.a = 0.302;
+    sp.update(0);
+    const gC = grab();
+    const imgC = gC.A;
+    dump(gC.img, 'C_slotA0302');
+    const ratios2 = [];
+    for (let i = 0; i < imgA.length; i++) {
+      if (imgA[i] > 10 && imgA[i] < 242) ratios2.push(imgC[i] / imgA[i]);
+    }
+    const med2 = median(ratios2);
+    const verdict2 = Math.abs(med2 - 0.302) < 0.03 ? 'FOLDED(x0.302)' :
+      Math.abs(med2 - 1) < 0.03 ? 'NO-FOLD' : 'OTHER';
+    report('T6b-spine-slot-alpha', true,
+      `slot.a=0.302 ratio median=${med2?.toFixed(4)} => ${verdict2}`);
+
+    // T7：常數貼圖 a-響應曲線——消滅幾何/UV/取樣混淆，直接讀出 frag 公式
+    // 常數 rgba16float(0.5, 0.5)；對 att.a 與 slot.a 各掃一輪
+    const cData = new Uint16Array(8 * 8 * 4);
+    for (let i = 0; i < 8 * 8; i++) { cData[i*4] = toHalf(0.5); cData[i*4+1] = toHalf(0.5); cData[i*4+2] = toHalf(0.5); cData[i*4+3] = toHalf(0.5); }
+    const cSrc = new BufferImageSource({ resource: cData, width: 8, height: 8, format: 'rgba16float', alphaMode: 'premultiplied-alpha' });
+    try { cSrc.style.addressModeU = 'clamp-to-edge'; cSrc.style.addressModeV = 'clamp-to-edge'; } catch {}
+    const cTex = SpineTexture.from(new Texture({ source: cSrc }).source);
+    const att0 = toplight.getAttachment();
+    const oldTex = att0.region.texture;
+    att0.region.texture = cTex;
+    const grabMed = () => {
+      const g = grab();
+      const vals = [];
+      for (let i = 0; i < g.A.length; i++) if (g.A[i] > 4) vals.push(g.A[i]);
+      return { med: median(vals), n: vals.length, img: g.img };
+    };
+    const sweep = [];
+    for (const a of [1, 0.5, 0.302, 0.1, 0.01]) {
+      if (att0.color) att0.color.a = a;
+      toplight.color.a = 1;
+      sp.update(0);
+      const r = grabMed();
+      sweep.push(`att${a}:${r.med?.toFixed(1)}(n${r.n})`);
+    }
+    for (const a of [1, 0.302, 0.01]) {
+      if (att0.color) att0.color.a = 1;
+      toplight.color.a = a;
+      sp.update(0);
+      const r = grabMed();
+      sweep.push(`slot${a}:${r.med?.toFixed(1)}(n${r.n})`);
+    }
+    if (att0.color) att0.color.a = 1;
+    toplight.color.a = 1;
+    sp.update(0);
+    // 重複渲染確定性對照（同狀態抓兩次）
+    const r1 = grabMed(); const r2 = grabMed();
+    sweep.push(`repeat:${r1.med?.toFixed(1)}vs${r2.med?.toFixed(1)}`);
+    report('T7-constant-response', true, sweep.join(' | '));
+    att0.region.texture = oldTex;
+
+    // T9：真 bake 的 A/B 逐像素比值圖（還原現場：真貼圖＋Idle_01）——看比值空間分布
+    sp.update(0);
+    const gA2 = grab();
+    const imgA2 = gA2.A;
+    if (att.color) att.color.a = attA;
+    sp.update(0);
+    const gB2 = grab();
+    dump(gA2.img, 'A2');
+    dump(gB2.img, 'B2');
+    {
+      const rc = document.createElement('canvas'); rc.width = W; rc.height = H;
+      const rx2 = rc.getContext('2d');
+      const rid = rx2.createImageData(W, H);
+      const grid = [];
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        const a = imgA2[i], b = gB2.A[i];
+        const r = a > 8 ? Math.min(1, b / a) : 0;
+        const v = Math.round(r * 255);
+        rid.data[i*4] = v; rid.data[i*4+1] = v; rid.data[i*4+2] = v; rid.data[i*4+3] = 255;
+        if (x % 16 === 8 && y % 16 === 8 && a > 8) grid.push(`${x},${y}:${a}->${b}(${(b/a).toFixed(2)})`);
+      }
+      rx2.putImageData(rid, 0, 0);
+      console.log('UNIT T6-DUMP ratio_map ' + rc.toDataURL('image/png'));
+      console.log('UNIT T9-grid ' + grid.slice(0, 40).join(' '));
+      // 比值分布
+      const rs = [];
+      for (let i = 0; i < imgA2.length; i++) if (imgA2[i] > 8 && imgA2[i] < 250) rs.push(gB2.A[i] / imgA2[i]);
+      const buckets = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+      for (const r of rs) buckets[Math.min(9, Math.floor(r * 10))]++;
+      report('T9-ratio-map', true, `n=${rs.length} buckets0.0-1.0=${buckets.join(',')} grid=${grid.slice(0, 12).join(' ')}`);
+    }
+
+    // T10：常數貼圖＋Idle 週期時間掃描——量動畫驅動的 slot color 摺疊曲線（production 偏暗根因）
+    att0.region.texture = cTex;
+    try { sp.state.setAnimation(0, 'Idle_01', true); } catch {}
+    const cyc = [];
+    const step = 3.33 / 8;
+    let tLog = [];
+    for (let k = 0; k <= 8; k++) {
+      sp.update(step);   // 累進至 t = k×step
+      const r = grabMed();
+      cyc.push(r.med?.toFixed(0));
+      tLog.push(`t${(k * step).toFixed(2)}:out${r.med?.toFixed(0)}(n${r.n}) slot.rgb(${toplight.color.r.toFixed(2)},${toplight.color.g.toFixed(2)},${toplight.color.b.toFixed(2)})a${toplight.color.a.toFixed(3)} att.a${(att0.color?.a ?? -1).toFixed(3)}`);
+    }
+    const dk = toplight.data.darkColor ?? toplight.darkColor;
+    report('T10-idle-fold-curve', true,
+      `out(t)=${cyc.join(',')} | darkColor=${dk ? `${dk.r?.toFixed(3)},${dk.g?.toFixed(3)},${dk.b?.toFixed(3)},${dk.a?.toFixed(3)}` : 'none'} att.rgb=${att0.color ? `${att0.color.r.toFixed(3)},${att0.color.g.toFixed(3)},${att0.color.b.toFixed(3)}` : '?'} | ${tLog.join(' ')}`);
+    att0.region.texture = oldTex;
+
+    // T11：全 page 尺寸烘焙（page-space UV 自然正確）→ 驗證 spine 路徑端點等於遊戲公式
+    try {
+      const bmp2 = await createImageBitmap(await (await fetch(base + 'Hanako_home.png')).blob(), { premultiplyAlpha: 'none' });
+      const PW = 2048, PH = 2048;
+      const pc = document.createElement('canvas'); pc.width = PW; pc.height = PH;
+      const pcx = pc.getContext('2d', { willReadFrequently: true });
+      pcx.drawImage(bmp2, 0, 0);
+      const pd = pcx.getImageData(0, 0, PW, PH).data;
+      const pageTex = new Uint16Array(PW * PH * 4);
+      const regX = att0.region.x, regY = att0.region.y, regW = att0.region.width, regH = att0.region.height;
+      for (let y = 0; y < regH; y++) {
+        for (let x = 0; x < regW; x++) {
+          const si = ((regY + y) * PW + (regX + x)) * 4;
+          const a = pd[si + 3] / 255;
+          const di = ((regY + y) * PW + (regX + x)) * 4;
+          pageTex[di]     = toHalf(GAMMA_TO_LINEAR(pd[si] / 255) * a * F);
+          pageTex[di + 1] = toHalf(GAMMA_TO_LINEAR(pd[si + 1] / 255) * a * F);
+          pageTex[di + 2] = toHalf(GAMMA_TO_LINEAR(pd[si + 2] / 255) * a * F);
+          pageTex[di + 3] = toHalf(a * attA);
+        }
+      }
+      const pageSrc = new BufferImageSource({ resource: pageTex, width: PW, height: PH, format: 'rgba16float', alphaMode: 'premultiplied-alpha' });
+      try { pageSrc.style.addressModeU = 'clamp-to-edge'; pageSrc.style.addressModeV = 'clamp-to-edge'; } catch {}
+      const pageSpineTex = SpineTexture.from(new Texture({ source: pageSrc }).source);
+      att0.region.texture = pageSpineTex;
+      if (att.color) att.color.a = 1;   // 中和（production 做法）
+      toplight.color.a = 1;
+      sp.update(0);
+      const gP = grab();
+      dump(gP.img, 'P_pagebake');
+      // 分布對照：page-bake spine 渲染 vs plain sprite（region bake 1:1）——兩者取樣同一內容
+      const pL = [];
+      for (let i = 0; i < gP.A.length; i++) pL.push(gP.A[i]);
+      const pr2 = [0.1, 0.5, 0.9].map((p) => (qs(sL, p) / qs(pL, p)).toFixed(3)).join(',');
+      report('T11-pagebake-uv', true,
+        `plain/pagebake R p10,p50,p90=${pr2} (plain p50=${qs(sL, 0.5)}, pagebake p50=${qs(pL, 0.5)}) => ${(() => { const r = qs(sL, 0.5) / qs(pL, 0.5); return Math.abs(r - 1) < 0.12 ? 'UV-OK' : 'UV-MISMATCH'; })()}`);
+      att0.region.texture = oldTex;
+    } catch (e) {
+      skipTest('T11-pagebake-uv', 'exception: ' + (e?.message || e));
+    }
+  } catch (e) {
+    skipTest('T6-spine-att-alpha', 'exception: ' + (e?.message || e));
+  }
+}
+
+console.log('UNIT_SUMMARY ' + JSON.stringify({ pass, fail, skip, results }));
+</script>
+</body>
+</html>
