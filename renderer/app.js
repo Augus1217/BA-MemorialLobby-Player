@@ -1,4 +1,4 @@
-import { Application, Assets, Texture, Sprite, MeshSimple, Container, BlurFilter, ColorMatrixFilter, Cache, UniformGroup, GlProgram, Filter, BufferImageSource } from 'pixi.js';
+import { Application, Assets, Texture, Sprite, MeshSimple, Container, BlurFilter, ColorMatrixFilter, Cache, UniformGroup, GlProgram, Filter, BufferImageSource, RenderTexture, Mesh, MeshGeometry, Shader, UPDATE_PRIORITY } from 'pixi.js';
 import { Spine, ScaleTimeline, SpineTexture } from '@esotericsoftware/spine-pixi-v8';
 import { Vector2 } from '@esotericsoftware/spine-core';
 import { i as initClickFx } from '../assets/clickfx/clickFx.js';
@@ -341,42 +341,21 @@ const log = (s) => console.log('[lobby]', s);
 // 比對 kivo _fix skel 實證（Hanako 3/3、CH0220 8/8、Seia 1/1 個 Additive 槽全改）。
 // 不能「全部 Additive→Screen」：全庫 4296 個 Additive 槽中有眼睛/背景/光暈等
 // 非光效槽（kivo 未修角色在站上仍維持 Additive），名稱過濾才不會改壞眼睛。
-// 光槽分流（2026-10-02 Seia 案）：additive 槽依「貼圖 alpha 結構」二分——
-//   alpha 造型（中位數 < 0.5，如 Hanako toplight p50=0.24）→ hdr 烘焙 One/One（fold 供給 ×attA）
-//   不透明 falloff-in-rgb（alpha≈1 全域，如 Lens_flare／Seia top_light 1016×755 全屏光罩）
-//     → 維持 kivo 的 Screen 混色：One/One 會把亮 blob 以線性值直加（R+0.6）→ 全屏暖罩
-//       （實測全 frame R-B：hdr 39.6-43.2 vs 實機 33.4 / kivo 17.7-33.9）
-// normal-blend 光槽（如 Seia Nose_Light）不動：kivo 的 sRGB 渲染已與實機一致，
-//   線性烘焙在 sRGB 畫布直接顯示會放大暖度比（實測臉部 +52.6 vs 實機 +34~45）。
-const hdrAlphaShaped = (region, base) => {
-  try {
-    const page = _hdrPageData.get(base + region.page.name);
-    if (!page) return true;   // 頁面未預載（不應發生）：保守走烘焙
-    const as = page.data, W = page.w;
-    const xs = [];            // 中位數取樣（stride 4）
-    for (let y = region.y; y < region.y + region.height; y += 4) {
-      for (let x = region.x; x < region.x + region.width; x += 4) xs.push(as[(y * W + x) * 4 + 3]);
-    }
-    xs.sort((a, b) => a - b);
-    return xs[xs.length >> 1] < 128;
-  } catch { return true; }
-};
-async function prefillHdrPageData(atlasUrl) {
-  if (!HDR_MODE || !atlasUrl) return;
-  const base = atlasUrl.slice(0, atlasUrl.lastIndexOf('/') + 1);
-  const text = await (await fetchRetry(atlasUrl)).text();
-  for (const line of text.split(/\r?\n/)) {
-    if (/^\S+\.png$/.test(line.trim())) await hdrPageData(base + line.trim());
-  }
-}
-const fixAdditiveSlots = (obj, atlasUrl) => {
+// 光槽全數走自研像素級管線（2026-10-02 用戶指示：移除 kivo 來源的 Screen 修復，
+// 每行代碼以遊戲資料把關）。hdr=0 時本函式退化為 kivo 行為（退場機制保留）。
+// 遊戲資料依據：
+//   - 材質 dump（Hanako/CH0070）：頁面材質 Blend 固定 One OneMinusSrcAlpha，
+//     _SrcBlend/_DstBlend 與 skel blendMode 一緻；blendModeMaterials 空
+//     （applyAdditiveMaterial=0）→ additive 槽也用頁面材質渲染，additive 性質由
+//     頂點色與合成空間承擔。
+//   - 貼圖簽章（零 alpha 區 rgb）：Hanako 頁=洋紅亮色（straight，_StraightAlphaInput=1
+//     在 shader 內預乘）；CH0070 page3=黑（PMA，材質 _StraightAlphaInput=0 不再預乘）。
+//     烘焙預乘跟隨頁面簽章：straight 頁 ×texA（零 alpha 洩漏保護）、PMA 頁不再乘。
+const fixAdditiveSlots = (obj) => {
   let n = 0;
-  const base = atlasUrl ? atlasUrl.slice(0, atlasUrl.lastIndexOf('/') + 1) : null;
   for (const slot of obj.skeleton.slots) {
-    if (!/light|flare/i.test(slot.data.name)) continue;
-    if (slot.data.blendMode !== 1) continue;   // normal 光槽：kivo 渲染不動
-    if (HDR_MODE && base && hdrAlphaShaped(slot.getAttachment()?.region, base)) continue;   // alpha 造型：hdr 烘焙
-    if (slot.data.blendMode === 1) { slot.data.blendMode = 3; n++; }   // 不透明 falloff：kivo Screen
+    if (HDR_MODE && /light|flare/i.test(slot.data.name)) continue;   // hdr：prepareHdrLights 全權
+    if (slot.data.blendMode === 1 && /light|flare/i.test(slot.data.name)) { slot.data.blendMode = 3; n++; }
   }
   return n;
 };
@@ -412,7 +391,7 @@ const toHalf = (val) => {
   return bits;
 };
 
-const _hdrPageData = new Map();   // pageUrl -> {w, h, data}：整頁只解碼/讀取一次（66 槽共享頁面）
+const _hdrPageData = new Map();   // pageUrl -> {w, h, u8}：整頁只解碼一次（跨 region/跨骨架共用）
 async function hdrPageData(pageUrl) {
   let p = _hdrPageData.get(pageUrl);
   if (!p) {
@@ -421,7 +400,7 @@ async function hdrPageData(pageUrl) {
     cnv.width = bmp.width; cnv.height = bmp.height;
     const ctx = cnv.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(bmp, 0, 0);
-    p = { w: bmp.width, h: bmp.height, data: ctx.getImageData(0, 0, bmp.width, bmp.height).data };
+    p = { w: bmp.width, h: bmp.height, u8: ctx.getImageData(0, 0, bmp.width, bmp.height).data };
     _hdrPageData.set(pageUrl, p);
     if (_hdrPageData.size > 4) {   // 每頁 ~16MB：只留最近 4 頁，跨大廳不積記憶體
       const oldest = _hdrPageData.keys().next().value;
@@ -430,95 +409,61 @@ async function hdrPageData(pageUrl) {
   }
   return p;
 }
-
-async function hdrRegionTexture(pageUrl, region, attA) {
-  const page = await hdrPageData(pageUrl);
-  const w = region.width, h = region.height;
-  // 因子全部交給 batcher 的自然 PMA 摺疊（cache color = skeleton×slot×attachment）：
-  // 烘焙只做線性化＋texA 預乘，attA 不進烘焙也不中和——fold 會供給 ×attA（遊戲
-  // pmaVertexColors=true 詮釋：v.rgb = linear(1)×attA，實機 beam 細微、無 HDR 爆發；
-  // 舊 trueAdd 實驗 dome 192 vs 實機 200.3 即此語義）。F 參數保留（=1）供實驗。
-  const factor = 1;
-  // rgba16float（WebGL2 核心可線性濾器；rgba32float 在 SwiftShader 缺
-  // OES_texture_float_linear → 貼圖 incomplete → 取樣全黑，2026-10-01 踩過）
-  const out = new Uint16Array(w * h * 4);
-  for (let y = 0; y < h; y++) {
-    let si = ((region.y + y) * page.w + region.x) * 4;
-    let j = y * w * 4;
-    for (let x = 0; x < w; x++, si += 4, j += 4) {
-      const a = page.data[si+3] / 255;
-      out[j]   = toHalf(GAMMA_TO_LINEAR(page.data[si] / 255) * a * factor);
-      out[j+1] = toHalf(GAMMA_TO_LINEAR(page.data[si+1] / 255) * a * factor);
-      out[j+2] = toHalf(GAMMA_TO_LINEAR(page.data[si+2] / 255) * a * factor);
-      out[j+3] = toHalf(a);
-    }
-  }
-  const src = new BufferImageSource({ resource: out, width: w, height: h, format: 'rgba16float', alphaMode: 'premultiplied-alpha' });
-  try { src.style.addressModeU = 'clamp-to-edge'; src.style.addressModeV = 'clamp-to-edge'; } catch {}
-  return new Texture({ source: src });
-}
-
-// region 尺寸烘焙圖的 UV 重映射：attachment 的 UV 是 page 空間（對應原始 page 貼圖），
-// 烘焙圖只有 region rect——不重映射會取樣錯誤子區並放大（×0.3 偏暗＋內容錯置的根因；
-// 2026-10-02 單元測試 T12：remap 後與 page 烘焙渲染 medianDiff=0，錯誤翻轉=152）。
-// v 軸方向由 region.v/v2 與 region.y 的對應判定（spine loader 的 v 慣例兩種都防）；
-// UV 逐角線性重映射對 rotate region 也成立（角點在 rect 內的相對位置不變）。
-function remapAttachmentUVs(att, region) {
-  const uvs = att.uvs;
-  if (!uvs || !region?.page) return;
-  const H = region.page.height;
-  const errTop = Math.abs(region.v * H - region.y) + Math.abs(region.v2 * H - (region.y + region.height));
-  const errBottom = Math.abs((1 - region.v2) * H - region.y) + Math.abs((1 - region.v) * H - (region.y + region.height));
-  const topOrigin = errTop <= errBottom;
-  const du = region.u2 - region.u, dv = region.v2 - region.v;
-  for (let i = 0; i < uvs.length; i += 2) {
-    uvs[i] = (uvs[i] - region.u) / du;
-    uvs[i+1] = topOrigin
-      ? (uvs[i+1] - region.v) / dv
-      : (region.v2 - uvs[i+1]) / dv;
+async function prefillHdrPageData(atlasUrl) {
+  if (!HDR_MODE || !atlasUrl) return;
+  const base = atlasUrl.slice(0, atlasUrl.lastIndexOf('/') + 1);
+  const text = await (await fetchRetry(atlasUrl)).text();
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\S+\.png$/.test(line.trim())) await hdrPageData(base + line.trim());
   }
 }
 
+// ---- 自研像素級光線管線 v2：頁面級線性化＋線性 RT＋sRGB encode ----------------
+// 遊戲（URP 線性專案）的機制：sRGB 貼圖硬體解碼取樣 → 線性緩衝合成（Blend One/OMISA，
+// 頂點色 PMA 合成經 PMAGammaToTargetSpace）→ 輸出前 encode。我們逐項複刻：
+//   ① 頁面線性化（本函式）：atlas 檔皆未標 pma（遊戲資料）＝straight 檔，spine-pixi
+//      loader 原本在上傳時 CPU 預乘——此處以 lin(rgb)×a 的 rgba16float 頁面取代之
+//      （預乘＋線性化皆為逐 texel 运算，頁面級一次完成；零 alpha texel 歸零＝洩漏保護）。
+//   ② 頂點色：不中和 att.color、不烤因子——batcher 的 colorBit PMA 打包
+//      （vColor.rgb = aColor.rgb×aColor.a）自然供給 ×slot.a×att.a（pmaVertexColors=true 詮釋）。
+//   ③ blend 尊重 skel（材料 dump 證實 _SrcBlend/_DstBlend=One/OMISA 與 skel 一致；
+//      blendModeMaterials 空 → additive 槽同用頁面材質）。
+//   ④ 線性 RT＋encode（app.init 後的 hdrTwoPass）。
+// kivo 的 Screen 修復全面移除（fixAdditiveSlots 在 hdr 下跳過光槽）。
 async function prepareHdrLights(obj, atlasUrl) {
   if (!HDR_MODE || !obj?.skeleton || !atlasUrl) return;
   const t0 = performance.now();
   const base = atlasUrl.slice(0, atlasUrl.lastIndexOf('/') + 1);
-  // hdrOnly=<regex>：只烘焙名稱符合的槽（隔離貢獻源用）
+  // hdrOnly=<regex>：隔離診斷——名稱不符的光槽整個移除（color.a=0 會被動畫 RGBA 軌贖身）
   const onlyRe = /(?:[&?#])hdrOnly=([^&\s]+)/.exec(location.hash + location.search)?.[1];
-  const remapped = new Set();   // 多槽共享同一 attachment：UV 重映射只能做一次
-  for (const slot of obj.skeleton.slots) {
-    if (!/light|flare/i.test(slot.data.name)) continue;
-    if (onlyRe && !new RegExp(onlyRe, 'i').test(slot.data.name)) {
-      try { slot.setAttachment(null); } catch {}   // 隔離：完全移除（color.a=0 會被動畫 RGBA 軌贖身）
-      continue;
+  const atlas = Assets.get(atlasUrl);
+  if (!atlas?.pages) { log('[hdr] atlas 未快取：' + atlasUrl); return; }
+  let n = 0;
+  for (const page of atlas.pages) {
+    const p = await hdrPageData(base + page.name);
+    const out = new Uint16Array(p.w * p.h * 4);
+    for (let i = 0, j = 0; i < p.u8.length; i += 4, j += 4) {
+      const a = p.u8[i+3] / 255;
+      const m = page.pma ? 1 : a;   // 未標 pma＝straight 檔：複刻 loader 的上傳預乘
+      out[j]   = toHalf(GAMMA_TO_LINEAR(p.u8[i] / 255) * m);
+      out[j+1] = toHalf(GAMMA_TO_LINEAR(p.u8[i+1] / 255) * m);
+      out[j+2] = toHalf(GAMMA_TO_LINEAR(p.u8[i+2] / 255) * m);
+      out[j+3] = toHalf(a);
     }
-    try {
-      const att = slot.getAttachment();
-      const region = att?.region;
-      if (!region || !region.page) continue;
-      // 只烘焙 skel-additive 且「alpha 造型」的槽（其餘分流見 fixAdditiveSlots 上方註解）
-      if (slot.data.blendMode !== 1) continue;
-      if (!hdrAlphaShaped(region, base)) continue;
-      if (region.rotate) {   // 烘焙路徑未處理旋轉 page rect，退回原貼圖（kivo 語意）
-        log('[hdr] ' + slot.data.name + ' rotate=' + region.rotate + ' 略過烘焙');
-        continue;
-      }
-      const attA = att.color?.a ?? 1;
-      if (!remapped.has(att)) {
-        remapped.add(att);
-        const tex = await hdrRegionTexture(base + region.page.name, region, attA);
-        region.texture = SpineTexture.from(tex.source);
-        remapAttachmentUVs(att, region);   // 必須在賦值後、渲染前：attachment.uvs 是 page 空間
-      }
-      // att.color 不中和：PMA 摺疊（×slot.a×att.a）＝遊戲頂點色語義（pmaVertexColors=true 詮釋）
-      // blend 尊重 skel 資料：additive 槽＝pixi 'add'（One,One 真加法）；normal 槽＝OMISA。
-      // 不能全部設 normal：Lens_flare 貼圖 alpha≈1、falloff 畫在 rgb（暗處 rgb≈40），
-      // OMISA 會把整個場景蓋上 dst×0.33 的暗矩形（2026-10-02 實測水區 229→43）；
-      // 遊戲端 flare 為真加法（暗 rgb 加法不可見）。烘焙零-alpha texel rgb=0，One/One 同樣乾淨。
-      log('[hdr] ' + slot.data.name + ' <- ' + region.page.name + ' attA=' + attA.toFixed(3) + ' blend=' + slot.data.blendMode);
-    } catch (e) { log('[hdr] ' + slot.data.name + ' 失敗: ' + (e?.message || e)); }
+    const src = new BufferImageSource({ resource: out, width: p.w, height: p.h, format: 'rgba16float', alphaMode: 'premultiplied-alpha' });
+    try { src.style.addressModeU = 'clamp-to-edge'; src.style.addressModeV = 'clamp-to-edge'; } catch {}
+    page.setTexture(SpineTexture.from(src));   // 官方 API：page.texture＋全 region.texture 一次更新
+    n++;
   }
-  log('[hdr] 烘焙完成 ' + remapped.size + ' 附件，耗時 ' + (performance.now() - t0).toFixed(0) + 'ms');
+  if (onlyRe) {
+    const re = new RegExp(onlyRe, 'i');
+    for (const slot of obj.skeleton.slots) {
+      if (/light|flare/i.test(slot.data.name) && !re.test(slot.data.name)) {
+        try { slot.setAttachment(null); } catch {}
+      }
+    }
+  }
+  log('[hdr] 頁面線性化 ' + n + ' 頁，耗時 ' + (performance.now() - t0).toFixed(0) + 'ms');
 }
 
 
@@ -1664,8 +1609,8 @@ async function playExtraSkeleton(skelName, clips, vis) {
       const atlasUrl = assetUrl(`${base}${skRaw}.atlas`);
       await Assets.load(atlasUrl);
       obj = Spine.from({ skeleton: skelUrl, atlas: atlasUrl });
-      await prefillHdrPageData(atlasUrl);
-      fixAdditiveSlots(obj, atlasUrl);
+      fixAdditiveSlots(obj);
+      try { await prepareHdrLights(obj, atlasUrl); } catch (e) { log('[hdr] prepare 失敗: ' + (e?.message || e)); }
       obj.skelName = skelNorm(skRaw);
       applySkeletonMix(obj, skRaw);
       extras.push(obj);
@@ -6051,8 +5996,8 @@ async function loadScene(entry) {
       await Assets.load(skel);
       await Assets.load(atlas);
       const obj = Spine.from({ skeleton: skel, atlas });
-      await prefillHdrPageData(atlas);
-      fixAdditiveSlots(obj, atlas);
+      fixAdditiveSlots(obj);
+      try { await prepareHdrLights(obj, atlas); } catch (e) { log('[hdr] prepare 失敗: ' + (e?.message || e)); }
       obj.skelName = (res.skel.startsWith('./') ? res.skel.slice(2) : res.skel).replace(/\.(skel|json)$/i, '').toLowerCase();
       applySkeletonMix(obj, obj.skelName);
       // 不在此自動播放——由 startBgSequence 依 BA 時間軸統一驅動（避免搶在
@@ -6478,8 +6423,7 @@ async function loadLobby(name) {
     await Promise.all(charAssets.map(a => Assets.load(a)));
     if (!alive()) return;   // 被超車：不可再建 spine，否則蓋掉新大廳
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
-    await prefillHdrPageData(charAssets[1]);
-    fixAdditiveSlots(spine, charAssets[1]);
+    fixAdditiveSlots(spine);
     // hdr 烘焙必須在 addChild/開播前完成（先好再播）：異步跑到一半會讓光槽逐槽換貼圖，
     // 開場出現「怪怪的→閃一下」。頁面解碼有快取，整體遞增延遲 <0.5s。
     try { await prepareHdrLights(spine, charAssets[1]); } catch (e) { log('[hdr] prepare 失敗: ' + (e?.message || e)); }
@@ -7328,6 +7272,60 @@ async function init() {
   await app.init({ resizeTo: window, antialias: true, backgroundColor: 0x05060d, autoDensity: true });
   const canvas = app.canvas;
   document.getElementById('app').appendChild(canvas);
+
+  // ---- 自研線性合成管線（hdr；hdr=0 退回直渲）--------------------------------
+  // 遊戲在線性緩衝合成、輸出前 sRGB encode。sRGB 畫布直渲會讓線性烘焙值與 dst 項
+  // 產生空間誤差（Seia 案：全 frame R-B 系統性 +8~12 暖罩）。兩段式：
+  //   stage → rgba16float 線性 RT（光槽頁面已線性化、batcher blend 逐項等於遊戲）
+  //         → 全屏 quad sRGB encode → 畫面。
+  let hdrRT = null;
+  let hdrEncodeStage = null;
+  const ensureHdrRT = () => {
+    const w = app.renderer.width, h = app.renderer.height;
+    try {
+      if (!hdrRT) {
+        hdrRT = RenderTexture.create({ width: w, height: h, format: 'rgba16float', resolution: 1, antialias: true, dynamic: true });
+        const geo = new MeshGeometry({
+          positions: new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]),
+          uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
+          indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+        });
+        const shader = new Shader({
+          glProgram: GlProgram.from({
+            vertex: `in vec2 aPosition; in vec2 aUV; out vec2 vUV;
+              void main(void){ vUV = vec2(aUV.x, 1.0 - aUV.y); gl_Position = vec4(aPosition, 0.0, 1.0); }`,
+            fragment: `precision highp float;
+              in vec2 vUV; out vec4 finalColor; uniform sampler2D uTexture;
+              vec3 l2s(vec3 c){ return mix(c * 12.92, 1.055 * pow(max(c, vec3(0.0)), vec3(1.0/2.4)) - 0.055, step(0.0031308, c)); }
+              void main(void){ vec4 c = texture(uTexture, vUV); finalColor = vec4(l2s(clamp(c.rgb, 0.0, 1.0)), 1.0); }`,
+          }),
+          resources: { uTexture: hdrRT.source },
+        });
+        hdrEncodeStage = new Container();
+        hdrEncodeStage.addChild(new Mesh({ geometry: geo, shader }));
+      } else if (hdrRT.width !== w || hdrRT.height !== h) {
+        hdrRT.source.resize(w, h);   // 綁定不變，shader 續用同一 source
+      }
+      return true;
+    } catch (e) {
+      console.warn('[hdr] 線性 RT 初始化失敗，退回直渲:', e?.message || e);
+      try { hdrRT?.destroy(true); } catch {}
+      hdrRT = null;
+      return false;
+    }
+  };
+  const hdrTwoPass = () => {
+    if (!ensureHdrRT()) return false;
+    app.renderer.render({ container: app.stage, target: hdrRT, clear: true });
+    app.renderer.render({ container: hdrEncodeStage, clear: true });
+    return true;
+  };
+  if (HDR_MODE) {
+    const appRender = app.render;   // ticker 內持有者（Application.prototype.render）
+    try { app.ticker.remove(appRender, app); } catch {}
+    app.render = () => { hdrTwoPass(); };   // ba_debug/exporting 等散點呼叫也走兩段式
+    app.ticker.add(() => { hdrTwoPass(); }, null, UPDATE_PRIORITY.LOW);
+  }
 
   // Stage 5：字型 + ClickFx（core 已就位，一次到位）
   await loadGameFonts();
