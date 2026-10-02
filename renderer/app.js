@@ -127,6 +127,7 @@ const BA_DEBUG = (() => {
   const q = location.search + location.hash;
   return {
     probe: /PROBE=1/.test(q),
+    probeInteract: /probeInteract=1/.test(q),
     layout: /LAYOUT=1/.test(q),
     auto: /autostart=1|PROBE=1/.test(q),
     cursorOff: /cursorOff=1/.test(q),
@@ -2337,7 +2338,14 @@ function playStart() {
   // 有排程資料就精確照播：把「本體骨架」的 clips 依 start 排進 track 0
   // （delay 鏈），Idle_01 之後 loop。多段開場（體育服優香 Start_Idle_01 →
   // 10.67s Start_Idle_02 → 24s Idle_01）自動正確，不再一個一個改。
-  const tl = TIMELINES?.[currentLobby] ?? TIMELINES?.[currentLobby.toLowerCase()];
+  // timeline 查找：本體 key → 小寫 → GL/Teen 變體退回基底 key（基底時間軸的 clip
+  // 由下方 bodyClips 的 has() 過濾把關，變體 skel 缺的 clip 自動跳過）。
+  const tlVariantBase = (k) => String(k).replace(/_(?:gl|teen)$/i, '');
+  let tl = TIMELINES?.[currentLobby] ?? TIMELINES?.[currentLobby.toLowerCase()];
+  if (!tl) {
+    const vb = tlVariantBase(currentLobby);
+    if (vb !== currentLobby) tl = TIMELINES?.[vb] ?? TIMELINES?.[vb.toLowerCase()];
+  }
   if (tl?.tracks?.length) {
     // timeline 的多條 spine track：每條屬於某個 skeleton（extract_timelines.py 的 per-clip
     // skeleton 欄位）。本體骨架的 clips 播在 spine（track-agnostic 依 start 排 delay 鏈），
@@ -6746,6 +6754,9 @@ function zoneAt(sx, sy) {
     for (const b of (Z.pat2 || [])) cands.push({ kind: 'pat', rec: b });
     if (Z.touch) cands.push({ kind: 'touch', rec: Z.touch });
     if (Z.hand) cands.push({ kind: 'hand', rec: Z.hand });
+    if (Z.eye) cands.push({ kind: 'look', rec: Z.eye });   // 抓眼區為正式候選（深度 -100，
+    // 在臉上與 bodytouch 重疊）：遊戲語義＝NGUI OnClick（乾淨點擊→Talk）與 DragIK
+    // （按住拖曳→眼隨指）並存，見 onPointerUp 的 look-session 補 Talk。
   }
   let best = null;
   for (const c of cands) {
@@ -6902,6 +6913,7 @@ function onPointerMove(e) {
 
 function onPointerUp(e) {
   clearTimeout(longPressTimer);
+  let cleanClickTalk = false;
   if (pressSess) {
     const sess = pressSess;
     pressSess = null;
@@ -6909,6 +6921,14 @@ function onPointerUp(e) {
     if (sess.triggered) {
       // Release: the hold branches end the gesture (EndClip + bone eases back).
       if (ikDrag) ikDrag.pressing = false;
+      // NGUI OnClick（抽取器文檔：OnClick → BodyTouch → Talk）：抓眼區與 bodytouch
+      // 在臉上重疊——乾淨點擊（位移 <10px、釋放在盒內）即使 look 已觸發也要補 Talk
+      // （臉上輕點=說話、按住拖=抓眼）；拖過檻則 OnClick 取消，純抓眼。
+      // 注意得等 endLook() 清完 busy 再 playTalk（playTalk 有 busy 防護）。
+      cleanClickTalk = sess.kind === 'look' && !state.introBlock && !!downPos &&
+        Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) < 10 &&
+        isBodyTouchRegion(e.clientX, e.clientY);
+      if (window.__probeT0) console.log('[interact-probe] ' + JSON.stringify({ tag: 'up-debug', kind: sess.kind, triggered: sess.triggered, dist: +Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y).toFixed(1), inBox: isBodyTouchRegion(e.clientX, e.clientY), clean: cleanClickTalk }));
     } else if (sess.kind === 'talk' && !state.introBlock &&
         isBodyTouchRegion(e.clientX, e.clientY)) {
       // NGUI OnClick: press + release inside the box, no time limit.
@@ -6933,6 +6953,7 @@ function onPointerUp(e) {
   else if (state.busy === 'touch') endTouch();
   else if (state.busy === 'look') endLook();
   else if (patting) endPat();
+  if (cleanClickTalk) playTalk();
   downPos = null;
   downTime = 0;
 }
@@ -7764,6 +7785,145 @@ if (BA_DEBUG.probe) {
       lobbyCount: ORDER.length,
     };
     console.log('[i18n-probe] ' + JSON.stringify(probe));
+  };
+}
+
+// ---- 互動探針（PROBE=1&probeInteract=1&lobby=<key>&autostart=1&vignette=0）----
+// 驗證抓眼/摸頭/說話/特殊互動的觸發區、時機、動畫、語音、字幕、字體、骨骼驅動。
+// 合成 PointerEvent 驅動 app 自身的 onPointerDown/Move/Up 路徑，記錄內部狀態，
+// 輸出 [interact-probe] JSON 行（electron console-message 轉發 → runner 收集比對）。
+if (BA_DEBUG.probe && BA_DEBUG.probeInteract) {
+  window.__probeRun = async () => {
+    try {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const trace = [];
+    const mark = (ev, extra = {}) => trace.push({ t: +((performance.now() - window.__probeT0) / 1000).toFixed(3), ev, ...extra });
+    const emit = (tag, obj) => console.log(`[interact-probe] ${JSON.stringify({ tag, ...obj })}`);
+    const fire = (type, x, y, extra = {}) => app.canvas.dispatchEvent(new PointerEvent(type, {
+      clientX: x, clientY: y, bubbles: true, pointerId: 7, pointerType: 'mouse', isPrimary: true, ...extra,
+    }));
+    const quadCenter = (q) => {
+      if (!q) return null;
+      const xs = q.map((p) => p.x), ys = q.map((p) => p.y);
+      return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+    };
+    const trackAnim = () => {
+      const ts = spine?.state?.tracks ?? [];
+      return ts.filter(Boolean).map((t) => t.animation?.name).join('+') || null;
+    };
+    const boneOf = (name) => spine?.skeleton?.findBone(name);
+
+    // 等大廳載入＋intro 收斂到 idle（introBlock 鎖互動；最長 45s）
+    await sleep(4000);
+    const idleName = resolveIdleClip();
+    for (let i = 0; i < 180; i++) {
+      if (!state.introBlock && trackAnim() === idleName) break;
+      if (i % 12 === 0) emit('wait-idle', { i, introBlock: state.introBlock, anim: trackAnim(), idleName, busy: state.busy });
+      await sleep(250);
+    }
+    window.__probeT0 = performance.now();
+    emit('lobby', { lobby: currentLobby, interactionMode, anim: trackAnim(),
+      zones: { bodytouch: (BODYTOUCH[currentLobby] || []).length, ik: Object.keys(IKZONES[currentLobby] || {}) },
+      scale: spine ? +spine.scale.x.toFixed(4) : null });
+
+    // ---- 1) 說話：bodytouch 中心 down+up → Talk 動畫＋語音＋字幕（字體/語言/氣泡型）----
+    const tb = (window.ba_debug?.touchBoxes() || [])[0];
+    const talkC = tb ? quadCenter(tb.quad) : { x: innerWidth * 0.5, y: innerHeight * 0.5 };
+    mark('talk-down', { at: talkC, zone: window.ba_debug.zoneAt(talkC.x, talkC.y) });
+    fire('pointerdown', talkC.x, talkC.y);
+    let lastBusy = null;
+    const busyPoll = setInterval(() => {
+      if (state.busy !== lastBusy) { lastBusy = state.busy; mark('busy', { busy: state.busy }); }
+    }, 50);
+    await sleep(140);
+    fire('pointerup', talkC.x, talkC.y);
+    let lastVoice = null, lastSub = null;
+    for (let i = 0; i < 90; i++) {           // 9 秒觀察窗
+      await sleep(100);
+      if (lastVoiceName !== lastVoice) { lastVoice = lastVoiceName; mark('voice', { id: lastVoice, sub: !!subtitleFor(lastVoice) }); }
+      if (chatDialog.classList.contains('show') && chatDialog.textContent !== lastSub) {
+        lastSub = chatDialog.textContent;
+        const cs = getComputedStyle(chatDialog);
+        mark('subtitle', { text: (chatDialog.textContent || '').slice(0, 40), lang: chatDialog.dataset.lang, dtype: chatDialog.dataset.dtype, font: cs.fontFamily.split(',')[0], size: cs.fontSize });
+      }
+      if (i > 40 && !lastVoice && state.busy !== 'talk') break;   // 首個語音事件在動畫 ~1.3s 處，別跟它賽跑
+    }
+    mark('talk-end', { anim: trackAnim(), busy: state.busy });
+    clearInterval(busyPoll);
+    emit('talk', { trace: trace.slice() }); trace.length = 0;
+    await sleep(2500);
+
+    // ---- 2) 摸頭：hairpat 區 down→hold→up，記錄動畫＋Touch_Point 驅動 ----
+    // 等前一互動的對話/手勢收尾（BlockInteraction 窗口內 BodyTouch 無效＝遊戲行為）
+    for (let i = 0; i < 100 && (state.busy || dialogActive); i++) await sleep(250);
+    const ikz = window.ba_debug?.ikZones();
+    const patQ = ikz?.hairpat?.quad;
+    const patC = patQ ? quadCenter(patQ) : { x: innerWidth * 0.35, y: innerHeight * 0.18 };
+    const tp = boneOf('Touch_Point');
+    mark('pat-down', { at: patC, bone: !!tp });
+    fire('pointerdown', patC.x, patC.y);
+    const patBone = [];
+    for (let i = 0; i < 12; i++) {
+      await sleep(100);
+      fire('pointermove', patC.x + i * 2, patC.y - i);
+      if (tp) patBone.push({ t: +((performance.now() - window.__probeT0) / 1000).toFixed(2), x: +tp.worldX.toFixed(2), y: +tp.worldY.toFixed(2) });
+      if (i === 1) mark('pat-anim', { anim: trackAnim(), busy: state.busy });
+    }
+    mark('pat-up', { anim: trackAnim() });
+    fire('pointerup', patC.x + 20, patC.y - 10);
+    await sleep(2500);
+    mark('pat-settled', { anim: trackAnim(), busy: state.busy });
+    emit('pat', { trace: trace.slice(), bone: patBone }); trace.length = 0;
+
+    // ---- 3) 抓眼：eye 區 down→拖曳→up，記錄 Touch_Eye 驅動 vs drag 關鍵影格 ----
+    for (let i = 0; i < 100 && (state.busy || dialogActive); i++) await sleep(250);
+    const eyeQ = ikz?.eye?.quad;
+    const eyeC = eyeQ ? quadCenter(eyeQ) : { x: innerWidth * 0.5, y: innerHeight * 0.4 };
+    const te = boneOf('Touch_Eye');
+    const eyeRec = IKZONES[currentLobby]?.eye;
+    mark('look-down', { at: eyeC, bone: !!te, dragKeys: eyeRec ? [eyeRec.drag?.x0, eyeRec.drag?.y0, eyeRec.drag?.x1, eyeRec.drag?.y1] : null });
+    fire('pointerdown', eyeC.x, eyeC.y);
+    const eyeBone = [];
+    const dragPath = [[0.3, 0.3], [0.7, 0.35], [0.5, 0.6], [0.35, 0.45]];
+    for (let i = 0; i < dragPath.length * 4; i++) {
+      const [fx, fy] = dragPath[Math.floor(i / 4)];
+      fire('pointermove', eyeC.x + fx * 60, eyeC.y + fy * 40);
+      await sleep(120);
+      if (te) eyeBone.push({ t: +((performance.now() - window.__probeT0) / 1000).toFixed(2), x: +te.worldX.toFixed(2), y: +te.worldY.toFixed(2) });
+      if (i === 3) mark('look-anim', { anim: trackAnim(), busy: state.busy, eyeFollow: state.busy === 'look' });
+    }
+    mark('look-up', {});
+    fire('pointerup', eyeC.x, eyeC.y);
+    await sleep(1800);
+    mark('look-settled', { anim: trackAnim(), busy: state.busy });
+    emit('look', { trace: trace.slice(), bone: eyeBone }); trace.length = 0;
+
+    // ---- 4) 特殊互動（若有）：臉區按住 → 對應手勢 ----
+    if (interactionMode) {
+      for (let i = 0; i < 100 && (state.busy || dialogActive); i++) await sleep(250);
+      const spQ = (ikz?.[{ pinch: 'pinch', touch: 'touch', handfollow: 'hand' }[interactionMode]] || {}).quad;
+      const faceC = spQ ? quadCenter(spQ) : { x: innerWidth * 0.5, y: innerHeight * 0.45 };
+      mark('special-zone', { quad: !!spQ });
+      mark('special-down', { mode: interactionMode, at: faceC });
+      fire('pointerdown', faceC.x, faceC.y);
+      const spBone = [];
+      for (let i = 0; i < 14; i++) {
+        await sleep(100);
+        fire('pointermove', faceC.x + Math.sin(i / 3) * 40, faceC.y + i * 1.5);
+        if (i === 1) mark('special-anim', { anim: trackAnim(), busy: state.busy, mode: state.busy });
+        const hb = handFollowBone || boneOf('Touch_Point');
+        if (hb) spBone.push({ t: +((performance.now() - window.__probeT0) / 1000).toFixed(2), x: +hb.worldX.toFixed(2), y: +hb.worldY.toFixed(2) });
+      }
+      fire('pointerup', faceC.x, faceC.y + 20);
+      await sleep(2000);
+      mark('special-settled', { anim: trackAnim(), busy: state.busy });
+      emit('special', { trace: trace.slice(), bone: spBone }); trace.length = 0;
+    }
+
+    emit('done', { lobby: currentLobby, steps: trace.length });
+    } catch (e) {
+      console.log('[interact-probe] ' + JSON.stringify({ tag: 'error', err: String(e?.message || e), stack: (e?.stack || '').split('\n').slice(1, 3).join(' | ') }));
+    }
   };
 }
 
