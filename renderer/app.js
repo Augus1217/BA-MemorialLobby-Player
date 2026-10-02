@@ -389,7 +389,11 @@ async function hdrRegionTexture(pageUrl, region, attA) {
   const ctx = cnv.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(bmp, region.x, region.y, w, h, 0, 0, w, h);
   const d = ctx.getImageData(0, 0, w, h).data;
-  const factor = GAMMA_TO_LINEAR(1/attA) * attA;
+  // 因子全部交給 batcher 的自然 PMA 摺疊（cache color = skeleton×slot×attachment）：
+  // 烘焙只做線性化＋texA 預乘，attA 不進烘焙也不中和——fold 會供給 ×attA（遊戲
+  // pmaVertexColors=true 詮釋：v.rgb = linear(1)×attA，實機 beam 細微、無 HDR 爆發；
+  // 舊 trueAdd 實驗 dome 192 vs 實機 200.3 即此語義）。F 參數保留（=1）供實驗。
+  const factor = 1;
   // rgba16float（WebGL2 核心可線性濾器；rgba32float 在 SwiftShader 缺
   // OES_texture_float_linear → 貼圖 incomplete → 取樣全黑，2026-10-01 踩過）
   const out = new Uint16Array(w * h * 4);
@@ -398,28 +402,67 @@ async function hdrRegionTexture(pageUrl, region, attA) {
     out[j]   = toHalf(GAMMA_TO_LINEAR(d[i]/255) * a * factor);
     out[j+1] = toHalf(GAMMA_TO_LINEAR(d[i+1]/255) * a * factor);
     out[j+2] = toHalf(GAMMA_TO_LINEAR(d[i+2]/255) * a * factor);
-    out[j+3] = toHalf(a * attA);
+    out[j+3] = toHalf(a);
   }
   const src = new BufferImageSource({ resource: out, width: w, height: h, format: 'rgba16float', alphaMode: 'premultiplied-alpha' });
   try { src.style.addressModeU = 'clamp-to-edge'; src.style.addressModeV = 'clamp-to-edge'; } catch {}
   return new Texture({ source: src });
 }
 
+// region 尺寸烘焙圖的 UV 重映射：attachment 的 UV 是 page 空間（對應原始 page 貼圖），
+// 烘焙圖只有 region rect——不重映射會取樣錯誤子區並放大（×0.3 偏暗＋內容錯置的根因；
+// 2026-10-02 單元測試 T12：remap 後與 page 烘焙渲染 medianDiff=0，錯誤翻轉=152）。
+// v 軸方向由 region.v/v2 與 region.y 的對應判定（spine loader 的 v 慣例兩種都防）；
+// UV 逐角線性重映射對 rotate region 也成立（角點在 rect 內的相對位置不變）。
+function remapAttachmentUVs(att, region) {
+  const uvs = att.uvs;
+  if (!uvs || !region?.page) return;
+  const H = region.page.height;
+  const errTop = Math.abs(region.v * H - region.y) + Math.abs(region.v2 * H - (region.y + region.height));
+  const errBottom = Math.abs((1 - region.v2) * H - region.y) + Math.abs((1 - region.v) * H - (region.y + region.height));
+  const topOrigin = errTop <= errBottom;
+  const du = region.u2 - region.u, dv = region.v2 - region.v;
+  for (let i = 0; i < uvs.length; i += 2) {
+    uvs[i] = (uvs[i] - region.u) / du;
+    uvs[i+1] = topOrigin
+      ? (uvs[i+1] - region.v) / dv
+      : (region.v2 - uvs[i+1]) / dv;
+  }
+}
+
 async function prepareHdrLights(obj, atlasUrl) {
   if (!HDR_MODE || !obj?.skeleton || !atlasUrl) return;
   const base = atlasUrl.slice(0, atlasUrl.lastIndexOf('/') + 1);
+  // hdrOnly=<regex>：只烘焙名稱符合的槽（隔離貢獻源用）
+  const onlyRe = /(?:[&?#])hdrOnly=([^&\s]+)/.exec(location.hash + location.search)?.[1];
+  const remapped = new Set();   // 多槽共享同一 attachment：UV 重映射只能做一次
   for (const slot of obj.skeleton.slots) {
     if (!/light|flare/i.test(slot.data.name)) continue;
+    if (onlyRe && !new RegExp(onlyRe, 'i').test(slot.data.name)) {
+      try { slot.setAttachment(null); } catch {}   // 隔離：完全移除（color.a=0 會被動畫 RGBA 軌贖身）
+      continue;
+    }
     try {
       const att = slot.getAttachment();
       const region = att?.region;
       if (!region || !region.page) continue;
+      if (region.rotate) {   // 烘焙路徑未處理旋轉 page rect，退回原貼圖（kivo 語意）
+        log('[hdr] ' + slot.data.name + ' rotate=' + region.rotate + ' 略過烘焙');
+        continue;
+      }
       const attA = att.color?.a ?? 1;
-      const tex = await hdrRegionTexture(base + region.page.name, region, attA);
-      region.texture = SpineTexture.from(tex.source);
-      if (att.color) att.color.a = 1;   // attA 已烘進 float（factor＋alpha），中和摺疊避免二次
-      slot.data.blendMode = 0;          // 'normal' = ONE, OneMinusSrcAlpha（遊戲 blend）
-      log('[hdr] ' + slot.data.name + ' <- ' + region.page.name + ' F=' + (GAMMA_TO_LINEAR(1/attA)*attA).toFixed(2));
+      if (!remapped.has(att)) {
+        remapped.add(att);
+        const tex = await hdrRegionTexture(base + region.page.name, region, attA);
+        region.texture = SpineTexture.from(tex.source);
+        remapAttachmentUVs(att, region);   // 必須在賦值後、渲染前：attachment.uvs 是 page 空間
+      }
+      // att.color 不中和：PMA 摺疊（×slot.a×att.a）＝遊戲頂點色語義（pmaVertexColors=true 詮釋）
+      // blend 尊重 skel 資料：additive 槽＝pixi 'add'（One,One 真加法）；normal 槽＝OMISA。
+      // 不能全部設 normal：Lens_flare 貼圖 alpha≈1、falloff 畫在 rgb（暗處 rgb≈40），
+      // OMISA 會把整個場景蓋上 dst×0.33 的暗矩形（2026-10-02 實測水區 229→43）；
+      // 遊戲端 flare 為真加法（暗 rgb 加法不可見）。烘焙零-alpha texel rgb=0，One/One 同樣乾淨。
+      log('[hdr] ' + slot.data.name + ' <- ' + region.page.name + ' attA=' + attA.toFixed(3) + ' blend=' + slot.data.blendMode);
     } catch (e) { log('[hdr] ' + slot.data.name + ' 失敗: ' + (e?.message || e)); }
   }
 }

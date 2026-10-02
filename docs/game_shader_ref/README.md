@@ -8,30 +8,36 @@
 - pmaVertexColors：大廳 spine 為 runtime 建立（bundle 無 SkeletonRenderer 元件）
   → spine-unity 預設 **false**（頂點色不做 CPU 預乘）
 
-## 最終像素級公式（線性空間）
+## 最終像素級公式（線性空間）——2026-10-02 修訂：頂點色為 PMA 合成
 
 ```
-vertexColor = sk×sl×att 合成（rgb 不預乘）= (1,1,1,0.302) for toplight
+vertexColor = sk×sl×att 合成，且為 PMA（pmaVertexColors=true，rgb 已 ×a）：
+    toplight 輸入 = (0.302, 0.302, 0.302, 0.302)
 v = PMAGammaToTargetSpace(vertexColor):
-    a≠0 → v.rgb = GammaToLinear(rgb/a) × a
-    toplight: GammaToLinear(1/0.302)×0.302 = 13.9×0.302 = **4.2（HDR 頂點色！）**
+    v.rgb = GammaToLinear(rgb/a) × a = GammaToLinear(1) × 0.302 = 0.302   ← 無 HDR 爆發
 v.a = 0.302
 
-frag.rgb = tex.rgb × tex.a × v.rgb      [_STRAIGHT_ALPHA_INPUT=1 + 頂點轉換]
-frag.a   = tex.a × v.a                  = tex.a × 0.302
+frag.rgb = tex.rgb(線性) × tex.a × v.rgb      [_STRAIGHT_ALPHA_INPUT=1]
+frag.a   = tex.a × v.a                        = tex.a × 0.302
 out.rgb  = frag.rgb + dst.rgb × (1 − frag.a)   [Blend One OneMinusSrcAlpha]
 ```
 
-## 機制解釋：為什麼遊戲的光這麼亮
+**舊詮釋（2026-10-01 版「att.a 經 /a×a 變 HDR ×4.89」）已被實測否定**：該推導假設
+SkeletonRenderer 頂點色為 straight 合成（pmaVertexColors=false 的 spine-unity 預設），
+但遊戲是 runtime 建立＋il2cpp 自訂——實機截圖中 beam 是細微高光掃過，而 HDR ×4.89
+詮釋在我們管線上把整個上半屏加法飽和（face 253.5 vs 實機 220.4）。（A）PMA 詮釋的旁證：
+① 實機 beam 細微；② 穹頂實測 202.5-205.7 vs 實機 200.3（+2~+5）；③ 動畫 alpha 脈衝下
+兩側都線性 in s（straight 詮釋會 1/s 發散，物理不合理）；④ 舊 trueAdd 實驗（×0.302）
+dome 192 為史上最接近的加法變體。**殘差 −8（trueAdd 時代）來自合成空間：遊戲在線性
+空間合成後 sRGB encode，我們的 baseline 在 sRGB 空間直接合成——完整像素級需 linear RT。**
 
-attachment alpha 0.302 經 PMAGammaToTargetSpace 的「除以 a 再線性化」：
-`linear(1/0.302)×0.302 = 4.2` —— **頂點色變成 HDR ×4.2**。
-toplight（灰紫 rgb 0.267 線性）× tex.a × 4.2：
-- beam 核心（texA 0.87）：+0.976 線性 → 台座/穹頂爆白 ✓
-- 台座羽化（texA 0.15）：+0.168 → 250 白 ✓
-- 零 alpha texel（洋紅）：×0 ✓ 無洩漏，左下乾淨 ✓
-- 霧/水（beam 中段）：強提亮 ✓
-所有實機觀察由同一公式解釋。kivo 的 screen 為 LDR 近似（柔性和模擬 HDR 滾降）。
+## 機制解釋（修訂）
+
+attachment alpha 0.302 經 PMA 摺疊自然進入 frag（rgb 與 alpha 同 ×0.302）——**pixi
+batcher 的 colorBit PMA 打包（vColor.rgb = aColor.rgb×aColor.a）就是遊戲語義本身**，
+烘焙不需任何魔法因子：bake rgb = GammaToLinear(tex)×texA、alpha = texA、
+att.color 不中和、blend 尊重 skel 資料（additive=One/One、normal=One/OMISA）。
+Spine/Skeleton-PMA-Additive 變體（同資料夾）即 additive 槽的材質。
 
 ## 我們的實作路徑
 光槽自訂 shader（pixi batcher 客製或 filter）：取樣 raw straight 貼圖，
