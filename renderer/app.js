@@ -1,5 +1,5 @@
-import { Application, Assets, Texture, Sprite, MeshSimple, Container, BlurFilter, ColorMatrixFilter, Cache, UniformGroup, GlProgram, Filter } from 'pixi.js';
-import { Spine, ScaleTimeline } from '@esotericsoftware/spine-pixi-v8';
+import { Application, Assets, Texture, Sprite, MeshSimple, Container, BlurFilter, ColorMatrixFilter, Cache, UniformGroup, GlProgram, Filter, BufferImageSource } from 'pixi.js';
+import { Spine, ScaleTimeline, SpineTexture } from '@esotericsoftware/spine-pixi-v8';
 import { Vector2 } from '@esotericsoftware/spine-core';
 import { i as initClickFx } from '../assets/clickfx/clickFx.js';
 
@@ -344,10 +344,86 @@ const log = (s) => console.log('[lobby]', s);
 const fixAdditiveSlots = (obj) => {
   let n = 0;
   for (const slot of obj.skeleton.slots) {
+    if (HDR_MODE && /light|flare/i.test(slot.data.name)) continue;   // hdr：prepareHdrLights 接手（float 貼圖＋normal blend）
     if (slot.data.blendMode === 1 && /light|flare/i.test(slot.data.name)) { slot.data.blendMode = 3; n++; }
   }
   return n;
 };
+
+// ---- 像素級遊戲公式（hdr=1）--------------------------------------------
+// 依據：docs/game_shader_ref/（遊戲 Spine/Skeleton 4.2 著色器原始碼＋材質 dump）。
+// 遊戲逐像素（線性空間、Blend One OneMinusSrcAlpha）：
+//   v.rgb = GammaToLinear(skRGB×slRGB×attRGB / (skA×slA×attA)) × (skA×slA×attA)
+//   v.a   = skA×slA×attA
+//   frag.rgb = tex.rgb(線性) × tex.a × v.rgb      [_STRAIGHT_ALPHA_INPUT=1]
+//   frag.a   = tex.a × v.a
+//   out = frag + dst×(1−frag.a)
+// 實作：把公式烤進 rgba32float region 貼圖（rgb/alpha 通道解耦），槽 blend 設
+// 'normal'（ONE, OneMinusSrcAlpha）→ 逐項等於遊戲。factor 來自各槽 attachment alpha
+// （toplight 0.302 → 4.887；Lens_flare 0.667 → 1.691）。
+const HDR_MODE = /(?:^|&)hdr=1/.test(location.hash + location.search);
+const GAMMA_TO_LINEAR = (x) => x <= 0.04045 ? x/12.92 : Math.pow((x+0.055)/1.055, 2.4);
+// Float32 → half float（three.js DataUtils 同款位元轉換）
+const _f32view = new Float32Array(1);
+const _i32view = new Int32Array(_f32view.buffer);
+const toHalf = (val) => {
+  _f32view[0] = val;
+  const x = _i32view[0];
+  let bits = (x >> 16) & 0x8000;
+  let m = (x >> 12) & 0x07ff;
+  const e = (x >> 23) & 0xff;
+  if (e < 103) return bits;
+  if (e > 142) { bits |= 0x7c00; bits |= ((e === 255) ? 0 : 1) && (x & 0x007fffff); return bits; }
+  if (e === 142) { bits |= ((x & 0x007fffff) | 0x00800000) >> 13; return bits; }
+  bits |= ((e - 112) << 10) | (m >> 1);
+  bits += (m & 1);
+  return bits;
+};
+
+async function hdrRegionTexture(pageUrl, region, attA) {
+  const blob = await (await fetchRetry(pageUrl)).blob();
+  const bmp = await createImageBitmap(blob, { premultiplyAlpha: 'none' });
+  const w = region.width, h = region.height;
+  const cnv = document.createElement('canvas');
+  cnv.width = w; cnv.height = h;
+  const ctx = cnv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bmp, region.x, region.y, w, h, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  const factor = GAMMA_TO_LINEAR(1/attA) * attA;
+  // rgba16float（WebGL2 核心可線性濾器；rgba32float 在 SwiftShader 缺
+  // OES_texture_float_linear → 貼圖 incomplete → 取樣全黑，2026-10-01 踩過）
+  const out = new Uint16Array(w * h * 4);
+  for (let i = 0, j = 0; i < d.length; i += 4, j += 4) {
+    const a = d[i+3] / 255;
+    out[j]   = toHalf(GAMMA_TO_LINEAR(d[i]/255) * a * factor);
+    out[j+1] = toHalf(GAMMA_TO_LINEAR(d[i+1]/255) * a * factor);
+    out[j+2] = toHalf(GAMMA_TO_LINEAR(d[i+2]/255) * a * factor);
+    out[j+3] = toHalf(a * attA);
+  }
+  const src = new BufferImageSource({ resource: out, width: w, height: h, format: 'rgba16float', alphaMode: 'premultiplied-alpha' });
+  try { src.style.addressModeU = 'clamp-to-edge'; src.style.addressModeV = 'clamp-to-edge'; } catch {}
+  return new Texture({ source: src });
+}
+
+async function prepareHdrLights(obj, atlasUrl) {
+  if (!HDR_MODE || !obj?.skeleton || !atlasUrl) return;
+  const base = atlasUrl.slice(0, atlasUrl.lastIndexOf('/') + 1);
+  for (const slot of obj.skeleton.slots) {
+    if (!/light|flare/i.test(slot.data.name)) continue;
+    try {
+      const att = slot.getAttachment();
+      const region = att?.region;
+      if (!region || !region.page) continue;
+      const attA = att.color?.a ?? 1;
+      const tex = await hdrRegionTexture(base + region.page.name, region, attA);
+      region.texture = SpineTexture.from(tex.source);
+      if (att.color) att.color.a = 1;   // attA 已烘進 float（factor＋alpha），中和摺疊避免二次
+      slot.data.blendMode = 0;          // 'normal' = ONE, OneMinusSrcAlpha（遊戲 blend）
+      log('[hdr] ' + slot.data.name + ' <- ' + region.page.name + ' F=' + (GAMMA_TO_LINEAR(1/attA)*attA).toFixed(2));
+    } catch (e) { log('[hdr] ' + slot.data.name + ' 失敗: ' + (e?.message || e)); }
+  }
+}
+
 
 // ---- camera (lobby_camera_config.json) ----
 const CAMERA = { maxScale: 4, weight: 0.5 };
@@ -6304,6 +6380,7 @@ async function loadLobby(name) {
     if (!alive()) return;   // 被超車：不可再建 spine，否則蓋掉新大廳
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
     fixAdditiveSlots(spine);
+    prepareHdrLights(spine, charAssets[1]);
     const sch = SCHEDULE?.lobbies?.[name];
     currentLobbyVoiceFolder = sch?.voiceFolder || null;
     voiceSkip.clear();
