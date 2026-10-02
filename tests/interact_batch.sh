@@ -18,7 +18,7 @@ while read -r L; do
   [ -z "$L" ] && continue
   i=$((i+1))
   echo "[$(date +%H:%M:%S)] ($i/$total) $L" >> /tmp/bq/interact_batch.log
-  LOBBY="$L" TIMEOUT_MS=150000 timeout 180 ./node_modules/.bin/electron tests/interact_main.js > /dev/null 2>&1
+  LOBBY="$L" TIMEOUT_MS=150000 timeout -k 10 180 ./node_modules/.bin/electron tests/interact_main.js > /dev/null 2>&1 < /dev/null
   ok=$?
   echo "  exit=$ok lines=$(wc -l < /tmp/bq/interact_${L}.json 2>/dev/null || echo 0)" >> /tmp/bq/interact_batch.log
 done < "$KEYS"
