@@ -6466,15 +6466,23 @@ async function loadLobby(name) {
     : !!(entry.bg) || !!(entry.scene && entry.scene.skel && entry.scene.skel !== entry.skel);
   // 圖層順序：bg 最底 → spine（本體）中 → scene（特寫）最頂（前景）。其餘 UI/對話在互動時
   // 才 addChild，自然位於最上層。
+  // 注意：baPostOn 時 ticker 的 ensurePostWrap 會把 stage children 搬進 postWrap——
+  // loadScene 的 await 期間必定發生（Hoshino 等有場景的大廳），bg/spine/scene 可能散在
+  // 兩個容器，直接 app.stage.setChildIndex 會拋「The supplied Container must be a child
+  // of the caller」。統一收進當前圖層根（postWrap 或 stage）再排序。
+  const layerRoot = (baPostOn && postWrap && postWrap.parent === app.stage) ? postWrap : app.stage;
+  for (const c of [bg, spine, scene]) {
+    if (c && c.parent !== layerRoot) layerRoot.addChild(c);   // addChild 自動脫離舊 parent
+  }
   if (bg && scene) {
-    app.stage.setChildIndex(bg, 0);
-    app.stage.setChildIndex(spine, 1);
-    app.stage.setChildIndex(scene, app.stage.children.length - 1);
+    layerRoot.setChildIndex(bg, 0);
+    layerRoot.setChildIndex(spine, 1);
+    layerRoot.setChildIndex(scene, layerRoot.children.length - 1);
   } else if (scene) {
-    app.stage.setChildIndex(scene, app.stage.children.length - 1);
-    app.stage.setChildIndex(spine, app.stage.children.length - 2 >= 0 ? app.stage.children.length - 2 : 0);
+    layerRoot.setChildIndex(scene, layerRoot.children.length - 1);
+    layerRoot.setChildIndex(spine, Math.max(0, layerRoot.children.length - 2));
   } else {
-    app.stage.setChildIndex(spine, Math.max(0, app.stage.children.length - 1));
+    layerRoot.setChildIndex(spine, Math.max(0, layerRoot.children.length - 1));
   }
   fitted = false;
   // frame on the Idle pose (mesh geometry only exists after a render), then play the intro
