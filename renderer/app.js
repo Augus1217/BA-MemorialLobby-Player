@@ -341,11 +341,42 @@ const log = (s) => console.log('[lobby]', s);
 // 比對 kivo _fix skel 實證（Hanako 3/3、CH0220 8/8、Seia 1/1 個 Additive 槽全改）。
 // 不能「全部 Additive→Screen」：全庫 4296 個 Additive 槽中有眼睛/背景/光暈等
 // 非光效槽（kivo 未修角色在站上仍維持 Additive），名稱過濾才不會改壞眼睛。
-const fixAdditiveSlots = (obj) => {
+// 光槽分流（2026-10-02 Seia 案）：additive 槽依「貼圖 alpha 結構」二分——
+//   alpha 造型（中位數 < 0.5，如 Hanako toplight p50=0.24）→ hdr 烘焙 One/One（fold 供給 ×attA）
+//   不透明 falloff-in-rgb（alpha≈1 全域，如 Lens_flare／Seia top_light 1016×755 全屏光罩）
+//     → 維持 kivo 的 Screen 混色：One/One 會把亮 blob 以線性值直加（R+0.6）→ 全屏暖罩
+//       （實測全 frame R-B：hdr 39.6-43.2 vs 實機 33.4 / kivo 17.7-33.9）
+// normal-blend 光槽（如 Seia Nose_Light）不動：kivo 的 sRGB 渲染已與實機一致，
+//   線性烘焙在 sRGB 畫布直接顯示會放大暖度比（實測臉部 +52.6 vs 實機 +34~45）。
+const hdrAlphaShaped = (region, base) => {
+  try {
+    const page = _hdrPageData.get(base + region.page.name);
+    if (!page) return true;   // 頁面未預載（不應發生）：保守走烘焙
+    const as = page.data, W = page.w;
+    const xs = [];            // 中位數取樣（stride 4）
+    for (let y = region.y; y < region.y + region.height; y += 4) {
+      for (let x = region.x; x < region.x + region.width; x += 4) xs.push(as[(y * W + x) * 4 + 3]);
+    }
+    xs.sort((a, b) => a - b);
+    return xs[xs.length >> 1] < 128;
+  } catch { return true; }
+};
+async function prefillHdrPageData(atlasUrl) {
+  if (!HDR_MODE || !atlasUrl) return;
+  const base = atlasUrl.slice(0, atlasUrl.lastIndexOf('/') + 1);
+  const text = await (await fetchRetry(atlasUrl)).text();
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\S+\.png$/.test(line.trim())) await hdrPageData(base + line.trim());
+  }
+}
+const fixAdditiveSlots = (obj, atlasUrl) => {
   let n = 0;
+  const base = atlasUrl ? atlasUrl.slice(0, atlasUrl.lastIndexOf('/') + 1) : null;
   for (const slot of obj.skeleton.slots) {
-    if (HDR_MODE && /light|flare/i.test(slot.data.name)) continue;   // hdr：prepareHdrLights 接手（float 貼圖＋skel blend）
-    if (slot.data.blendMode === 1 && /light|flare/i.test(slot.data.name)) { slot.data.blendMode = 3; n++; }
+    if (!/light|flare/i.test(slot.data.name)) continue;
+    if (slot.data.blendMode !== 1) continue;   // normal 光槽：kivo 渲染不動
+    if (HDR_MODE && base && hdrAlphaShaped(slot.getAttachment()?.region, base)) continue;   // alpha 造型：hdr 烘焙
+    if (slot.data.blendMode === 1) { slot.data.blendMode = 3; n++; }   // 不透明 falloff：kivo Screen
   }
   return n;
 };
@@ -465,6 +496,9 @@ async function prepareHdrLights(obj, atlasUrl) {
       const att = slot.getAttachment();
       const region = att?.region;
       if (!region || !region.page) continue;
+      // 只烘焙 skel-additive 且「alpha 造型」的槽（其餘分流見 fixAdditiveSlots 上方註解）
+      if (slot.data.blendMode !== 1) continue;
+      if (!hdrAlphaShaped(region, base)) continue;
       if (region.rotate) {   // 烘焙路徑未處理旋轉 page rect，退回原貼圖（kivo 語意）
         log('[hdr] ' + slot.data.name + ' rotate=' + region.rotate + ' 略過烘焙');
         continue;
@@ -1630,7 +1664,8 @@ async function playExtraSkeleton(skelName, clips, vis) {
       const atlasUrl = assetUrl(`${base}${skRaw}.atlas`);
       await Assets.load(atlasUrl);
       obj = Spine.from({ skeleton: skelUrl, atlas: atlasUrl });
-      fixAdditiveSlots(obj);
+      await prefillHdrPageData(atlasUrl);
+      fixAdditiveSlots(obj, atlasUrl);
       obj.skelName = skelNorm(skRaw);
       applySkeletonMix(obj, skRaw);
       extras.push(obj);
@@ -6016,7 +6051,8 @@ async function loadScene(entry) {
       await Assets.load(skel);
       await Assets.load(atlas);
       const obj = Spine.from({ skeleton: skel, atlas });
-      fixAdditiveSlots(obj);
+      await prefillHdrPageData(atlas);
+      fixAdditiveSlots(obj, atlas);
       obj.skelName = (res.skel.startsWith('./') ? res.skel.slice(2) : res.skel).replace(/\.(skel|json)$/i, '').toLowerCase();
       applySkeletonMix(obj, obj.skelName);
       // 不在此自動播放——由 startBgSequence 依 BA 時間軸統一驅動（避免搶在
@@ -6442,7 +6478,8 @@ async function loadLobby(name) {
     await Promise.all(charAssets.map(a => Assets.load(a)));
     if (!alive()) return;   // 被超車：不可再建 spine，否則蓋掉新大廳
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
-    fixAdditiveSlots(spine);
+    await prefillHdrPageData(charAssets[1]);
+    fixAdditiveSlots(spine, charAssets[1]);
     // hdr 烘焙必須在 addChild/開播前完成（先好再播）：異步跑到一半會讓光槽逐槽換貼圖，
     // 開場出現「怪怪的→閃一下」。頁面解碼有快取，整體遞增延遲 <0.5s。
     try { await prepareHdrLights(spine, charAssets[1]); } catch (e) { log('[hdr] prepare 失敗: ' + (e?.message || e)); }
