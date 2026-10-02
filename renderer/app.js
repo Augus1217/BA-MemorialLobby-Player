@@ -344,24 +344,25 @@ const log = (s) => console.log('[lobby]', s);
 const fixAdditiveSlots = (obj) => {
   let n = 0;
   for (const slot of obj.skeleton.slots) {
-    if (HDR_MODE && /light|flare/i.test(slot.data.name)) continue;   // hdr：prepareHdrLights 接手（float 貼圖＋normal blend）
+    if (HDR_MODE && /light|flare/i.test(slot.data.name)) continue;   // hdr：prepareHdrLights 接手（float 貼圖＋skel blend）
     if (slot.data.blendMode === 1 && /light|flare/i.test(slot.data.name)) { slot.data.blendMode = 3; n++; }
   }
   return n;
 };
 
-// ---- 像素級遊戲公式（hdr=1）--------------------------------------------
+// ---- 自研像素級光線公式（預設開啟；hdr=0 退回 kivo screen 基準）-----------------
 // 依據：docs/game_shader_ref/（遊戲 Spine/Skeleton 4.2 著色器原始碼＋材質 dump）。
-// 遊戲逐像素（線性空間、Blend One OneMinusSrcAlpha）：
+// 遊戲逐像素（線性空間；頂點色為 PMA 合成，pmaVertexColors=true 詮釋）：
 //   v.rgb = GammaToLinear(skRGB×slRGB×attRGB / (skA×slA×attA)) × (skA×slA×attA)
 //   v.a   = skA×slA×attA
 //   frag.rgb = tex.rgb(線性) × tex.a × v.rgb      [_STRAIGHT_ALPHA_INPUT=1]
 //   frag.a   = tex.a × v.a
 //   out = frag + dst×(1−frag.a)
-// 實作：把公式烤進 rgba32float region 貼圖（rgb/alpha 通道解耦），槽 blend 設
-// 'normal'（ONE, OneMinusSrcAlpha）→ 逐項等於遊戲。factor 來自各槽 attachment alpha
-// （toplight 0.302 → 4.887；Lens_flare 0.667 → 1.691）。
-const HDR_MODE = /(?:^|&)hdr=1/.test(location.hash + location.search);
+// 實作：光槽 region 烘成 rgba16float（rgb=線性×texA、alpha=texA，零魔法因子），
+// UV 重映射到烘焙圖、att.color 不中和——PMA 摺疊自然供給 ×attA；
+// blend 尊重 skel（additive=One/One、normal=OMISA）。因子 ×4.89 的 straight 頂點色
+// 詮釋已被實測否定（全屏飽和；實機 beam 細微），詳見 docs/game_shader_ref/README.md。
+const HDR_MODE = !/(?:^|&)hdr=0/.test(location.hash + location.search);
 const GAMMA_TO_LINEAR = (x) => x <= 0.04045 ? x/12.92 : Math.pow((x+0.055)/1.055, 2.4);
 // Float32 → half float（three.js DataUtils 同款位元轉換）
 const _f32view = new Float32Array(1);
