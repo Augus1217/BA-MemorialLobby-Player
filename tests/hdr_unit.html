@@ -620,6 +620,7 @@ function renderScene(list) {
     att0.region.texture = oldTex;
 
     // T11：全 page 尺寸烘焙（page-space UV 自然正確）→ 驗證 spine 路徑端點等於遊戲公式
+    let gP = null;
     try {
       const bmp2 = await createImageBitmap(await (await fetch(base + 'Hanako_home.png')).blob(), { premultiplyAlpha: 'none' });
       const PW = 2048, PH = 2048;
@@ -647,7 +648,7 @@ function renderScene(list) {
       if (att.color) att.color.a = 1;   // 中和（production 做法）
       toplight.color.a = 1;
       sp.update(0);
-      const gP = grab();
+      gP = grab();
       dump(gP.img, 'P_pagebake');
       // 分布對照：page-bake spine 渲染 vs plain sprite（region bake 1:1）——兩者取樣同一內容
       const pL = [];
@@ -658,6 +659,77 @@ function renderScene(list) {
       att0.region.texture = oldTex;
     } catch (e) {
       skipTest('T11-pagebake-uv', 'exception: ' + (e?.message || e));
+    }
+
+    // T12：UV 重映射驗證——region 烘焙圖＋重映射 UV 應與 page 烘焙渲染一致（production 修法）
+    try {
+      const region2 = att0.region;
+      const H = region2.page.height;
+      console.log(`UNIT T12-uv page=${region2.page.width}x${H} u=${region2.u.toFixed(5)}..${region2.u2.toFixed(5)} v=${region2.v.toFixed(5)}..${region2.v2.toFixed(5)} rotate=${region2.rotate} x=${region2.x} y=${region2.y} w=${region2.width} h=${region2.height}`);
+      // v 軸方向判定：region.v/v2 哪個對應 image row y（rect 頂）
+      const errTop = Math.abs(region2.v * H - region2.y) + Math.abs(region2.v2 * H - (region2.y + region2.height));
+      const errBottom = Math.abs((1 - region2.v2) * H - region2.y) + Math.abs((1 - region2.v) * H - (region2.y + region2.height));
+      const topOrigin = errTop <= errBottom;
+      // 重建 region 尺寸烘焙圖（同 production hdrRegionTexture）
+      const bmp3 = await createImageBitmap(await (await fetch(base + 'Hanako_home.png')).blob(), { premultiplyAlpha: 'none' });
+      const rw2 = region2.width, rh2 = region2.height;
+      const cnv3 = document.createElement('canvas'); cnv3.width = rw2; cnv3.height = rh2;
+      const c3 = cnv3.getContext('2d', { willReadFrequently: true });
+      c3.drawImage(bmp3, region2.x, region2.y, rw2, rh2, 0, 0, rw2, rh2);
+      const d3 = c3.getImageData(0, 0, rw2, rh2).data;
+      const bakeBuf = new Uint16Array(rw2 * rh2 * 4);
+      for (let i = 0, j = 0; i < d3.length; i += 4, j += 4) {
+        const a = d3[i+3] / 255;
+        bakeBuf[j]   = toHalf(GAMMA_TO_LINEAR(d3[i] / 255) * a * F);
+        bakeBuf[j+1] = toHalf(GAMMA_TO_LINEAR(d3[i+1] / 255) * a * F);
+        bakeBuf[j+2] = toHalf(GAMMA_TO_LINEAR(d3[i+2] / 255) * a * F);
+        bakeBuf[j+3] = toHalf(a * attA);
+      }
+      const bakeSrc = new BufferImageSource({ resource: bakeBuf, width: rw2, height: rh2, format: 'rgba16float', alphaMode: 'premultiplied-alpha' });
+      try { bakeSrc.style.addressModeU = 'clamp-to-edge'; bakeSrc.style.addressModeV = 'clamp-to-edge'; } catch {}
+
+      const origUVs = att0.uvs.slice();
+      const applyRemap = (invertV) => {
+        const uvs = att0.uvs;
+        const du = region2.u2 - region2.u, dv = region2.v2 - region2.v;
+        for (let i = 0; i < uvs.length; i += 2) {
+          uvs[i] = (uvs[i] - region2.u) / du;
+          uvs[i+1] = (topOrigin !== invertV)
+            ? (uvs[i+1] - region2.v) / dv
+            : (region2.v2 - uvs[i+1]) / dv;
+        }
+      };
+      const medianDiff = (g1, g2) => {
+        const ds = [];
+        for (let i = 0; i < g1.length; i += 4) ds.push(Math.abs(g1[i] - g2[i]));
+        return median(ds);
+      };
+
+      // 正確 remap
+      att0.uvs.set(origUVs);
+      applyRemap(false);
+      region2.texture = SpineTexture.from(new Texture({ source: bakeSrc }).source);
+      if (att.color) att.color.a = 1;
+      toplight.color.a = 1;
+      sp.update(0);
+      const gR = grab();
+      dump(gR.img, 'R_remap');
+      const diffOK = gP ? medianDiff(gR.img, gP.img) : NaN;
+      // 對照組：故意反向 v
+      att0.uvs.set(origUVs);
+      applyRemap(true);
+      sp.update(0);
+      const gW = grab();
+      dump(gW.img, 'W_wrongflip');
+      const diffBad = gP ? medianDiff(gW.img, gP.img) : NaN;
+      report('T12-uv-remap', diffOK < 6 && diffBad > diffOK * 3,
+        `v-axis=${topOrigin ? 'top-origin' : 'bottom-origin(v=GL)'} medianDiff vs pagebake: remap=${diffOK?.toFixed(1)} wrongflip=${diffBad?.toFixed(1)} => ${diffOK < 6 ? 'REMAP-OK' : 'MISMATCH'}`);
+      // 還原
+      att0.uvs.set(origUVs);
+      region2.texture = oldTex;
+      sp.update(0);
+    } catch (e) {
+      skipTest('T12-uv-remap', 'exception: ' + (e?.message || e));
     }
   } catch (e) {
     skipTest('T6-spine-att-alpha', 'exception: ' + (e?.message || e));
