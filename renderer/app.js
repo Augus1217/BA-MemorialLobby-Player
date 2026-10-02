@@ -380,15 +380,28 @@ const toHalf = (val) => {
   return bits;
 };
 
+const _hdrPageData = new Map();   // pageUrl -> {w, h, data}：整頁只解碼/讀取一次（66 槽共享頁面）
+async function hdrPageData(pageUrl) {
+  let p = _hdrPageData.get(pageUrl);
+  if (!p) {
+    const bmp = await createImageBitmap(await (await fetchRetry(pageUrl)).blob(), { premultiplyAlpha: 'none' });
+    const cnv = document.createElement('canvas');
+    cnv.width = bmp.width; cnv.height = bmp.height;
+    const ctx = cnv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(bmp, 0, 0);
+    p = { w: bmp.width, h: bmp.height, data: ctx.getImageData(0, 0, bmp.width, bmp.height).data };
+    _hdrPageData.set(pageUrl, p);
+    if (_hdrPageData.size > 4) {   // 每頁 ~16MB：只留最近 4 頁，跨大廳不積記憶體
+      const oldest = _hdrPageData.keys().next().value;
+      _hdrPageData.delete(oldest);
+    }
+  }
+  return p;
+}
+
 async function hdrRegionTexture(pageUrl, region, attA) {
-  const blob = await (await fetchRetry(pageUrl)).blob();
-  const bmp = await createImageBitmap(blob, { premultiplyAlpha: 'none' });
+  const page = await hdrPageData(pageUrl);
   const w = region.width, h = region.height;
-  const cnv = document.createElement('canvas');
-  cnv.width = w; cnv.height = h;
-  const ctx = cnv.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(bmp, region.x, region.y, w, h, 0, 0, w, h);
-  const d = ctx.getImageData(0, 0, w, h).data;
   // 因子全部交給 batcher 的自然 PMA 摺疊（cache color = skeleton×slot×attachment）：
   // 烘焙只做線性化＋texA 預乘，attA 不進烘焙也不中和——fold 會供給 ×attA（遊戲
   // pmaVertexColors=true 詮釋：v.rgb = linear(1)×attA，實機 beam 細微、無 HDR 爆發；
@@ -397,12 +410,16 @@ async function hdrRegionTexture(pageUrl, region, attA) {
   // rgba16float（WebGL2 核心可線性濾器；rgba32float 在 SwiftShader 缺
   // OES_texture_float_linear → 貼圖 incomplete → 取樣全黑，2026-10-01 踩過）
   const out = new Uint16Array(w * h * 4);
-  for (let i = 0, j = 0; i < d.length; i += 4, j += 4) {
-    const a = d[i+3] / 255;
-    out[j]   = toHalf(GAMMA_TO_LINEAR(d[i]/255) * a * factor);
-    out[j+1] = toHalf(GAMMA_TO_LINEAR(d[i+1]/255) * a * factor);
-    out[j+2] = toHalf(GAMMA_TO_LINEAR(d[i+2]/255) * a * factor);
-    out[j+3] = toHalf(a);
+  for (let y = 0; y < h; y++) {
+    let si = ((region.y + y) * page.w + region.x) * 4;
+    let j = y * w * 4;
+    for (let x = 0; x < w; x++, si += 4, j += 4) {
+      const a = page.data[si+3] / 255;
+      out[j]   = toHalf(GAMMA_TO_LINEAR(page.data[si] / 255) * a * factor);
+      out[j+1] = toHalf(GAMMA_TO_LINEAR(page.data[si+1] / 255) * a * factor);
+      out[j+2] = toHalf(GAMMA_TO_LINEAR(page.data[si+2] / 255) * a * factor);
+      out[j+3] = toHalf(a);
+    }
   }
   const src = new BufferImageSource({ resource: out, width: w, height: h, format: 'rgba16float', alphaMode: 'premultiplied-alpha' });
   try { src.style.addressModeU = 'clamp-to-edge'; src.style.addressModeV = 'clamp-to-edge'; } catch {}
@@ -432,6 +449,7 @@ function remapAttachmentUVs(att, region) {
 
 async function prepareHdrLights(obj, atlasUrl) {
   if (!HDR_MODE || !obj?.skeleton || !atlasUrl) return;
+  const t0 = performance.now();
   const base = atlasUrl.slice(0, atlasUrl.lastIndexOf('/') + 1);
   // hdrOnly=<regex>：只烘焙名稱符合的槽（隔離貢獻源用）
   const onlyRe = /(?:[&?#])hdrOnly=([^&\s]+)/.exec(location.hash + location.search)?.[1];
@@ -465,6 +483,7 @@ async function prepareHdrLights(obj, atlasUrl) {
       log('[hdr] ' + slot.data.name + ' <- ' + region.page.name + ' attA=' + attA.toFixed(3) + ' blend=' + slot.data.blendMode);
     } catch (e) { log('[hdr] ' + slot.data.name + ' 失敗: ' + (e?.message || e)); }
   }
+  log('[hdr] 烘焙完成 ' + remapped.size + ' 附件，耗時 ' + (performance.now() - t0).toFixed(0) + 'ms');
 }
 
 
@@ -6423,7 +6442,10 @@ async function loadLobby(name) {
     if (!alive()) return;   // 被超車：不可再建 spine，否則蓋掉新大廳
     spine = Spine.from({ skeleton: charAssets[0], atlas: charAssets[1] });
     fixAdditiveSlots(spine);
-    prepareHdrLights(spine, charAssets[1]);
+    // hdr 烘焙必須在 addChild/開播前完成（先好再播）：異步跑到一半會讓光槽逐槽換貼圖，
+    // 開場出現「怪怪的→閃一下」。頁面解碼有快取，整體遞增延遲 <0.5s。
+    try { await prepareHdrLights(spine, charAssets[1]); } catch (e) { log('[hdr] prepare 失敗: ' + (e?.message || e)); }
+    if (!alive()) return;
     const sch = SCHEDULE?.lobbies?.[name];
     currentLobbyVoiceFolder = sch?.voiceFolder || null;
     voiceSkip.clear();
