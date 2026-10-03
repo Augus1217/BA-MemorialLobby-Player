@@ -129,6 +129,7 @@ const BA_DEBUG = (() => {
     probe: /PROBE=1/.test(q),
     probeInteract: /probeInteract=1/.test(q),
     probeBeam: /probeBeam=1/.test(q),
+    probeWater: /probeWater=1/.test(q),
     layout: /LAYOUT=1/.test(q),
     auto: /autostart=1|PROBE=1/.test(q),
     cursorOff: /cursorOff=1/.test(q),
@@ -6345,6 +6346,7 @@ async function loadLobby(name) {
   if (spine) {
     oldTextures = collectTextures(spine);
     spine.state.clearListeners?.();
+    teardownLobbyParticles();   // 粒子層是 spine child，先拆 ticker/層再 destroy
     spine.destroy();
     spine = null;
   }
@@ -6506,6 +6508,7 @@ async function loadLobby(name) {
       if (!alive()) return;
       fitScene();
       playStart();
+      initLobbyParticles(name);   // 大廳 Unity 粒子層（資料驅動，見 lobby_particles.json）
       log(`[layout] ${name}: scene=${!!scene} charScale=${charScale.toFixed(3)} cameraTargetY=${cameraTargetY.toFixed(0)}`);
     }
   };
@@ -7188,7 +7191,7 @@ async function loadBootData() {
 
   const [camera, idx, transforms, icons, chat, touch, zones, schedule, voiceIdx,
          timelines, clipMix, clipGraph, spineMix, titleVoices, flash,
-         bgmCsv, studentsCsv, subtitles, dialogTypes, postConfig, charProfiles] = await Promise.all([
+         bgmCsv, studentsCsv, subtitles, dialogTypes, postConfig, charProfiles, lobbyParticles] = await Promise.all([
     settle(json('assets/data/lobby_camera_config.json')),
     settle(json('assets/data/lobby_index.json').catch(() => json('assets/lobby_index.json'))),
     settle(json('assets/data/lobby_transforms.json')),
@@ -7210,6 +7213,7 @@ async function loadBootData() {
     settle(json('assets/data/lobby_dialog_types.json')),
     settle(json('assets/data/lobby_post_config.json')),
     settle(json('assets/data/char_profiles.json')),
+    settle(json('assets/data/lobby_particles.json')),
   ]);
 
   if (camera?.MaxScale != null) CAMERA.maxScale = camera.MaxScale;
@@ -7232,6 +7236,7 @@ async function loadBootData() {
   DIALOG_TYPES = dialogTypes || {};
   CHAR_PROFILES = charProfiles || null;
   if (postConfig) Object.assign(POST_CONFIG, postConfig);
+  LOBBY_PARTICLES = lobbyParticles || {};
 
   // BGM mapping（CSV → object）
   if (bgmCsv) {
@@ -8126,4 +8131,406 @@ if (BA_DEBUG.probe && BA_DEBUG.probeBeam) {
   };
 }
 
-init().then(() => (window.__probeBeamRun || window.__probeRun)?.()).catch((e) => { console.error('[probe] init failed:', e); showErr(e); });
+// ---- 大廳 Unity 粒子層重建（lobby_particles.json；Hanako 先行）----------------
+// 遊戲大廳 = spine（場景+角色+水效靜態層）+ Unity ParticleSystem 層（來源
+// ui-uilobbyelement-_mxload-prefabs bundle 的 lobby prefab；Hanako 有 15 個
+// ParticleSystem：Star_01-04 四芒星閃爍 ×7、boke 前景散景 ×4、dust 灰塵 ×2、
+// FX/intro_fx_3 無材質引用不重建）。參數由 bundle typetree dump，資料驅動：
+// assets/data/lobby_particles.json[lobbyKey].systems[]。座標為 prefab 骨架
+// local 累積（Unity 米制、與 spine ×0.01 後同空間），掛 spine child 繼承
+// 相機/縮放變換；y 以 spine child 實測方向（遊戲截圖對位校準）。
+let LOBBY_PARTICLES = {};   // lobbyKey -> { systems: [...] }
+let particleLayer = null;   // Spine 的 child；裝各系統的 Container
+let particleSystems = [];   // { def, container, parts:[{sp, age, life, vx, vy, spin}], emitT }
+let particleTickerFn = null;
+// prefab 粒子資料是 Unity 米制（SkeletonData scale 0.01 後）；pixi spine 的 local
+// 單位是 spine 編輯單位（.skel 原始座標，fitScene charScale=vw/2800 證實未套 0.01）
+// →米制 ×100＝編輯單位。
+const PARTICLE_M2E = 100;
+
+// 材質 path_id → 貼圖資產名（assets/particles/{lobbyKey}/<name>.png）。
+// 貼圖抽自遊戲共用特效材質的 _MainTex；對應關係以材質 dump 為準。
+const PARTICLE_TEX_BY_MAT = {
+  '-9196344600820910457': 'star_a',
+  '-4667760338569166115': 'star_b',
+  '-7072478924192317810': 'boke_a',
+  '-6724683030127153740': 'boke_b',
+  '5832294079426220345': 'dust',
+};
+
+// 程式生成佔位貼圖：真貼圖抽檔到位前的開發驗證用（星＝四芒星芒、圓＝軟邊散景）。
+function makePlaceholderTex(name) {
+  const S = 128;
+  const cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const c = cv.getContext('2d');
+  if (name.startsWith('star')) {
+    const g = c.createRadialGradient(S/2, S/2, 0, S/2, S/2, S/2);
+    g.addColorStop(0, 'rgba(255,255,255,0.9)'); g.addColorStop(0.25, 'rgba(255,255,255,0.35)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = g; c.fillRect(0, 0, S, S);
+    c.strokeStyle = 'rgba(255,255,255,0.9)'; c.lineWidth = 3; c.lineCap = 'round';
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      c.beginPath(); c.moveTo(S/2, S/2); c.lineTo(S/2 + dx*S*0.46, S/2 + dy*S*0.46); c.stroke();
+    }
+  } else {
+    const g = c.createRadialGradient(S/2, S/2, 0, S/2, S/2, S/2);
+    g.addColorStop(0, 'rgba(255,255,255,0.55)'); g.addColorStop(0.6, 'rgba(255,255,255,0.22)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = g; c.fillRect(0, 0, S, S);
+  }
+  const t = Texture.from(cv);
+  t.source.label = 'lobby-particle-placeholder-' + name;
+  return t;
+}
+
+function particleTex(lobbyKey, matId, name) {
+  const key = `${lobbyKey}/${name}`;
+  if (!particleTexCache[key]) {
+    // 真貼圖優先（extractor 抽出的 PNG）；缺檔才用佔位（開發期）
+    particleTexCache[key] = Assets.load(assetUrl(`assets/particles/${lobbyKey}/${name}.png`))
+      .then((t) => (particleTexCache[key] = t))
+      .catch(() => (particleTexCache[key] = makePlaceholderTex(name)));
+    return null;   // 首幀未就緒，下一幀起用
+  }
+  const v = particleTexCache[key];
+  return (v && v.source) ? v : null;
+}
+const particleTexCache = {};
+
+// Unity MinMaxCurve 常數取樣（支援 scalar / two-constants / curve with keys）
+function mmcAt(mm, t, rng) {
+  if (!mm) return 1;
+  if (mm.mode === 'scalar' || mm.mode === 'constant') return mm.v ?? 1;
+  if (mm.mode === 'two-constants') return mm.min + (mm.max - mm.min) * rng();
+  if (mm.mode === 'curve') {
+    const k = mm.keys || [];
+    const s = mm.mul ?? 1;
+    if (!k.length) return s;
+    if (t <= k[0].t) return k[0].v * s;
+    for (let i = 1; i < k.length; i++) {
+      if (t <= k[i].t) {
+        const a = k[i-1], b = k[i];
+        const u = (t - a.t) / Math.max(1e-6, b.t - a.t);
+        // 線性近似 Unity 貝茲（斜率只在端點顯著，視覺差可忽略）
+        return (a.v + (b.v - a.v) * u) * s;
+      }
+    }
+    return k[k.length-1].v * s;
+  }
+  return 1;
+}
+function gradAlphaAt(grad, t) {
+  if (!grad) return 1;
+  const ks = grad.alpha || [];
+  if (!ks.length) return 1;
+  if (t <= ks[0].t) return ks[0].a;
+  for (let i = 1; i < ks.length; i++) {
+    if (t <= ks[i].t) {
+      const a = ks[i-1], b = ks[i];
+      const u = (t - a.t) / Math.max(1e-6, b.t - a.t);
+      return a.a + (b.a - a.a) * u;
+    }
+  }
+  return ks[ks.length-1].a;
+}
+function rgbTint(rgb) {
+  return (Math.round(Math.max(0, Math.min(1, rgb[0])) * 255) << 16) |
+         (Math.round(Math.max(0, Math.min(1, rgb[1])) * 255) << 8) |
+          Math.round(Math.max(0, Math.min(1, rgb[2])) * 255);
+}
+function gradRgbAt(grad, t, fallback) {
+  const ks = grad?.rgb || [];
+  if (ks.length < 2) return fallback;
+  for (let i = 1; i < ks.length; i++) {
+    if (t <= ks[i].t) {
+      const a = ks[i-1], b = ks[i];
+      const u = (t - a.t) / Math.max(1e-6, b.t - a.t);
+      return [0,1,2].map((j) => a.rgb[j] + (b.rgb[j] - a.rgb[j]) * u);
+    }
+  }
+  return ks[ks.length-1].rgb;
+}
+
+function teardownLobbyParticles() {
+  if (particleTickerFn) { app.ticker.remove(particleTickerFn); particleTickerFn = null; }
+  if (particleLayer) { particleLayer.destroy({ children: true }); particleLayer = null; }
+  particleSystems = [];
+}
+
+function initLobbyParticles(lobbyKey) {
+  teardownLobbyParticles();
+  const def = LOBBY_PARTICLES?.[lobbyKey];
+  if (!def?.systems?.length || !spine) { log(`[particles] ${lobbyKey}: 跳過（def=${def ? def.systems?.length ?? 0 : 'null'} spine=${!!spine}）`); return; }
+  particleLayer = new Container();
+  particleLayer.eventMode = 'none';
+  particleLayer.label = 'lobbyParticles';
+  spine.addChild(particleLayer);   // 繼承 spine 的相機/縮放變換（遊戲中粒子掛 SkeletonUtility root 下，同空間）
+  for (const sys of def.systems) {
+    if (!sys.material || sys.material.m_PathID === 0) continue;   // FX/intro_fx 無材質引用，遊戲端亦非本層視覺
+    const texName = PARTICLE_TEX_BY_MAT[String(sys.material.m_PathID)];
+    if (!texName) { log(`[particles] 無貼圖映射: ${sys.name} mat=${sys.material.m_PathID}`); continue; }
+    const container = new Container();
+    container.eventMode = 'none';
+    // 系統原點：prefab 米制 world（Unity y-up、SkeletonUtility root 原點）→ 編輯單位 → pixi y-down
+    container.position.set(sys.world[0] * PARTICLE_M2E, -sys.world[1] * PARTICLE_M2E);
+    particleLayer.addChild(container);
+    particleSystems.push({ def: sys, texName, container, parts: [], emitT: 0, rng: Math.random });
+  }
+  if (!particleSystems.length) { particleLayer.destroy(); particleLayer = null; log(`[particles] ${lobbyKey}: 全系統被濾`); return; }
+  log(`[particles] ${lobbyKey}: ${particleSystems.length} 系統（Star=${particleSystems.filter(p=>p.def.name.startsWith('Star')).length} boke=${particleSystems.filter(p=>p.def.name.startsWith('boke')).length} dust=${particleSystems.filter(p=>p.def.name.startsWith('dust')).length}）`);
+  // 診斷：3.5s 後回報各系統活粒子數與樣本螢幕位置（定位座標/可見性問題用）
+  setTimeout(() => {
+    if (!particleLayer || !spine) return;
+    for (const sys of particleSystems) {
+      const gp = sys.container.getGlobalPosition();
+      const sample = sys.parts[0];
+      log(`[particles] ${sys.def.name}: live=${sys.parts.length} layerGlobal=(${gp.x.toFixed(0)},${gp.y.toFixed(0)}) scale=${spine.scale.x.toFixed(3)}` +
+        (sample ? ` sample=(${sample.x.toFixed(2)},${sample.y.toFixed(2)}) a=${sample.sp.alpha.toFixed(2)} w=${(sample.sp.width*Math.abs(spine.scale.x)).toFixed(0)}px tex=${!!sample.sp.texture?.source}` : ' sample=none'));
+    }
+  }, 3500);
+  let prev = performance.now();
+  particleTickerFn = () => {
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - prev) / 1000);
+    prev = now;
+    tickLobbyParticles(dt);
+  };
+  app.ticker.add(particleTickerFn, null, UPDATE_PRIORITY.LOW);
+}
+
+function tickLobbyParticles(dt) {
+  if (!particleLayer || !spine) return;
+  for (const sys of particleSystems) {
+    const d = sys.def;
+    // 發射（Unity rateOverTime；無 prewarm，進場後自然累積）
+    sys.emitT -= dt;
+    const rate = d.emissionRate || 0;
+    while (sys.emitT <= 0) {
+      sys.emitT += rate > 0 ? 1 / rate : Infinity;
+      if (rate <= 0) break;
+      const live = sys.parts.length;
+      if (live < (d.maxParticles || 1000)) spawnParticle(sys);
+    }
+    // 更新
+    for (let i = sys.parts.length - 1; i >= 0; i--) {
+      const p = sys.parts[i];
+      p.age += dt;
+      const t = p.age / p.life;
+      if (t >= 1) { p.sp.destroy(); sys.parts.splice(i, 1); continue; }
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      const sizeOL = d.sizeOverLifetime?.length ? mmcAt({mode:'curve', keys:d.sizeOverLifetime}, t, sys.rng) : 1;
+      // 目標編輯單位寬＝baseSize×sizeOL；sprite scale＝目標寬/貼圖像素寬
+      p.sp.scale.set((p.baseSize * sizeOL) / (p.sp.texture?.width || 128));
+      const a = p.baseAlpha * gradAlphaAt(d.colorOverLifetime?.max, t) * (d.colorOverLifetime?.mode === 'curve' ? 1 : 1);
+      const rgb = gradRgbAt(d.colorOverLifetime?.max, t, p.rgb);
+      p.sp.alpha = Math.max(0, Math.min(1, a));
+      p.sp.tint = rgbTint(rgb);
+    }
+  }
+}
+
+function spawnParticle(sys) {
+  const d = sys.def;
+  let tex = particleTex(currentLobby, d.material.m_PathID, sys.texName);
+  if (!tex) { sys.emitT = 0.25; return; }   // 貼圖載入中，稍後再發
+  const sp = new Sprite(tex);
+  sp.anchor.set(0.5);
+  sp.blendMode = 'add';
+  // 發射位置：shape type 5（Box）→ 盒內均勻隨機（m_Scale 為盒尺寸，local 單位×淨 scale＝米→編輯）
+  let ox = 0, oy = 0;
+  if (d.shape && d.shape.type === 5) {
+    const ns = d.netScale ?? 1;
+    ox = (sys.rng() - 0.5) * (d.shape.scale[0] || 0) * ns * PARTICLE_M2E;
+    oy = (sys.rng() - 0.5) * (d.shape.scale[1] || 0) * ns * PARTICLE_M2E;
+  }
+  sp.position.set(ox, -oy);
+  const life = mmcAt(d.startLifetime, 0, sys.rng);
+  // 尺寸：startSize（local 單位）× 淨 scale＝米制直徑 → ×M2E＝編輯單位
+  const size = mmcAt(d.startSize, 0, sys.rng) * (d.netScale ?? 1) * PARTICLE_M2E;
+  const speed = mmcAt(d.startSpeed, 0, sys.rng) * (d.netScale ?? 1) * PARTICLE_M2E;
+  // 速度方向：startSpeed 沿 -Y（Unity 粒子預設朝上無錐角時沿 +Z 螢幕外；
+  // 本層 speed≈0~1 且無 VelocityModule，視覺近似靜止微漂——先取微小向下漂移）
+  const p = { sp, age: 0, life: Math.max(0.05, life), baseSize: size, baseAlpha: 1, rgb: [1,1,1], x: ox, y: -oy, vx: 0, vy: speed * 0.2 };
+  if (d.startColor?.mode === 'two-constants') {
+    const c = d.startColor, u = sys.rng();
+    p.rgb = [0,1,2].map((j) => c.min[j] + (c.max[j] - c.min[j]) * u);
+    p.baseAlpha = c.min[3] + (c.max[3] - c.min[3]) * u;
+  } else if (d.startColor?.mode === 'constant') {
+    p.rgb = d.startColor.rgba.slice(0, 3); p.baseAlpha = d.startColor.rgba[3];
+  }
+  sp.tint = rgbTint(p.rgb);
+  sys.container.addChild(sp);
+  sys.parts.push(p);
+}
+
+// ---- 水槽渲染探針（PROBE=1&probeWater=1&lobby=<key>&autostart=1&vignette=0）----
+// Hanako 案：遊戲實機噴泉上有白色半透明水波紋＋水面光點，骨架資料有對應槽
+//（fountain_scattering_effect / fountain_light_effect_* / F_water / Lens_flare / halo / L_R_scattering）
+// 但畫面上沒有。本探針用幀差法量每槽的實際渲染貢獻：
+//   基準幀＝全部水槽 setAttachment(null) → grab；恢復 → grab；
+//   逐槽在自己螢幕 bbox 內算 mean|ΔRGB|＝該槽實際貢獻（0＝有附件沒畫出/被蓋住）。
+// 凍結姿勢下操作（水槽多無動畫軌，姿勢任意時刻皆有效）。
+if (BA_DEBUG.probe && BA_DEBUG.probeWater) {
+  window.__probeWaterRun = async () => {
+    const emit = (tag, obj) => console.log(`[interact-probe] ${JSON.stringify({ tag, ...obj })}`);
+    try {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const idleName = resolveIdleClip();
+      await sleep(4000);
+      for (let i = 0; i < 600; i++) {
+        if (spine && !state.introBlock && spine.state.tracks?.[0]?.animation?.name === idleName) break;
+        if (i % 20 === 0) emit('wait', { i, hasSpine: !!spine, anim: spine?.state?.tracks?.[0]?.animation?.name || null });
+        await sleep(250);
+      }
+      if (!spine) return emit('done', { err: 'no spine' });
+      emit('ready', { lobby: currentLobby, anim: spine.state.tracks?.[0]?.animation?.name || null });
+
+      // 顯示樹快照：找出「背景」實體（iso 全移除 spine 槽後仍可見的東西）
+      const dumpTree = (obj, depth, out) => {
+        if (depth > 4 || !obj) return;
+        const b = obj.getBounds?.();
+        out.push('  '.repeat(depth) + `${obj.constructor?.name ?? '?'}${obj.name ? ':' + obj.name : ''}` +
+          ` vis=${obj.visible !== false} kids=${obj.children?.length ?? 0}` +
+          (b ? ` bounds=[${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)}x${Math.round(b.height)}]` : ''));
+        for (const c of obj.children ?? []) dumpTree(c, depth + 1, out);
+      };
+      { const out = []; dumpTree(app.stage, 0, out); emit('tree', { lines: out }); }
+
+      const prevAuto = spine.autoUpdate;
+      spine.autoUpdate = false;
+      clearTimers();
+      spine.update(0);
+
+      const RE = /fountain|water|flare|halo|scatter/i;
+      const isoRe = /(?:[&?#])iso=([^&\s]+)/.exec(location.hash + location.search)?.[1];
+      const slots = spine.skeleton.slots.filter((s) => RE.test(s.data.name) || RE.test(s.getAttachment()?.name ?? ''));
+
+      const world = new Float32Array(4096);
+      const gl2 = app.canvas.getContext('webgl2');
+      let px = null, pw = 0, ph = 0, pScale = 1;
+      const grabFrame = () => {
+        app.render();
+        pw = gl2.drawingBufferWidth; ph = gl2.drawingBufferHeight;
+        pScale = pw / window.innerWidth;
+        px = new Uint8Array(pw * ph * 4);
+        gl2.readPixels(0, 0, pw, ph, gl2.RGBA, gl2.UNSIGNED_BYTE, px);
+      };
+
+      // single=<slotName>：單槽差異存證——移除該槽 grab → 恢復 grab，差異×6 輸出 PNG。
+      // 看該槽在完整場景中的實際貢獻位置與顏色（幀差統計只給均值，看不出形狀）。
+      const singleName = /(?:[&?#])single=([^&\s]+)/.exec(location.hash + location.search)?.[1];
+      if (singleName) {
+        const target = spine.skeleton.slots.find((s) => s.data.name === singleName);
+        if (!target) { emit('done', { err: 'no slot ' + singleName }); return; }
+        const orig = target.getAttachment();
+        target.setAttachment(null);
+        spine.update(0);
+        grabFrame();
+        const base2 = px;
+        target.setAttachment(orig);
+        spine.update(0);
+        grabFrame();
+        // 差異圖：|Δ|×6（bottom-up 翻正）
+        const img = new Uint8ClampedArray(pw * ph * 4);
+        for (let i = 0; i < pw * ph; i++) {
+          const o = i * 4;
+          const y = ph - 1 - Math.floor(i / pw), x = i % pw;
+          const s = ((y * pw) + x) * 4;
+          img[o] = Math.min(255, Math.abs(px[s] - base2[s]) * 6);
+          img[o+1] = Math.min(255, Math.abs(px[s+1] - base2[s+1]) * 6);
+          img[o+2] = Math.min(255, Math.abs(px[s+2] - base2[s+2]) * 6);
+          img[o+3] = 255;
+        }
+        const cnv = document.createElement('canvas');
+        cnv.width = pw; cnv.height = ph;
+        cnv.getContext('2d').putImageData(new ImageData(img, pw, ph), 0, 0);
+        cnv.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;z-index:99999;';
+        document.body.appendChild(cnv);
+        emit('single', { slot: singleName });
+        emit('capture', { file: `single_${singleName}` });
+        await sleep(600);
+        cnv.remove();
+        spine.autoUpdate = prevAuto;
+        emit('done', { lobby: currentLobby, single: singleName });
+        return;
+      }
+
+      // iso=<regex>：受控隔離——只保留名稱匹配的槽（其餘全部移除），凍結姿勢存證。
+      // 用途：逐群驗證水槽是否能單獨渲染（幀差全 0 時分辨「沒進 batch」vs「被上層蓋住」）。
+      // 陷阱：pixi-spine v8 batcher 有快取，setAttachment 後必須 spine.update(0) 才 rebuild，
+      // 否則 capturePage 抓到舊幾何（首次探針的假 0 幀差與「隔離無效」皆源於此）。
+      if (isoRe) {
+        const re = new RegExp(isoRe, 'i');
+        let kept = 0;
+        for (const s of spine.skeleton.slots) {
+          const hit = re.test(s.data.name) || re.test(s.getAttachment()?.name ?? '');
+          if (!hit) { try { s.setAttachment(null); } catch {} } else kept++;
+        }
+        spine.update(0);
+        emit('iso', { iso: isoRe, kept });
+        grabFrame();
+        emit('capture', { file: `iso_${isoRe.replace(/[^a-z0-9]/gi, '_')}` });
+        await sleep(400);
+        spine.autoUpdate = prevAuto;
+        emit('done', { lobby: currentLobby, iso: isoRe, kept });
+        return;
+      }
+      const meta = [];
+      const boxes = [];
+      for (const s of slots) {
+        const att = s.getAttachment();
+        const rec = { slot: s.data.name, drawOrder: spine.skeleton.slots.indexOf(s), bm: s.data.blendMode,
+          slotA: +s.color.a.toFixed(3), att: att?.name ?? null,
+          attA: att?.color ? +att.color.a.toFixed(3) : null,
+          region: att?.region?.page?.name ?? null, type: att?.constructor?.name ?? null };
+        if (att?.computeWorldVertices) {
+          const n = Math.min(att.worldVerticesLength, world.length);
+          att.computeWorldVertices(s, 0, n, world, 0, 2);
+          let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+          for (let i = 0; i < n; i += 2) {
+            const g = spine.toGlobal({ x: world[i], y: world[i+1] });
+            x0 = Math.min(x0, g.x); x1 = Math.max(x1, g.x);
+            y0 = Math.min(y0, g.y); y1 = Math.max(y1, g.y);
+          }
+          if (x1 >= x0) { rec.bbox = [Math.round(x0), Math.round(y0), Math.round(x1), Math.round(y1)]; boxes.push(rec); }
+        }
+        meta.push(rec);
+      }
+      emit('slots', { n: meta.length, slots: meta });
+
+      // 幀差：全移除 → 基準幀；全恢復 → 一次 grab，逐槽 bbox 統計
+      // （每次 attachment 異動後 spine.update(0) 強制 batcher rebuild——見上方陷阱註解）
+      const orig = slots.map((s) => s.getAttachment());
+      for (const s of slots) s.setAttachment(null);
+      spine.update(0);
+      grabFrame();
+      const base = px;
+      for (let i = 0; i < slots.length; i++) slots[i].setAttachment(orig[i]);
+      spine.update(0);
+      grabFrame();
+      const stats = boxes.map((rec) => {
+        const [bx0, by0, bx1, by1] = rec.bbox;
+        const px0 = Math.max(0, Math.round(bx0 * pScale)), px1 = Math.min(pw - 1, Math.round(bx1 * pScale));
+        const py0 = Math.max(0, ph - 1 - Math.round(by1 * pScale)), py1 = Math.min(ph - 1, ph - 1 - Math.round(by0 * pScale));
+        let cnt = 0, sum = 0, maxD = 0;
+        for (let y = py0; y <= py1; y++) for (let x = px0; x <= px1; x++) {
+          const o = (y * pw + x) * 4;
+          const d = (Math.abs(px[o] - base[o]) + Math.abs(px[o+1] - base[o+1]) + Math.abs(px[o+2] - base[o+2])) / 3;
+          sum += d; cnt++;
+          if (d > maxD) maxD = d;
+        }
+        return { slot: rec.slot, drawOrder: rec.drawOrder, meanD: cnt ? +(sum / cnt).toFixed(2) : null, maxD: +maxD.toFixed(1), px: cnt };
+      });
+      stats.sort((a, b) => b.meanD - a.meanD);
+      emit('diff', { top: stats.slice(0, 20), zero: stats.filter((s) => s.meanD === 0).map((s) => s.slot) });
+      emit('capture', { file: 'water_full' });
+      await sleep(600);
+      spine.autoUpdate = prevAuto;
+      emit('done', { lobby: currentLobby, nSlots: slots.length, nDiff: stats.filter((s) => s.meanD > 0).length });
+    } catch (e) {
+      console.log('[interact-probe] ' + JSON.stringify({ tag: 'error', err: String(e?.message || e), stack: (e?.stack || '').split('\n').slice(1, 3).join(' | ') }));
+    }
+  };
+}
+
+init().then(() => (window.__probeWaterRun || window.__probeBeamRun || window.__probeRun)?.()).catch((e) => { console.error('[probe] init failed:', e); showErr(e); });

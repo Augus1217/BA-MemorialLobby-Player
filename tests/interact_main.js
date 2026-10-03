@@ -14,7 +14,7 @@ const TIMEOUT_MS = Number(process.env.TIMEOUT_MS) || (PROBE_MODE === 'beam' ? 30
 let vite = null, win = null, done = false;
 const lines = [];
 
-const outFile = () => PROBE_MODE === 'beam' ? `/tmp/bq/beam_${LOBBY}.json` : `/tmp/bq/interact_${LOBBY}.json`;
+const outFile = () => `/tmp/bq/${PROBE_MODE}_${LOBBY}.json`;
 
 function probeDevUrl(timeout = 1000) {
   return new Promise((resolve) => {
@@ -53,12 +53,12 @@ app.whenReady().then(async () => {
         lines.push(m[1]); console.log('[probe-line] ' + m[1].slice(0, 160));
         if (m[1].includes('"done"')) finish(0, 'probe done');
         // beam 探針的存證幀：姿勢已凍結（autoUpdate=false），capturePage 非同步仍安全
-        if (PROBE_MODE === 'beam' && m[1].includes('"capture"')) {
+        if (PROBE_MODE !== 'interact' && m[1].includes('"capture"')) {
           try {
             const rec = JSON.parse(m[1]);
             win.webContents.capturePage().then((img) => {
-              fs.writeFileSync(`/tmp/bq/beam_${rec.file || 'frame'}.png`, img.toPNG());
-              console.log('[probe-capture] saved beam_' + (rec.file || 'frame') + '.png');
+              fs.writeFileSync(`/tmp/bq/${PROBE_MODE}_${rec.file || 'frame'}.png`, img.toPNG());
+              console.log('[probe-capture] saved ' + PROBE_MODE + '_' + (rec.file || 'frame') + '.png');
             }).catch((e) => console.log('[probe-capture] fail: ' + e.message));
           } catch {}
         }
@@ -67,7 +67,7 @@ app.whenReady().then(async () => {
       console.log('[probe-error] ' + message.slice(0, 200));
     }
   });
-  const probeParam = PROBE_MODE === 'beam' ? 'probeBeam=1' : 'probeInteract=1';
+  const probeParam = PROBE_MODE === 'beam' ? 'probeBeam=1' : PROBE_MODE === 'water' ? 'probeWater=1' : 'probeInteract=1';
   const extra = process.env.EXTRA || '';
   win.loadURL(`${DEV_URL}/#lobby=${LOBBY}&autostart=1&vignette=0&PROBE=1&${probeParam}${extra}`);
   setTimeout(() => finish(lines.length ? 0 : 2, '逾時（已收集 ' + lines.length + ' 行）'), TIMEOUT_MS);
