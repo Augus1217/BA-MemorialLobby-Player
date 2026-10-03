@@ -7339,12 +7339,11 @@ async function init() {
       return m ? parseFloat(m[1]) : dflt;
     };
     return {
-      thr: num('bloomThr', 0.92),
-      knee: num('bloomKnee', 0.5),
+      thr: num('bloomThr', 0.9),      // URP 語義：gamma 空間值，bake 時轉線性；knee 硬編碼 thr×0.5
       int: num('bloomInt', 0),
-      scatter: num('bloomScatter', 0.7),
+      scatter: num('bloomScatter', 0.7),   // URP UI 語義 0..1 → 實際 lerp(0.05,0.95,v)
       tint: [num('bloomTintR', 1), num('bloomTintG', 1), num('bloomTintB', 1)],
-      lv: Math.max(1, Math.min(6, Math.round(num('bloomLv', 5)))),
+      lv: Math.max(2, Math.min(10, Math.round(num('bloomLv', 8)))),
     };
   })();
   const mkLinearRT = (w, h) => RenderTexture.create({
@@ -7367,44 +7366,87 @@ async function init() {
       in vec2 vUV; out vec4 finalColor; uniform sampler2D uBloomTex;
       uniform float uBloomInt; uniform vec3 uBloomTint;
       void main(void){
-        vec3 bloom = texture(uBloomTex, vUV).rgb * uBloomTint * uBloomInt;
+        // URP：tint 先做 luma 正規化（SetupBloom：tint×1/luminance）
+        vec3 tint = uBloomTint / max(dot(uBloomTint, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
+        vec3 bloom = texture(uBloomTex, vUV).rgb * tint * uBloomInt;
         finalColor = vec4(bloom, 1.0); }`,
+    // 以下 bloom 鏈 shader 逐項複刻 URP 2021.3 Bloom.shader（鐵譜）：
+    // prefilter＝半解析度 13-tap HQ kernel＋soft-knee（knee=thr×0.5 硬編碼）；
+    // downH/downV＝逐級 9-tap 高斯（H: source texel×2、V: 5-tap 最佳化）；
+    // up＝lerp(down[i], prevUp, scatter) 純雙線性（無 tent）——深層模糊才能
+    // 傳播到全畫面（舊 tent+mix 深層貢獻 0.3^lv≈0，這就是 veil 消失的原因）。
     prefilter: `precision highp float;
       in vec2 vUV; out vec4 finalColor; uniform sampler2D uTex;
-      uniform float uThr; uniform float uKnee;
+      uniform vec2 uTexel; uniform float uThr; uniform float uKnee;
       void main(void){
-        vec3 c = texture(uTex, vUV).rgb;
+        vec2 t = uTexel;
+        vec4 A = texture(uTex, vUV + t * vec2(-1.0, -1.0));
+        vec4 B = texture(uTex, vUV + t * vec2( 0.0, -1.0));
+        vec4 C = texture(uTex, vUV + t * vec2( 1.0, -1.0));
+        vec4 D = texture(uTex, vUV + t * vec2(-0.5, -0.5));
+        vec4 E = texture(uTex, vUV + t * vec2( 0.5, -0.5));
+        vec4 F = texture(uTex, vUV + t * vec2(-1.0,  0.0));
+        vec4 G = texture(uTex, vUV);
+        vec4 H = texture(uTex, vUV + t * vec2( 1.0,  0.0));
+        vec4 I = texture(uTex, vUV + t * vec2(-0.5,  0.5));
+        vec4 J = texture(uTex, vUV + t * vec2( 0.5,  0.5));
+        vec4 K = texture(uTex, vUV + t * vec2(-1.0,  1.0));
+        vec4 L = texture(uTex, vUV + t * vec2( 0.0,  1.0));
+        vec4 M = texture(uTex, vUV + t * vec2( 1.0,  1.0));
+        vec2 div = (1.0 / 4.0) * vec2(0.5, 0.125);
+        vec4 o = (D + E + I + J) * div.x;
+        o += (A + B + G + F) * div.y;
+        o += (B + C + H + G) * div.y;
+        o += (F + G + L + K) * div.y;
+        o += (G + H + M + L) * div.y;
+        vec3 c = o.rgb;
         float br = max(c.r, max(c.g, c.b));
-        float knee = uThr * uKnee + 1e-4;
+        float knee = uKnee;
         float soft = clamp(br - uThr + knee, 0.0, 2.0 * knee);
-        soft = soft * soft / (4.0 * knee + 1e-4);
-        float contribution = max(soft, br - uThr) / max(br, 1e-4);
-        finalColor = vec4(c * contribution, 1.0); }`,
-    down: `precision highp float;
+        soft = (soft * soft) / (4.0 * knee + 1e-4);
+        float multiplier = max(br - uThr, soft) / max(br, 1e-4);
+        c *= multiplier;
+        finalColor = vec4(max(c, vec3(0.0)), 1.0); }`,
+    downH: `precision highp float;
       in vec2 vUV; out vec4 finalColor; uniform sampler2D uTex;
       uniform vec2 uTexel;
       void main(void){
-        vec4 c = texture(uTex, vUV + vec2(-1.0, -1.0) * uTexel)
-               + texture(uTex, vUV + vec2( 1.0, -1.0) * uTexel)
-               + texture(uTex, vUV + vec2(-1.0,  1.0) * uTexel)
-               + texture(uTex, vUV + vec2( 1.0,  1.0) * uTexel);
-        finalColor = c * 0.25; }`,
+        float tx = uTexel.x * 2.0;
+        vec3 c0 = texture(uTex, vUV - vec2(tx * 4.0, 0.0)).rgb;
+        vec3 c1 = texture(uTex, vUV - vec2(tx * 3.0, 0.0)).rgb;
+        vec3 c2 = texture(uTex, vUV - vec2(tx * 2.0, 0.0)).rgb;
+        vec3 c3 = texture(uTex, vUV - vec2(tx, 0.0)).rgb;
+        vec3 c4 = texture(uTex, vUV).rgb;
+        vec3 c5 = texture(uTex, vUV + vec2(tx, 0.0)).rgb;
+        vec3 c6 = texture(uTex, vUV + vec2(tx * 2.0, 0.0)).rgb;
+        vec3 c7 = texture(uTex, vUV + vec2(tx * 3.0, 0.0)).rgb;
+        vec3 c8 = texture(uTex, vUV + vec2(tx * 4.0, 0.0)).rgb;
+        vec3 color = c0 * 0.01621622 + c1 * 0.05405405 + c2 * 0.12162162 + c3 * 0.19459459
+                   + c4 * 0.22702703
+                   + c5 * 0.19459459 + c6 * 0.12162162 + c7 * 0.05405405 + c8 * 0.01621622;
+        finalColor = vec4(color, 1.0); }`,
+    downV: `precision highp float;
+      in vec2 vUV; out vec4 finalColor; uniform sampler2D uTex;
+      uniform vec2 uTexel;
+      void main(void){
+        float ty = uTexel.y;
+        vec3 c0 = texture(uTex, vUV - vec2(0.0, ty * 3.23076923)).rgb;
+        vec3 c1 = texture(uTex, vUV - vec2(0.0, ty * 1.38461538)).rgb;
+        vec3 c2 = texture(uTex, vUV).rgb;
+        vec3 c3 = texture(uTex, vUV + vec2(0.0, ty * 1.38461538)).rgb;
+        vec3 c4 = texture(uTex, vUV + vec2(0.0, ty * 3.23076923)).rgb;
+        vec3 color = c0 * 0.07027027 + c1 * 0.31621622
+                   + c2 * 0.22702703
+                   + c3 * 0.31621622 + c4 * 0.07027027;
+        finalColor = vec4(color, 1.0); }`,
     up: `precision highp float;
       in vec2 vUV; out vec4 finalColor; uniform sampler2D uHigh; uniform sampler2D uLow;
-      uniform vec2 uTexel; uniform float uScatter;
+      uniform float uScatter;
       void main(void){
-        vec3 c = texture(uHigh, vUV).rgb * 4.0
-               + texture(uHigh, vUV + vec2( 1.0, 0.0) * uTexel).rgb * 2.0
-               + texture(uHigh, vUV + vec2(-1.0, 0.0) * uTexel).rgb * 2.0
-               + texture(uHigh, vUV + vec2(0.0,  1.0) * uTexel).rgb * 2.0
-               + texture(uHigh, vUV + vec2(0.0, -1.0) * uTexel).rgb * 2.0
-               + texture(uHigh, vUV + vec2( 1.0,  1.0) * uTexel).rgb
-               + texture(uHigh, vUV + vec2(-1.0,  1.0) * uTexel).rgb
-               + texture(uHigh, vUV + vec2( 1.0, -1.0) * uTexel).rgb
-               + texture(uHigh, vUV + vec2(-1.0, -1.0) * uTexel).rgb;
-        vec3 high = c / 16.0;
-        vec3 low = texture(uLow, vUV).rgb;
-        finalColor = vec4(mix(high, low, uScatter), 1.0); }`,
+        // URP Upsample：lerp(highMip=down[i], lowMip=prevUp, Scatter)——雙線性
+        vec3 highMip = texture(uHigh, vUV).rgb;
+        vec3 lowMip = texture(uLow, vUV).rgb;
+        finalColor = vec4(mix(highMip, lowMip, uScatter), 1.0); }`,
   };
   const fsGeo = new MeshGeometry({
     positions: new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]),
@@ -7441,65 +7483,67 @@ async function init() {
     hdrEncodeStage.addChild(new Mesh({ geometry: fsGeo, shader: encodeShader }));
   };
   const downSize = (w, h, i) => [Math.max(1, w >> (i + 1)), Math.max(1, h >> (i + 1))];
+  // URP 流程（SetupBloom 鐵譜）：down[0]=prefilter(半解析度)、down[i]=BlurV(BlurH(down[i-1]))、
+  // up[i]=lerp(down[i], prevUp, scatter)（i=lv-2..0；首個 up 的 prevUp=down[lv-1]）、
+  // 最終 bloom=up[0]。thr 為 gamma 空間語義（URP: GammaToLinearSpace(threshold)）。
   const buildBloomChain = (w, h) => {
-    const pre = mkLinearRT(w, h);
+    const half = downSize(w, h, 0);
     const down = [], up = [];
-    for (let i = 0; i < BLOOM.lv; i++) {
-      const [dw, dh] = downSize(w, h, i);
-      down.push(mkLinearRT(dw, dh));
-      up.push(mkLinearRT(dw, dh));
-    }
+    for (let i = 0; i < BLOOM.lv; i++) down.push(mkLinearRT(downSize(w, h, i)[0], downSize(w, h, i)[1]));
+    for (let i = 0; i < BLOOM.lv - 1; i++) up.push(mkLinearRT(downSize(w, h, i)[0], downSize(w, h, i)[1]));
+    const thrLin = GAMMA_TO_LINEAR(BLOOM.thr);
     const preS = new Shader({
       glProgram: GlProgram.from({ vertex: FS_VERT, fragment: FS_FRAG.prefilter }),
       resources: {
         uTex: hdrRT.source,
-        preU: new UniformGroup({ uThr: { value: BLOOM.thr, type: 'f32' }, uKnee: { value: BLOOM.knee, type: 'f32' } }),
+        preU: new UniformGroup({
+          uTexel: { value: [1 / w, 1 / h], type: 'vec2<f32>' },
+          uThr: { value: thrLin, type: 'f32' },
+          uKnee: { value: thrLin * 0.5, type: 'f32' },
+        }),
       },
     });
-    const downS = down.map((rt, i) => {
-      const sw = i === 0 ? w : (w >> i), sh = i === 0 ? h : (h >> i);   // 取樣源＝down[i-1]（或 pre）的尺寸
+    // down[i] = BlurV(BlurH(down[i-1]))：H 以 up[i] 當暫存
+    const blurHS = down.map((rt, i) => {
+      if (i === 0) return null;
+      const [sw, sh] = downSize(w, h, i - 1);   // 取樣源＝down[i-1]
       return new Shader({
-        glProgram: GlProgram.from({ vertex: FS_VERT, fragment: FS_FRAG.down }),
+        glProgram: GlProgram.from({ vertex: FS_VERT, fragment: FS_FRAG.downH }),
         resources: {
-          uTex: i === 0 ? pre.source : down[i - 1].source,
-          downU: new UniformGroup({ uTexel: { value: [1 / Math.max(1, sw), 1 / Math.max(1, sh)], type: 'vec2<f32>' } }),
+          uTex: down[i - 1].source,
+          blurHU: new UniformGroup({ uTexel: { value: [1 / sw, 1 / sh], type: 'vec2<f32>' } }),
+        },
+      });
+    });
+    const blurVS = down.map((rt, i) => {
+      if (i === 0) return null;
+      const [sw, sh] = downSize(w, h, i);       // H pass 目標＝up[i]（與 down[i] 同尺寸）
+      return new Shader({
+        glProgram: GlProgram.from({ vertex: FS_VERT, fragment: FS_FRAG.downV }),
+        resources: {
+          uTex: up[i - 1].source,
+          blurVU: new UniformGroup({ uTexel: { value: [1 / sw, 1 / sh], type: 'vec2<f32>' } }),
         },
       });
     });
     const upS = up.map((rt, i) => {
-      const last = i === BLOOM.lv - 1;
-      const high = last ? down[i].source : up[i + 1].source;
-      const hs = last ? [w >> BLOOM.lv, h >> BLOOM.lv] : [w >> (i + 2), h >> (i + 2)];
+      const last = i === BLOOM.lv - 2;
       return new Shader({
         glProgram: GlProgram.from({ vertex: FS_VERT, fragment: FS_FRAG.up }),
         resources: {
-          uHigh: high,
-          uLow: down[i].source,   // 深層首個 up pass 的 uLow 亦為 down[lv-1]（B4 驗證形）
-          upU: new UniformGroup({
-            uTexel: { value: [1 / Math.max(1, hs[0]), 1 / Math.max(1, hs[1])], type: 'vec2<f32>' },
-            uScatter: { value: BLOOM.scatter, type: 'f32' },
-          }),
+          uHigh: down[i].source,                                  // highMip=down[i]
+          uLow: last ? down[BLOOM.lv - 1].source : up[i + 1].source,   // lowMip=prevUp
+          upU: new UniformGroup({ uScatter: { value: 0.05 + 0.9 * BLOOM.scatter, type: 'f32' } }),
         },
       });
     });
-    bloomChain = { pre, down, up, preS, downS, upS, w, h };
+    bloomChain = { half, down, up, preS, blurHS, blurVS, upS, w, h };
     buildEncodeStage(up[0].source);
   };
   const resizeBloomChain = (w, h) => {
-    const c = bloomChain;
-    c.pre.source.resize(w, h);
-    c.down.forEach((rt, i) => { const [dw, dh] = downSize(w, h, i); rt.source.resize(dw, dh); });
-    c.up.forEach((rt, i) => { const [dw, dh] = downSize(w, h, i); rt.source.resize(dw, dh); });
-    c.downS.forEach((s, i) => {
-      const sw = i === 0 ? w : (w >> i), sh = i === 0 ? h : (h >> i);
-      s.resources.downU.uniforms.uTexel = [1 / Math.max(1, sw), 1 / Math.max(1, sh)];
-    });
-    c.upS.forEach((s, i) => {
-      const last = i === BLOOM.lv - 1;
-      const hs = last ? [w >> BLOOM.lv, h >> BLOOM.lv] : [w >> (i + 2), h >> (i + 2)];
-      s.resources.upU.uniforms.uTexel = [1 / Math.max(1, hs[0]), 1 / Math.max(1, hs[1])];
-    });
-    c.w = w; c.h = h;
+    // 尺寸變化直接整鏈重建（棄引用不 destroy）；resize 事件罕見，簡單正確優先
+    bloomChain = null;
+    buildBloomChain(w, h);
   };
   const ensureHdrRT = () => {
     const w = app.renderer.width, h = app.renderer.height;
@@ -7526,9 +7570,12 @@ async function init() {
       bloomQuadMesh.shader = shader;
       app.renderer.render({ container: bloomQuadStage, target, clear: true });
     };
-    draw(bloomChain.pre, bloomChain.preS);
-    for (let i = 0; i < BLOOM.lv; i++) draw(bloomChain.down[i], bloomChain.downS[i]);
-    for (let i = BLOOM.lv - 1; i >= 0; i--) draw(bloomChain.up[i], bloomChain.upS[i]);
+    draw(bloomChain.down[0], bloomChain.preS);              // prefilter → down[0]（半解析度）
+    for (let i = 1; i < BLOOM.lv; i++) {
+      draw(bloomChain.up[i - 1], bloomChain.blurHS[i]);     // BlurH → up[i]（暫存）
+      draw(bloomChain.down[i], bloomChain.blurVS[i]);       // BlurV → down[i]
+    }
+    for (let i = BLOOM.lv - 2; i >= 0; i--) draw(bloomChain.up[i], bloomChain.upS[i]);
   };
   const hdrTwoPass = () => {
     if (!ensureHdrRT()) return false;
@@ -7551,9 +7598,14 @@ async function init() {
       const n = Number(v);
       if (k === 'int') { BLOOM.int = n; if (encodeBloomU) encodeBloomU.uniforms.uBloomInt = n; return { int: BLOOM.int, chain: !!bloomChain }; }
       if (!bloomChain) return 'NO-CHAIN';
-      if (k === 'thr') { BLOOM.thr = n; bloomChain.preS.resources.preU.uniforms.uThr = n; return BLOOM.thr; }
-      if (k === 'knee') { BLOOM.knee = n; bloomChain.preS.resources.preU.uniforms.uKnee = n; return BLOOM.knee; }
-      if (k === 'scatter') { BLOOM.scatter = n; bloomChain.upS.forEach((s) => { s.resources.upU.uniforms.uScatter = n; }); return BLOOM.scatter; }
+      if (k === 'thr') {
+        BLOOM.thr = n;
+        const thrLin = GAMMA_TO_LINEAR(n);
+        bloomChain.preS.resources.preU.uniforms.uThr = thrLin;
+        bloomChain.preS.resources.preU.uniforms.uKnee = thrLin * 0.5;
+        return BLOOM.thr;
+      }
+      if (k === 'scatter') { BLOOM.scatter = n; bloomChain.upS.forEach((s) => { s.resources.upU.uniforms.uScatter = 0.05 + 0.9 * n; }); return BLOOM.scatter; }
       if (k === 'tint') { BLOOM.tint = n; if (encodeBloomU) encodeBloomU.uniforms.uBloomTint = n; return BLOOM.tint; }
       return `unknown key ${k}`;
     };
@@ -8753,6 +8805,28 @@ if (BA_DEBUG.probe && BA_DEBUG.probeWater) {
         cnv.getContext('2d').putImageData(new ImageData(img, pw, ph), 0, 0);
         cnv.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;z-index:99999;';
         document.body.appendChild(cnv);
+        // 數值化差異統計（readPixels 直算、無 capturePage 競態）：全域＋12×8 網格
+        // |Δ| 均值（0-255 encode 域）——判斷單槽在完整場景的實際視覺足跡
+        {
+          const gh = 8, gw = 12;
+          const grid = [];
+          for (let gy = 0; gy < gh; gy++) {
+            const row = [];
+            for (let gx = 0; gx < gw; gx++) {
+              const y0 = Math.floor(gy * ph / gh), y1 = Math.floor((gy + 1) * ph / gh);
+              const x0 = Math.floor(gx * pw / gw), x1 = Math.floor((gx + 1) * pw / gw);
+              let acc = 0, cnt = 0;
+              for (let y = y0; y < y1; y += 2) for (let x = x0; x < x1; x += 2) {
+                const s = ((y * pw) + x) * 4;
+                acc += (Math.abs(px[s] - base2[s]) + Math.abs(px[s+1] - base2[s+1]) + Math.abs(px[s+2] - base2[s+2])) / 3;
+                cnt++;
+              }
+              row.push(+(acc / Math.max(1, cnt)).toFixed(2));
+            }
+            grid.push(row);
+          }
+          emit('singleStats', { slot: singleName, grid });
+        }
         emit('single', { slot: singleName });
         emit('capture', { file: `single_${singleName}` });
         await sleep(600);
