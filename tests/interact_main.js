@@ -9,9 +9,12 @@ const http = require('http');
 
 const DEV_URL = 'http://127.0.0.1:5173';
 const LOBBY = process.env.LOBBY || 'Hanako_home';
-const TIMEOUT_MS = Number(process.env.TIMEOUT_MS) || 90000;
+const PROBE_MODE = process.env.PROBE_MODE || 'interact';   // interact | beam
+const TIMEOUT_MS = Number(process.env.TIMEOUT_MS) || (PROBE_MODE === 'beam' ? 300000 : 90000);
 let vite = null, win = null, done = false;
 const lines = [];
+
+const outFile = () => PROBE_MODE === 'beam' ? `/tmp/bq/beam_${LOBBY}.json` : `/tmp/bq/interact_${LOBBY}.json`;
 
 function probeDevUrl(timeout = 1000) {
   return new Promise((resolve) => {
@@ -34,22 +37,38 @@ async function ensureVite() {
 function finish(code, why) {
   if (done) return; done = true;
   if (why) console.log('[interact-runner] ' + why);
-  try { fs.writeFileSync(`/tmp/bq/interact_${LOBBY}.json`, lines.join('\n') + '\n'); } catch {}
+  try { fs.writeFileSync(outFile(), lines.join('\n') + '\n'); } catch {}
   try { if (vite) vite.kill(); } catch {}
   app.exit(code);
 }
 app.setPath('userData', `/tmp/bq/ud-interact-${LOBBY}`);
 app.whenReady().then(async () => {
   try { await ensureVite(); } catch (e) { return finish(2, 'vite 失敗: ' + e.message); }
-  win = new BrowserWindow({ width: 1600, height: 900, show: true, webPreferences: { contextIsolation: true, backgroundThrottling: false } });
+  win = new BrowserWindow({ width: Number(process.env.WIDTH) || 1600, height: Number(process.env.HEIGHT) || 900, show: true, webPreferences: { contextIsolation: true, backgroundThrottling: false } });
   win.webContents.on('console-message', (_e, _l, message) => {
+    if (process.env.DEBUG_CONSOLE) console.log('[console] ' + message.slice(0, 220));
     if (message.includes('[interact-probe]')) {
       const m = message.match(/\[interact-probe\] (\{.*\})$/);
-      if (m) { lines.push(m[1]); console.log('[probe-line] ' + m[1].slice(0, 160)); if (m[1].includes('"done"')) finish(0, 'probe done'); }
+      if (m) {
+        lines.push(m[1]); console.log('[probe-line] ' + m[1].slice(0, 160));
+        if (m[1].includes('"done"')) finish(0, 'probe done');
+        // beam 探針的存證幀：姿勢已凍結（autoUpdate=false），capturePage 非同步仍安全
+        if (PROBE_MODE === 'beam' && m[1].includes('"capture"')) {
+          try {
+            const rec = JSON.parse(m[1]);
+            win.webContents.capturePage().then((img) => {
+              fs.writeFileSync(`/tmp/bq/beam_${rec.file || 'frame'}.png`, img.toPNG());
+              console.log('[probe-capture] saved beam_' + (rec.file || 'frame') + '.png');
+            }).catch((e) => console.log('[probe-capture] fail: ' + e.message));
+          } catch {}
+        }
+      }
     } else if (/must be a child|uncaught|TypeError/.test(message)) {
       console.log('[probe-error] ' + message.slice(0, 200));
     }
   });
-  win.loadURL(`${DEV_URL}/#lobby=${LOBBY}&autostart=1&vignette=0&PROBE=1&probeInteract=1`);
+  const probeParam = PROBE_MODE === 'beam' ? 'probeBeam=1' : 'probeInteract=1';
+  const extra = process.env.EXTRA || '';
+  win.loadURL(`${DEV_URL}/#lobby=${LOBBY}&autostart=1&vignette=0&PROBE=1&${probeParam}${extra}`);
   setTimeout(() => finish(lines.length ? 0 : 2, '逾時（已收集 ' + lines.length + ' 行）'), TIMEOUT_MS);
 });

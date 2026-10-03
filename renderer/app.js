@@ -128,6 +128,7 @@ const BA_DEBUG = (() => {
   return {
     probe: /PROBE=1/.test(q),
     probeInteract: /probeInteract=1/.test(q),
+    probeBeam: /probeBeam=1/.test(q),
     layout: /LAYOUT=1/.test(q),
     auto: /autostart=1|PROBE=1/.test(q),
     cursorOff: /cursorOff=1/.test(q),
@@ -638,9 +639,11 @@ function fitScene() {
     // 遊戲相機為透視（CameraFovScaler 保持水平 fov 恆定，SPEC §2.1），可見高 =
     // 2·D·tan(vfov/2)；以 spine 單位計除數 = 200·tan(5°)·4/3·D = 23.33·D。
     // 2800 目測值反解 D=119.99 ≈ 120（整數 authored 值）；舊 2900 反解 D=124.3
-    // 不整 → 2800 為真值。D=120 → 16:9 可見高 1574.8 spine 單位，
-    // charScale = vh/1575（=vw/2800；精確值 1574.8，差 0.013% 不可見）。
-    charScale = vh / 1575;
+    // 不整 → 2800 為真值。D=120 → 16:9 可見高 1574.8 spine 單位。
+    // 水平 fov 恆定 ⇒ 可見寬固定 2800 spine 單位：charScale = vw/2800。
+    // （16:9 時 = vh/1575，與舊值一致；非 16:9 時舊 vh/1575 會過度放大，
+    //   實測 1.2565:1 下 ~1.42×——CH0230 與實機錄影並排比對發現。）
+    charScale = vw / 2800;
     sceneBiasY = cameraTargetY * charScale;               // 相機線置於畫面垂直中央
   }
 
@@ -7927,4 +7930,200 @@ if (BA_DEBUG.probe && BA_DEBUG.probeInteract) {
   };
 }
 
-init().then(() => window.__probeRun?.()).catch((e) => { console.error('[probe] init failed:', e); showErr(e); });
+// ---- beam 覆蓋探針（PROBE=1&probeBeam=1&lobby=<key>&autostart=1&vignette=0）----
+// 量 toplight beam（light_BG3/light_BG4）的世界覆蓋足跡隨 timeline 的變化：
+// 重建確定性序列（Start_Idle_01 → Idle_01，固定 dt=1/30），每 4s 取樣
+//   1) beam mesh 世界頂點 → 螢幕多邊形（spine.toGlobal）
+//   2) floor/piano 槽頂點被 beam 多邊形覆蓋比例（資料層涵蓋）
+//   3) beam 覆蓋/未覆蓋頂點處的畫面像素均值（渲染層貢獻）——gl.readPixels 直讀
+//     兩段式管線的 sRGB 編碼輸出（app.render() 後的 drawing buffer）
+// 輸出 [interact-probe] JSON 行（沿用 runner 轉發）；capture 標記由 runner 存 PNG。
+if (BA_DEBUG.probe && BA_DEBUG.probeBeam) {
+  window.__probeBeamRun = async () => {
+    const emit = (tag, obj) => console.log(`[interact-probe] ${JSON.stringify({ tag, ...obj })}`);
+    try {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const idleName = resolveIdleClip();
+      await sleep(4000);
+      let waited = 0;
+      for (let i = 0; i < 600; i++) {   // 載入影片 >55s 屬正常：等 intro 收斂到 idle（最長 150s）
+        if (spine && !state.introBlock && spine.state.tracks?.[0]?.animation?.name === idleName) break;
+        if (i % 20 === 0) emit('wait', { i, hasSpine: !!spine, introBlock: state.introBlock, anim: spine?.state?.tracks?.[0]?.animation?.name || null });
+        await sleep(250); waited += 250;
+      }
+      if (!spine) return emit('done', { err: 'no spine' });
+      emit('ready', { waitedMs: waited, idleName, lobby: currentLobby });
+
+      // 凍結自動驅動，改固定步長手動推進（確定性；Spine.from 的 autoUpdate 用 Ticker.shared）
+      const prevAuto = spine.autoUpdate;
+      spine.autoUpdate = false;
+      clearTimers();                       // 停掉自主互動計時器，避免採樣中插入互動動畫
+      const st = spine.state;
+      const startName = resolveStartClip();
+      // 重建確定性序列：setup pose 起播 Start_Idle_01 → Idle_01 loop（與遊戲同鏈）
+      spine.skeleton.setToSetupPose();
+      st.clearTracks();
+      if (startName) st.setAnimation(0, startName, false);
+      st.addAnimation(0, idleName, true, 0);
+      // setToSetupPose 會救回 hdrOnly 移除的附件——隔離實驗須在重建後重套
+      const onlyRe = /(?:[&?#])hdrOnly=([^&\s]+)/.exec(location.hash + location.search)?.[1];
+      if (onlyRe) {
+        const re = new RegExp(onlyRe, 'i');
+        for (const slot of spine.skeleton.slots) {
+          if (/light|flare/i.test(slot.data.name) && !re.test(slot.data.name)) {
+            try { slot.setAttachment(null); } catch {}
+          }
+        }
+      }
+      for (let tr = 1; tr <= 5; tr++) st.setEmptyAnimation(tr, 0);   // 互動軌淨空
+      st.update(0);
+
+      const world = new Float32Array(4096);
+      const toScreen = (slotName) => {
+        const slot = spine.skeleton.findSlot(slotName);
+        const att = slot?.getAttachment();
+        if (!att || !att.computeWorldVertices) return null;
+        const n = att.worldVerticesLength;
+        if (n > world.length) return null;
+        att.computeWorldVertices(slot, 0, n, world, 0, 2);
+        const pts = [];
+        for (let i = 0; i < n; i += 2) {
+          const g = spine.toGlobal({ x: world[i], y: world[i+1] });
+          pts.push({ x: g.x, y: g.y });
+        }
+        return { n: pts.length, pts, att: att.name };
+      };
+      const inPoly = (p, poly) => {
+        let inside = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+          const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+          if (((yi > p.y) !== (yj > p.y)) && (p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi)) inside = !inside;
+        }
+        return inside;
+      };
+      const bboxOf = (pts) => {
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+        for (const p of pts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+        return { x0: +x0.toFixed(1), x1: +x1.toFixed(1), y0: +y0.toFixed(1), y1: +y1.toFixed(1) };
+      };
+      // 像素取樣：readPixels 直讀編碼後輸出（bottom-up → y 翻轉），頂點處 5×5 均值
+      const gl2 = app.canvas.getContext('webgl2');
+      let px = null, pw = 0, ph = 0, pScale = 1;
+      const grabFrame = () => {
+        app.render();
+        pw = gl2.drawingBufferWidth; ph = gl2.drawingBufferHeight;
+        pScale = pw / window.innerWidth;
+        px = new Uint8Array(pw * ph * 4);
+        gl2.readPixels(0, 0, pw, ph, gl2.RGBA, gl2.UNSIGNED_BYTE, px);
+      };
+      const sampleAt = (sx, sy) => {   // 螢幕 CSS 座標 → 5×5 均值 [r,g,b]
+        const cx = Math.round(sx * pScale), cy = ph - 1 - Math.round(sy * pScale);
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+          const x = cx + dx, y = cy + dy;
+          if (x < 0 || y < 0 || x >= pw || y >= ph) continue;
+          const o = (y * pw + x) * 4;
+          r += px[o]; g += px[o+1]; b += px[o+2]; n++;
+        }
+        return n ? [r/n, g/n, b/n] : null;
+      };
+      const regionStats = (target, beam) => {
+        if (!target || !beam) return null;
+        let hit = 0;
+        const cov = [], unc = [];
+        for (const p of target.pts) {
+          const s = sampleAt(p.x, p.y);
+          if (!s) continue;
+          if (inPoly(p, beam.pts)) { hit++; cov.push(s); } else { unc.push(s); }
+        }
+        const mean = (arr) => arr.length ? [0,1,2].map(k => +(arr.reduce((a,s)=>a+s[k],0)/arr.length).toFixed(1)) : null;
+        return { verts: target.n, covFrac: +(hit/target.pts.length).toFixed(3),
+          covRGB: mean(cov), uncRGB: mean(unc), nCov: cov.length, nUnc: unc.length };
+      };
+
+      const DT = 1/30, STEP4 = Math.round(4/DT);
+      const introDur = (spine.skeleton.data.findAnimation(startName || '')?.duration) || 12.833;
+      const totalDur = introDur + (spine.skeleton.data.findAnimation(idleName)?.duration || 40);
+      const anchors = [];
+      const stepS = Number(/(?:[&?#])beamStep=(\d+)/.exec(location.hash + location.search)?.[1]) || 4;
+      for (let s = Math.round(stepS/DT); s * DT <= totalDur; s += Math.round(stepS/DT)) anchors.push(s);
+      anchors.push(Math.round(35/DT));   // 任務錨點
+      anchors.push(Math.round(totalDur/DT));
+      anchors.sort((a,b) => a-b);
+      let ai = 0;
+      const introStart = performance.now();
+      for (let s = 1; s <= anchors[anchors.length-1]; s++) {
+        spine.update(DT);
+        if (s !== anchors[ai]) continue;
+        ai++;
+        const T = +(s * DT).toFixed(3);
+        // 首個錨點：dump 所有非 normal 槽（additive 等）的螢幕足跡與顏色（找光斑歸屬用）
+        if (ai === 1) {
+          const world2 = new Float32Array(4096);
+          const additive = [];
+          for (const slot of spine.skeleton.slots) {
+            if (slot.data.blendMode === 0) continue;
+            const att = slot.getAttachment();
+            if (!att || !att.computeWorldVertices) continue;
+            const n = att.worldVerticesLength;
+            if (n > world2.length) continue;
+            att.computeWorldVertices(slot, 0, n, world2, 0, 2);
+            let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+            for (let i = 0; i < n; i += 2) {
+              const g = spine.toGlobal({ x: world2[i], y: world2[i+1] });
+              x0 = Math.min(x0, g.x); x1 = Math.max(x1, g.x);
+              y0 = Math.min(y0, g.y); y1 = Math.max(y1, g.y);
+            }
+            const ac = att.color;
+            additive.push({ slot: slot.data.name, bm: slot.data.blendMode,
+              a: +slot.color.a.toFixed(2), attA: ac ? +ac.a.toFixed(2) : null,
+              bbox: [Math.round(x0), Math.round(y0), Math.round(x1), Math.round(y1)] });
+          }
+          emit('slots', { slots: additive });
+        }
+        const phase = T < introDur ? `intro ${T.toFixed(1)}` : `idle ${(T - introDur).toFixed(1)}`;
+        const beam = toScreen('light_BG3');
+        const floor = toScreen('floor');
+        const piano = toScreen('piano');
+        const b5 = spine.skeleton.findBone('light_BG5');
+        const slot = spine.skeleton.findSlot('light_BG3');
+        grabFrame();
+        const fs = regionStats(floor, beam);
+        const ps = regionStats(piano, beam);
+        // Light_00/Light_01（角色上方 additive 槽）：頂點處畫面亮度＝它們的實際貢獻
+        const lightVerts = (name) => {
+          const lp = toScreen(name);
+          if (!lp) return null;
+          const samples = [];
+          const step = Math.max(1, Math.floor(lp.pts.length / 12));
+          for (let i = 0; i < lp.pts.length; i += step) {
+            const s2 = sampleAt(lp.pts[i].x, lp.pts[i].y);
+            if (s2) samples.push(s2);
+          }
+          const mean = samples.length ? [0,1,2].map(k => +(samples.reduce((a,s3)=>a+s3[k],0)/samples.length).toFixed(1)) : null;
+          return { n: lp.n, bbox: bboxOf(lp.pts), vertRGB: mean, nS: samples.length };
+        };
+        const rec = { tag: 'sample', t: T, phase,
+          beamBone: b5 ? { rot: +b5.getWorldRotationX().toFixed(2), x: +b5.worldX.toFixed(0), y: +b5.worldY.toFixed(0) } : null,
+          slotA: slot ? +slot.color.a.toFixed(3) : null,
+          beamBbox: beam ? bboxOf(beam.pts) : null,
+          floor: fs, piano: ps,
+          Light_00: lightVerts('Light_00'), Light_01: lightVerts('Light_01'),
+          skirt: (() => { const sp = toScreen('skirt_02'); return sp ? { n: sp.n, bbox: bboxOf(sp.pts),
+            mean: (() => { const ss = sp.pts.map(p => sampleAt(p.x, p.y)).filter(Boolean);
+              return ss.length ? [0,1,2].map(k => +(ss.reduce((a,s3)=>a+s3[k],0)/ss.length).toFixed(1)) : null; })() } : null; })() };
+        emit('sample', rec);
+        // 採樣後凍結姿勢存證幀（runner capturePage）；之後繼續推進
+        emit('capture', { t: T, file: `beam_t${String(Math.round(T)).padStart(2,'0')}` });
+        await sleep(450);
+        px = null;
+      }
+      spine.autoUpdate = prevAuto;
+      emit('done', { lobby: currentLobby, wallMs: Math.round(performance.now() - introStart) });
+    } catch (e) {
+      console.log('[interact-probe] ' + JSON.stringify({ tag: 'error', err: String(e?.message || e), stack: (e?.stack || '').split('\n').slice(1, 3).join(' | ') }));
+    }
+  };
+}
+
+init().then(() => (window.__probeBeamRun || window.__probeRun)?.()).catch((e) => { console.error('[probe] init failed:', e); showErr(e); });
