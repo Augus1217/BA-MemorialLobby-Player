@@ -8255,6 +8255,7 @@ function teardownLobbyParticles() {
   if (particleTickerFn) { app.ticker.remove(particleTickerFn); particleTickerFn = null; }
   if (particleLayer) { particleLayer.destroy({ children: true }); particleLayer = null; }
   particleSystems = [];
+  destroyLobbyWater();
 }
 
 function initLobbyParticles(lobbyKey) {
@@ -8265,10 +8266,14 @@ function initLobbyParticles(lobbyKey) {
   particleLayer.eventMode = 'none';
   particleLayer.label = 'lobbyParticles';
   spine.addChild(particleLayer);   // 繼承 spine 的相機/縮放變換（遊戲中粒子掛 SkeletonUtility root 下，同空間）
+  // psOnly=<regex>：單系統隔離（診斷用——一次只看一個 ParticleSystem 的視覺）
+  const psOnlyRe = /(?:[&?#])psOnly=([^&\s]+)/.exec(location.hash + location.search)?.[1];
+  const psOnly = psOnlyRe ? new RegExp(psOnlyRe, 'i') : null;
   for (const sys of def.systems) {
     if (!sys.material || sys.material.m_PathID === 0) continue;   // FX/intro_fx 無材質引用，遊戲端亦非本層視覺
     const texName = PARTICLE_TEX_BY_MAT[String(sys.material.m_PathID)];
     if (!texName) { log(`[particles] 無貼圖映射: ${sys.name} mat=${sys.material.m_PathID}`); continue; }
+    if (psOnly && !psOnly.test(sys.name)) continue;
     const container = new Container();
     container.eventMode = 'none';
     // 系統原點：prefab 米制 world（Unity y-up、SkeletonUtility root 原點）→ 編輯單位 → pixi y-down
@@ -8294,7 +8299,9 @@ function initLobbyParticles(lobbyKey) {
     const dt = Math.min(0.1, (now - prev) / 1000);
     prev = now;
     tickLobbyParticles(dt);
+    tickLobbyWater(dt);
   };
+  initLobbyWater(lobbyKey);
   app.ticker.add(particleTickerFn, null, UPDATE_PRIORITY.LOW);
 }
 
@@ -8336,18 +8343,19 @@ function spawnParticle(sys) {
   const sp = new Sprite(tex);
   sp.anchor.set(0.5);
   sp.blendMode = 'add';
-  // 發射位置：shape type 5（Box）→ 盒內均勻隨機（m_Scale 為盒尺寸，local 單位×淨 scale＝米→編輯）
+  // 尺寸/發射範圍縮放：scalingMode 0=Hierarchy（乘全鏈 netScale）1=Local（只乘 GO
+  // 自身 scale，不吃 FX 層 0.01）；結果為 Unity 世界單位＝pixi 編輯單位（不再乘 M2E）。
+  const sizeScale = d.scalingMode === 1 ? (d.selfScale ?? 1) : (d.fullNet ?? 1);
+  // 發射位置：shape type 5（Box）→ 盒內均勻隨機（m_Scale 為盒尺寸，同尺寸規則＝編輯單位）
   let ox = 0, oy = 0;
   if (d.shape && d.shape.type === 5) {
-    const ns = d.netScale ?? 1;
-    ox = (sys.rng() - 0.5) * (d.shape.scale[0] || 0) * ns * PARTICLE_M2E;
-    oy = (sys.rng() - 0.5) * (d.shape.scale[1] || 0) * ns * PARTICLE_M2E;
+    ox = (sys.rng() - 0.5) * (d.shape.scale[0] || 0) * sizeScale;
+    oy = (sys.rng() - 0.5) * (d.shape.scale[1] || 0) * sizeScale;
   }
   sp.position.set(ox, -oy);
   const life = mmcAt(d.startLifetime, 0, sys.rng);
-  // 尺寸：startSize（local 單位）× 淨 scale＝米制直徑 → ×M2E＝編輯單位
-  const size = mmcAt(d.startSize, 0, sys.rng) * (d.netScale ?? 1) * PARTICLE_M2E;
-  const speed = mmcAt(d.startSpeed, 0, sys.rng) * (d.netScale ?? 1) * PARTICLE_M2E;
+  const size = mmcAt(d.startSize, 0, sys.rng) * sizeScale;
+  const speed = mmcAt(d.startSpeed, 0, sys.rng) * sizeScale;
   // 速度方向：startSpeed 沿 -Y（Unity 粒子預設朝上無錐角時沿 +Z 螢幕外；
   // 本層 speed≈0~1 且無 VelocityModule，視覺近似靜止微漂——先取微小向下漂移）
   const p = { sp, age: 0, life: Math.max(0.05, life), baseSize: size, baseAlpha: 1, rgb: [1,1,1], x: ox, y: -oy, vx: 0, vy: speed * 0.2 };
@@ -8361,6 +8369,101 @@ function spawnParticle(sys) {
   sp.tint = rgbTint(p.rgb);
   sys.container.addChild(sp);
   sys.parts.push(p);
+}
+
+// ---- 大廳水面波光層（waterMesh）-------------------------------------------
+// 遊戲的「一層白色半透明的水」＝lobby prefab 的 water GameObject：
+// FX_water_wave_1 mesh（xz 水平面路徑，y=0，95 頂點弧形）＋ FX_TEX_Waterwave_01
+// 波光貼圖；自訂 shader 以 waterwave_02 噪聲（2×15 平鋪）扭曲 UV、
+// _Dis_Speed_X=-1.5 流動、加法合成（材質 _SrcBlend=One/_DstBlend=Zero）。
+// 遊戲以透視相機把 mesh 的 z（深度）投成畫面上的弧形；pixi 端以線性係數
+// WATER_Z2Y 近似（對遊戲截圖校準）。貼圖：assets/particles/{lobby}/waterwave_0*.png。
+let waterLayer = null, waterUniforms = null;
+const WATER_Z2Y = 0.25;   // mesh z（米制深度）→ pixi y 係數（透視近似，截圖校準）
+
+function destroyLobbyWater() {
+  if (waterLayer) { waterLayer.destroy({ children: true }); waterLayer = null; waterUniforms = null; }
+}
+
+function initLobbyWater(lobbyKey) {
+  destroyLobbyWater();
+  const def = LOBBY_PARTICLES?.[lobbyKey]?.waterMesh;
+  if (!def?.verts_xz?.length || !spine) { log(`[particles] water 跳過（def=${!!def} spine=${!!spine}）`); return; }
+  log('[particles] water 前置 OK，載入貼圖…');
+  const n = def.vertCount;
+  // mesh (x, z) → pixi 編輯單位：x 水平、z 深度（遊戲透視相機投成畫面 y）。
+  // screen_map 為對遊戲截圖的單幀校準（線性透視粗近似，待實機序列幀精修）。
+  const sm = def.screen_map;
+  const positions = new Float32Array(n * 2);
+  const uvs = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    positions[i*2] = sm.x_offset + def.verts_xz[i][0] * sm.x_scale;
+    positions[i*2+1] = sm.y_offset + def.verts_xz[i][1] * sm.y_scale;
+    uvs[i*2] = def.uv[i][0]; uvs[i*2+1] = def.uv[i][1];
+  }
+  waterLayer = new Container();
+  waterLayer.eventMode = 'none';
+  waterLayer.label = 'lobbyWater';
+  spine.addChild(waterLayer);   // 與粒子層同空間（繼承相機/縮放）
+  const geo = new MeshGeometry({
+    positions, uvs,
+    indices: new Uint32Array(def.indices),
+  });
+  const mat = def.material;
+  const base = `assets/particles/${lobbyKey}/`;
+  Promise.all([
+    Assets.load(assetUrl(base + mat.tex_main + '.png')),
+    Assets.load(assetUrl(base + mat.tex_distort + '.png')),
+  ]).then(([texMain, texDistort]) => {
+    if (!waterLayer) return;   // teardown 競態防護
+    waterUniforms = new UniformGroup({
+      uTime: { value: 0, type: 'f32' },
+      uDistortScale: { value: mat.distort_scale, type: 'vec2<f32>' },
+      uDisSpeed: { value: [mat.dis_speed_x, 0], type: 'vec2<f32>' },
+      uDistortPower: { value: [mat.distortion_power_x, 0], type: 'vec2<f32>' },
+      uMainSpeed: { value: mat.main_speed, type: 'vec2<f32>' },
+      uMainOffset: { value: mat.main_offset, type: 'vec2<f32>' },
+    });
+    const shader = new Shader({
+      glProgram: GlProgram.from({
+        vertex: `in vec2 aPosition; in vec2 aUV; out vec2 vUV;
+          uniform mat3 uProjectionMatrix; uniform mat3 uWorldTransformMatrix; uniform mat3 uTransformMatrix;
+          void main(void){
+            mat3 m = uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
+            vUV = aUV; gl_Position = vec4((m * vec3(aPosition, 1.0)).xy, 0.0, 1.0); }`,
+        fragment: `precision highp float;
+          in vec2 vUV; out vec4 finalColor;
+          uniform sampler2D uMain; uniform sampler2D uDistort;
+          uniform float uTime; uniform vec2 uDistortScale; uniform vec2 uDisSpeed;
+          uniform vec2 uDistortPower; uniform vec2 uMainSpeed; uniform vec2 uMainOffset;
+          void main(void){
+            vec2 duv = texture(uDistort, vUV * uDistortScale + uDisSpeed * uTime).rg * 2.0 - 1.0;
+            vec2 uv = vUV + uMainOffset + uMainSpeed * uTime + duv * uDistortPower;
+            vec4 c = texture(uMain, uv);
+            float a = c.a * 0.9;
+            finalColor = vec4(c.rgb * a, a); }`,
+      }),
+      resources: { uWaterUniforms: waterUniforms, uMain: texMain.source, uDistort: texDistort.source },
+    });
+    const mesh = new Mesh({ geometry: geo, shader });
+    mesh.blendMode = 'add';
+    waterLayer.addChild(mesh);
+    log(`[particles] ${lobbyKey}: 水面波光層就緒（${n} 頂點）`);
+    // 診斷：mesh 編輯 bbox 與螢幕 bbox（校準 screen_map 用）
+    setTimeout(() => {
+      if (!waterLayer) return;
+      const xs = [], ys = [];
+      for (let i = 0; i < n; i++) {
+        const g = spine.toGlobal({ x: positions[i*2], y: positions[i*2+1] });
+        xs.push(g.x); ys.push(g.y);
+      }
+      log(`[particles] water screen bbox: x ${Math.min(...xs).toFixed(0)}~${Math.max(...xs).toFixed(0)}, y ${Math.min(...ys).toFixed(0)}~${Math.max(...ys).toFixed(0)}`);
+    }, 2500);
+  }).catch((e) => log('[particles] 水面貼圖載入失敗: ' + e.message));
+}
+
+function tickLobbyWater(dtMs) {
+  if (waterUniforms) waterUniforms.uTime = (performance.now() / 1000) % 3600;
 }
 
 // ---- 水槽渲染探針（PROBE=1&probeWater=1&lobby=<key>&autostart=1&vignette=0）----

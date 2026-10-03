@@ -45,7 +45,8 @@ app.whenReady().then(async () => {
     if (process.env.DEBUG_CONSOLE) console.log('[console] ' + message.slice(0, 220));
     else if (message.includes('[particles]') || message.includes('[layout]')) console.log('[console] ' + message.slice(0, 200));
   });
-  win.loadURL(`${DEV_URL}/#lobby=${LOBBY}&autostart=1&vignette=0`);
+  const extra = process.env.EXTRA || '';
+  win.loadURL(`${DEV_URL}/#lobby=${LOBBY}&autostart=1&vignette=0${extra}`);
   setTimeout(async () => {
     try {
       const img = await win.webContents.capturePage();
