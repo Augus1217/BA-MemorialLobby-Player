@@ -46,6 +46,7 @@ app.whenReady().then(async () => {
     else if (message.includes('[particles]') || message.includes('[layout]')) console.log('[console] ' + message.slice(0, 200));
   });
   const extra = process.env.EXTRA || '';
+  console.log('[shot-runner] url:', `${DEV_URL}/#lobby=${LOBBY}&autostart=1&vignette=0${extra}`);
   win.loadURL(`${DEV_URL}/#lobby=${LOBBY}&autostart=1&vignette=0${extra}`);
   setTimeout(async () => {
     try {
