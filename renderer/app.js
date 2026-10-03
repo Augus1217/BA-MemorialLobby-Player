@@ -356,6 +356,8 @@ const log = (s) => console.log('[lobby]', s);
 //     在 shader 內預乘）；CH0070 page3=黑（PMA，材質 _StraightAlphaInput=0 不再預乘）。
 //     烘焙預乘跟隨頁面簽章：straight 頁 ×texA（零 alpha 洩漏保護）、PMA 頁不再乘。
 const fixAdditiveSlots = (obj) => {
+  // plain=1：完全跳過 slot 處理＝純 pixi spine 直渲（對照 Skeleton Viewer 語義用）
+  if (/(?:[&?#])plain=1/.test(location.hash + location.search)) return 0;
   let n = 0;
   for (const slot of obj.skeleton.slots) {
     if (HDR_MODE && /light|flare/i.test(slot.data.name)) continue;   // hdr：prepareHdrLights 全權
@@ -7690,6 +7692,8 @@ async function init() {
   // ---- 電影燈光效果（#fx 電影暈影）開關，持久化 ----
   let vignetteOn = true;
   try { vignetteOn = localStorage.getItem('ba_vignette') !== '0'; } catch {}
+  // vignette=0（歷史上是死參數，探針腳本一直帶著它）：URL 強制關閉 #fx
+  try { if (/(?:^|[?&])vignette=0/.test(location.search) || /(?:^|[?#&])vignette=0/.test(location.hash)) vignetteOn = false; } catch {}
   const syncVignetteUI = () => {
     fxEl.style.display = vignetteOn ? '' : 'none';
     btnCtlVignette?.classList.toggle('on', vignetteOn);
