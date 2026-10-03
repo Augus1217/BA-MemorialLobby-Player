@@ -1,0 +1,311 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>bloom unit</title>
+</head>
+<body style="margin:0">
+<!--
+  bloom 復刻受控單元測試（方法論：受控測量優先於場景比對）。
+  只用 readPixels 對比 CPU 黃金模型，完全確定性。
+    B1 雙 sampler 綁定（uTexture+uBloom 同 draw）＋bloom 加權
+    B2 具名 UniformGroup 混 sampler（app baPostFilter 慣例）
+    B3 Prefilter soft-knee 門檻 vs CPU 黃金模型
+    B4 down/up 鏈路：均值保持、不輸出全黑
+    B5 encode+bloom 整合（rt + bloom×int → encode）
+  結果：每測試一行 UNIT ...，最後一行 UNIT_SUMMARY {json}
+-->
+<script type="module">
+import {
+  Application, RenderTexture, Mesh, MeshGeometry, Shader, GlProgram, UniformGroup,
+  BufferImageSource, Texture, Container, Sprite,
+} from 'pixi.js';
+
+const LINEAR_TO_GAMMA = (x) => x <= 0.0031308 ? x*12.92 : 1.055*Math.pow(x, 1/2.4) - 0.055;
+const _f32 = new Float32Array(1), _i32 = new Int32Array(_f32.buffer);
+const toHalf = (val) => {
+  _f32[0] = val; const x = _i32[0];
+  let bits = (x >> 16) & 0x8000;
+  let m = (x >> 12) & 0x07ff; const e = (x >> 23) & 0xff;
+  if (e < 103) return bits;
+  if (e > 142) { bits |= 0x7c00; return bits; }
+  bits |= ((e - 112) << 10) | (m >> 1); bits += (m & 1); return bits;
+};
+
+const W = 128, H = 128;
+let pass = 0, fail = 0;
+const results = [];
+function report(id, ok, detail) {
+  results.push({ id, ok, detail });
+  if (ok) pass++; else fail++;
+  console.log(`UNIT ${id} ${ok ? 'PASS' : 'FAIL'} :: ${detail}`);
+}
+
+const app = new Application();
+await app.init({
+  width: W, height: H, backgroundColor: 0x000000,
+  preference: 'webgl', antialias: false,
+});
+document.body.appendChild(app.canvas);
+const gl = app.canvas.getContext('webgl2');
+
+const VERT = `in vec2 aPosition; in vec2 aUV; out vec2 vUV;
+  void main(void){ vUV = vec2(aUV.x, 1.0 - aUV.y); gl_Position = vec4(aPosition, 0.0, 1.0); }`;
+const ENCODE_FRAG = `precision highp float;
+  in vec2 vUV; out vec4 finalColor; uniform sampler2D uTexture; uniform sampler2D uBloom;
+  uniform float uBloomInt; uniform vec3 uBloomTint;
+  vec3 l2s(vec3 c){ return mix(c * 12.92, 1.055 * pow(max(c, vec3(0.0)), vec3(1.0/2.4)) - 0.055, step(0.0031308, c)); }
+  void main(void){ vec4 c = texture(uTexture, vUV);
+    vec3 bloom = texture(uBloom, vUV).rgb * uBloomTint * uBloomInt;
+    finalColor = vec4(l2s(clamp(c.rgb + bloom, 0.0, 1.0)), 1.0); }`;
+const PREFILTER_FRAG = `precision highp float;
+  in vec2 vUV; out vec4 finalColor; uniform sampler2D uTex;
+  uniform float uThr; uniform float uKnee;
+  void main(void){
+    vec3 c = texture(uTex, vUV).rgb;
+    float br = max(c.r, max(c.g, c.b));
+    float knee = uThr * uKnee + 1e-4;
+    float soft = clamp(br - uThr + knee, 0.0, 2.0 * knee);
+    soft = soft * soft / (4.0 * knee + 1e-4);
+    float contribution = max(soft, br - uThr) / max(br, 1e-4);
+    finalColor = vec4(c * contribution, 1.0);
+  }`;
+const DOWN_FRAG = `precision highp float;
+  in vec2 vUV; out vec4 finalColor; uniform sampler2D uTex;
+  uniform vec2 uTexel;
+  void main(void){
+    vec4 c = texture(uTex, vUV + vec2(-1.0, -1.0) * uTexel)
+           + texture(uTex, vUV + vec2( 1.0, -1.0) * uTexel)
+           + texture(uTex, vUV + vec2(-1.0,  1.0) * uTexel)
+           + texture(uTex, vUV + vec2( 1.0,  1.0) * uTexel);
+    finalColor = c * 0.25;
+  }`;
+const UP_FRAG = `precision highp float;
+  in vec2 vUV; out vec4 finalColor; uniform sampler2D uHigh; uniform sampler2D uLow;
+  uniform vec2 uTexel; uniform float uScatter;
+  void main(void){
+    vec3 c = texture(uHigh, vUV).rgb * 4.0
+           + texture(uHigh, vUV + vec2( 1.0, 0.0) * uTexel).rgb * 2.0
+           + texture(uHigh, vUV + vec2(-1.0, 0.0) * uTexel).rgb * 2.0
+           + texture(uHigh, vUV + vec2(0.0,  1.0) * uTexel).rgb * 2.0
+           + texture(uHigh, vUV + vec2(0.0, -1.0) * uTexel).rgb * 2.0
+           + texture(uHigh, vUV + vec2( 1.0,  1.0) * uTexel).rgb
+           + texture(uHigh, vUV + vec2(-1.0,  1.0) * uTexel).rgb
+           + texture(uHigh, vUV + vec2( 1.0, -1.0) * uTexel).rgb
+           + texture(uHigh, vUV + vec2(-1.0, -1.0) * uTexel).rgb;
+    vec3 high = c / 16.0;
+    vec3 low = texture(uLow, vUV).rgb;
+    finalColor = vec4(mix(high, low, uScatter), 1.0);
+  }`;
+const geo = new MeshGeometry({
+  positions: new Float32Array([-1,-1, 1,-1, 1,1, -1,1]),
+  uvs: new Float32Array([0,0, 1,0, 1,1, 0,1]),
+  indices: new Uint32Array([0,1,2, 0,2,3]),
+});
+const PASSTHRU = (tex) => new Shader({
+  glProgram: GlProgram.from({ vertex: VERT, fragment: `precision highp float;
+    in vec2 vUV; out vec4 finalColor; uniform sampler2D uTex;
+    void main(void){ finalColor = texture(uTex, vUV); }` }),
+  resources: { uTex: tex },
+});
+const readScreenMean = (x0, y0, x1, y1) => {
+  const gl2 = app.canvas.getContext('webgl2');
+  const px = new Uint8Array(W * H * 4);
+  gl2.readPixels(0, 0, W, H, gl2.RGBA, gl2.UNSIGNED_BYTE, px);
+  let r = 0, n = 0;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+    const i = ((H - 1 - y) * W + x) * 4; r += px[i]; n++;
+  }
+  return r / n;
+};
+const drawTo = (target, shader) => {
+  const cont = new Container();
+  cont.addChild(new Mesh({ geometry: geo, shader }));
+  app.renderer.render({ container: cont, target, clear: true });
+  cont.destroy({ children: true });
+};
+const readRT = (rt) => {
+  app.renderer.render({ container: new Container(), target: rt, clear: true });
+  // 直接 extract：readPixels 需要 framebuffer 綁定，改用 extract.pixels
+  return app.renderer.extract.pixels(rt);
+};
+// 合成來源 RT：4×4 半解析度、左上 1/4 亮方塊 lin(0.9)、其餘 lin(0.05)
+const makeSource = (w, h) => {
+  const data = new Uint16Array(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    const v = (x < w/2 && y < h/2) ? 0.79 : 0.022;   // lin(0.9)=0.79、lin(0.16)≈0.022
+    data[i] = data[i+1] = data[i+2] = toHalf(v); data[i+3] = toHalf(1);
+  }
+  return new BufferImageSource({ resource: data, width: w, height: h, format: 'rgba16float', alphaMode: 'premultiplied-alpha' });
+};
+const mkRT = (w, h) => RenderTexture.create({ width: w, height: h, format: 'rgba16float', resolution: 1 });
+const meanOf = (pix) => {
+  let r = 0, g = 0, b = 0; const n = pix.length / 4;
+  for (let i = 0; i < pix.length; i += 4) { r += pix[i]; g += pix[i+1]; b += pix[i+2]; }
+  return [r/n, g/n, b/n];
+};
+
+// ---- B1 雙 sampler ----
+{
+  try {
+    const rt = mkRT(W, H);
+    const bloomData = new Uint16Array(4);
+    bloomData[0] = bloomData[1] = bloomData[2] = toHalf(0.2); bloomData[3] = toHalf(1);
+    const bloomTex = new Texture({ source: new BufferImageSource({ resource: bloomData, width: 1, height: 1, format: 'rgba16float', alphaMode: 'premultiplied-alpha' }) });
+    const cont = new Container();
+    cont.addChild(new Sprite(new Texture({ source: makeSource(W, H) })));
+    app.stage.removeChildren(); app.stage.addChild(cont);
+    app.renderer.render({ container: app.stage, target: rt, clear: true });
+    const shader = new Shader({
+      glProgram: GlProgram.from({ vertex: VERT, fragment: ENCODE_FRAG }),
+      resources: {
+        uTexture: rt.source,
+        uBloom: bloomTex.source,
+        u: new UniformGroup({ uBloomInt: { value: 0.5, type: 'f32' } }),
+      },
+    });
+    drawTo(null, shader);
+    const img = app.renderer.extract.pixels(app.stage).length ? null : null;
+    // 直接 readCanvas：畫面上左半 = encode(lin(0.79)+0.1)、右半 = encode(0.022+0.1)
+    const gl2 = app.canvas.getContext('webgl2');
+    const px = new Uint8Array(W * H * 4);
+    gl2.readPixels(0, 0, W, H, gl2.RGBA, gl2.UNSIGNED_BYTE, px);
+    const at = (x, y) => { const i = ((H - 1 - y) * W + x) * 4; return [px[i], px[i+1], px[i+2]]; };
+    const left = at(20, 20), right = at(100, 20);
+    const expL = LINEAR_TO_GAMMA(0.79 + 0.2 * 0.5) * 255;
+    const expR = LINEAR_TO_GAMMA(0.022 + 0.2 * 0.5) * 255;
+    const ok = Math.abs(left[0] - expL) < 6 && Math.abs(right[0] - expR) < 6;
+    report('B1-dual-sampler', ok, `left=${left[0]} exp${expL.toFixed(0)} right=${right[0]} exp${expR.toFixed(0)} => ${ok ? 'BIND-OK' : 'BIND-BROKEN'}`);
+  } catch (e) { report('B1-dual-sampler', false, 'exception: ' + (e?.message || e)); }
+}
+
+// ---- B2 具名 group + inline 混用資訊性（baPostFilter 慣例已由 B1 覆蓋一半）----
+{
+  try {
+    // 資訊性：與 B1 同路徑但 uniforms 放兩個 group，驗證多 group 不衝突
+    const rt = mkRT(W, H);
+    const bloomData = new Uint16Array(4);
+    bloomData[0] = bloomData[1] = bloomData[2] = toHalf(0.2); bloomData[3] = toHalf(1);
+    const bloomTex = new Texture({ source: new BufferImageSource({ resource: bloomData, width: 1, height: 1, format: 'rgba16float', alphaMode: 'premultiplied-alpha' }) });
+    const cont = new Container();
+    cont.addChild(new Sprite(new Texture({ source: makeSource(W, H) })));
+    app.stage.removeChildren(); app.stage.addChild(cont);
+    app.renderer.render({ container: app.stage, target: rt, clear: true });
+    const shader = new Shader({
+      glProgram: GlProgram.from({ vertex: VERT, fragment: ENCODE_FRAG }),
+      resources: {
+        uTexture: rt.source,
+        uBloom: bloomTex.source,
+        uA: new UniformGroup({ uBloomInt: { value: 0.5, type: 'f32' } }),
+        uB: new UniformGroup({ uUnused: { value: 7, type: 'f32' } }),
+      },
+    });
+    drawTo(null, shader);
+    const gl2 = app.canvas.getContext('webgl2');
+    const px = new Uint8Array(W * H * 4);
+    gl2.readPixels(0, 0, W, H, gl2.RGBA, gl2.UNSIGNED_BYTE, px);
+    const at = (x, y) => { const i = ((H - 1 - y) * W + x) * 4; return px[i]; };
+    const left = at(20, 20);
+    const ok = Math.abs(left - LINEAR_TO_GAMMA(0.79 + 0.1) * 255) < 6;
+    report('B2-multi-group', ok, `left=${left} => ${ok ? 'OK' : 'BROKEN'}`);
+  } catch (e) { report('B2-multi-group', false, 'exception: ' + (e?.message || e)); }
+}
+
+// ---- B3 Prefilter soft-knee ----
+{
+  try {
+    const src = mkRT(64, 64);
+    drawTo(src, new Shader({
+      glProgram: GlProgram.from({ vertex: VERT, fragment: `precision highp float;
+        in vec2 vUV; out vec4 finalColor;
+        void main(void){
+          float v = vUV.x < 0.5 ? 0.79 : 0.022;
+          finalColor = vec4(vec3(v), 1.0); }` }),
+      resources: {},
+    }));
+    const dst = mkRT(64, 64);
+    drawTo(dst, new Shader({
+      glProgram: GlProgram.from({ vertex: VERT, fragment: PREFILTER_FRAG }),
+      resources: { uTex: src.source, u: new UniformGroup({ uThr: { value: 0.5, type: 'f32' }, uKnee: { value: 0.5, type: 'f32' } }) },
+    }));
+    // 量測：passthrough 畫到螢幕 → readPixels（float RT 的 extract 讀回會回零，勿用）
+    drawTo(null, PASSTHRU(dst.source));
+    // CPU 黃金：br=0.79 → contribution=(0.79-0.5+0.25 soft path)：thr=0.5 knee=0.25
+    // soft=clamp(0.79-0.5+0.25,0,0.5)=0.5 → soft²/(4·0.25)=0.25；max(0.25, 0.29)/0.79=0.367
+    const br = 0.79, thr = 0.5, knee0 = 0.25;
+    const soft = Math.min(Math.max(br - thr + knee0, 0), 2 * knee0);
+    const contrib = Math.max((soft * soft) / (4 * knee0 + 1e-4), br - thr) / br;
+    const exp = (0.79 * contrib) * 255;
+    const got = readScreenMean(20, 20, 60, 60);
+    const ok = Math.abs(got - exp) < 4;
+    report('B3-prefilter', ok, `brightHalf got=${got.toFixed(1)} exp=${exp.toFixed(1)} => ${ok ? 'OK' : 'MISMATCH'}`);
+  } catch (e) { report('B3-prefilter', false, 'exception: ' + (e?.message || e)); }
+}
+
+// ---- B4 down/up 鏈路均值保持 ----
+{
+  try {
+    const src = mkRT(64, 64);
+    drawTo(src, new Shader({
+      glProgram: GlProgram.from({ vertex: VERT, fragment: `precision highp float;
+        in vec2 vUV; out vec4 finalColor;
+        void main(void){
+          float v = vUV.x < 0.5 ? 0.5 : 0.0;
+          finalColor = vec4(vec3(v), 1.0); }` }),
+      resources: {},
+    }));
+    const d1 = mkRT(32, 32);
+    drawTo(d1, new Shader({
+      glProgram: GlProgram.from({ vertex: VERT, fragment: DOWN_FRAG }),
+      resources: { uTex: src.source, u: new UniformGroup({ uTexel: { value: [1/64, 1/64], type: 'vec2<f32>' } }) },
+    }));
+    const u1 = mkRT(64, 64);
+    drawTo(u1, new Shader({
+      glProgram: GlProgram.from({ vertex: VERT, fragment: UP_FRAG }),
+      resources: { uHigh: d1.source, uLow: d1.source, u: new UniformGroup({ uTexel: { value: [1/32, 1/32], type: 'vec2<f32>' }, uScatter: { value: 0.7, type: 'f32' } }) },
+    }));
+    const meanScreen = (tex) => {
+      drawTo(null, PASSTHRU(tex));
+      return readScreenMean(16, 16, W - 16, H - 16);
+    };
+    const m1 = meanScreen(d1.source), m2 = meanScreen(u1.source);
+    // 均值守恆：down/up 都是平均型濾器 → 全域均值≈0.25（邊界取樣 clamp 造成些微偏差）
+    const ok = m1 > 56 && m1 < 72 && m2 > 56 && m2 < 72;   // 0-255 單位；exp≈63.75
+    report('B4-chain-mean', ok, `down mean=${m1.toFixed(1)} up mean=${m2.toFixed(1)} (exp≈63.75=0.25×255) => ${ok ? 'OK' : 'BROKEN'}`);
+  } catch (e) { report('B4-chain-mean', false, 'exception: ' + (e?.message || e)); }
+}
+
+// ---- B5 encode+bloom 整合（rt 亮方塊 + 自身當 bloom ×0.3）＋vec3 tint 版本 ----
+{
+  try {
+    const rt = mkRT(W, H);
+    const cont = new Container();
+    cont.addChild(new Sprite(new Texture({ source: makeSource(W, H) })));
+    app.stage.removeChildren(); app.stage.addChild(cont);
+    app.renderer.render({ container: app.stage, target: rt, clear: true });
+    const shader = new Shader({
+      glProgram: GlProgram.from({ vertex: VERT, fragment: ENCODE_FRAG }),
+      resources: {
+        uTexture: rt.source,
+        uBloom: rt.source,   // 自體當 bloom（平方效應）
+        u: new UniformGroup({ uBloomInt: { value: 0.3, type: 'f32' }, uBloomTint: { value: new Float32Array([0.8, 1.0, 1.4]), type: 'vec3<f32>' } }),
+      },
+    });
+    drawTo(null, shader);
+    const gl2 = app.canvas.getContext('webgl2');
+    const px = new Uint8Array(W * H * 4);
+    gl2.readPixels(0, 0, W, H, gl2.RGBA, gl2.UNSIGNED_BYTE, px);
+    const at = (x, y) => { const i = ((H - 1 - y) * W + x) * 4; return px[i]; };
+    const left = at(20, 20), right = at(100, 20);
+    const expL = LINEAR_TO_GAMMA(0.79 + 0.79 * 0.3 * 1.4) * 255;
+    const expR = LINEAR_TO_GAMMA(0.022 + 0.022 * 0.3 * 1.4) * 255;
+    const ok = Math.abs(left - expL) < 6 && Math.abs(right - expR) < 5;
+    report('B5-encode-bloom', ok, `left=${left} exp${expL.toFixed(0)} right=${right} exp${expR.toFixed(0)} => ${ok ? 'OK' : 'MISMATCH'}`);
+  } catch (e) { report('B5-encode-bloom', false, 'exception: ' + (e?.message || e)); }
+}
+
+console.log('UNIT_SUMMARY ' + JSON.stringify({ pass, fail, results }));
+</script>
+</body>
+</html>
