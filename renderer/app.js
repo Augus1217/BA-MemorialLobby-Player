@@ -8383,7 +8383,11 @@ let waterLayer = null, waterUniforms = null;
 const WATER_Z2Y = 0.25;   // mesh z（米制深度）→ pixi y 係數（透視近似，截圖校準）
 // 弧光強度：遊戲端弧光明顯亮於貼圖原值（mesh 頂點色通道含負值、機制未明），
 // 以遊戲截圖校準（waterStr=3.0≈遊戲弧線亮度）。
-const WATER_STR = Number(/(?:[&?#])waterStr=([\d.]+)/.exec(location.search + location.hash)?.[1]) || 3.0;
+const WATER_STR = Number(/(?:[&?#])waterStr=([\d.]+)/.exec(location.search + location.hash)?.[1]) || 0;
+// 預設 0（關閉）：FX_water_wave_1 的資料存在，但遊戲 idle 畫面中找不到可指認的
+// 弧形波光（伽馬提亮檢視左下水面只有短線光斑＋彩虹色散＋白亮水體）——
+// mesh 的視覺貢獻未證實（材質 _Color alpha=0＋頂點色負值，實際渲染可能極淡/不可見）。
+// waterStr=3.0 可開啟實驗性波光，但在實機序列幀證實其遊戲內樣貌前不應預設開啟。
 
 function destroyLobbyWater() {
   if (waterLayer) { waterLayer.destroy({ children: true }); waterLayer = null; waterUniforms = null; }
