@@ -8381,6 +8381,9 @@ function spawnParticle(sys) {
 // WATER_Z2Y 近似（對遊戲截圖校準）。貼圖：assets/particles/{lobby}/waterwave_0*.png。
 let waterLayer = null, waterUniforms = null;
 const WATER_Z2Y = 0.25;   // mesh z（米制深度）→ pixi y 係數（透視近似，截圖校準）
+// 弧光強度：遊戲端弧光明顯亮於貼圖原值（mesh 頂點色通道含負值、機制未明），
+// 以遊戲截圖校準（waterStr=3.0≈遊戲弧線亮度）。
+const WATER_STR = Number(/(?:[&?#])waterStr=([\d.]+)/.exec(location.search + location.hash)?.[1]) || 3.0;
 
 function destroyLobbyWater() {
   if (waterLayer) { waterLayer.destroy({ children: true }); waterLayer = null; waterUniforms = null; }
@@ -8424,6 +8427,7 @@ function initLobbyWater(lobbyKey) {
       uDistortPower: { value: [mat.distortion_power_x, 0], type: 'vec2<f32>' },
       uMainSpeed: { value: mat.main_speed, type: 'vec2<f32>' },
       uMainOffset: { value: mat.main_offset, type: 'vec2<f32>' },
+      uWaterStrength: { value: WATER_STR, type: 'f32' },
     });
     const shader = new Shader({
       glProgram: GlProgram.from({
@@ -8437,12 +8441,13 @@ function initLobbyWater(lobbyKey) {
           uniform sampler2D uMain; uniform sampler2D uDistort;
           uniform float uTime; uniform vec2 uDistortScale; uniform vec2 uDisSpeed;
           uniform vec2 uDistortPower; uniform vec2 uMainSpeed; uniform vec2 uMainOffset;
+          uniform float uWaterStrength;
           void main(void){
             vec2 duv = texture(uDistort, vUV * uDistortScale + uDisSpeed * uTime).rg * 2.0 - 1.0;
             vec2 uv = vUV + uMainOffset + uMainSpeed * uTime + duv * uDistortPower;
             vec4 c = texture(uMain, uv);
             float a = c.a * 0.9;
-            finalColor = vec4(c.rgb * a, a); }`,
+            finalColor = vec4(c.rgb * a * uWaterStrength, a); }`,
       }),
       resources: { uWaterUniforms: waterUniforms, uMain: texMain.source, uDistort: texDistort.source },
     });
