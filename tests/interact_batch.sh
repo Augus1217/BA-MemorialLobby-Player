@@ -20,6 +20,8 @@ while read -r L; do
   echo "[$(date +%H:%M:%S)] ($i/$total) $L" >> /tmp/bq/interact_batch.log
   LOBBY="$L" TIMEOUT_MS=150000 timeout -k 10 180 ./node_modules/.bin/electron tests/interact_main.js > /dev/null 2>&1 < /dev/null
   ok=$?
+  # userData 目錄每廳 ~140MB，tmpfs 會爆：結果只看 JSON，跑完即清
+  rm -rf "/tmp/bq/ud-interact-$L"
   echo "  exit=$ok lines=$(wc -l < /tmp/bq/interact_${L}.json 2>/dev/null || echo 0)" >> /tmp/bq/interact_batch.log
 done < "$KEYS"
 echo "[$(date +%H:%M:%S)] BATCH COMPLETE ($total)" >> /tmp/bq/interact_batch.log
