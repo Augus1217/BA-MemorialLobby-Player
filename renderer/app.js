@@ -7317,6 +7317,72 @@ async function init() {
   //         → 全屏 quad sRGB encode → 畫面。
   let hdrRT = null;
   let hdrEncodeStage = null;
+  // ---- bloom（亮部柔光；遊戲後處理的視覺近似）--------------------------------
+  // 流程：hdrRT（線性）→ bright pass（threshold 軟膝）→ bloomRT_A → BlurFilter
+  // → bloomRT_B → encode shader 於 sRGB encode 前在線性域疊加。半解析度。
+  // bloom=0 關閉；bloomTh/bloomStr 校準用（預設對遊戲截圖）。
+  const BLOOM = (() => { const q = location.search + location.hash;
+    const on = !/bloom=0/.test(q);
+    const num = (re, d) => { const m = re.exec(q); return m ? Number(m[1]) : d; };
+    return { on, threshold: num(/bloomTh=([\d.]+)/, 0.92), strength: num(/bloomStr=([\d.]+)/, 0.25), blur: num(/bloomBlur=([\d.]+)/, 14) };
+  })();
+  let bloomRT_A = null, bloomRT_B = null, bloomBrightStage = null, bloomBlurStage = null, bloomBlurFilter = null;
+  const BLOOM_QUAD_VERT = `in vec2 aPosition; in vec2 aUV; out vec2 vUV;
+    void main(void){ vUV = vec2(aUV.x, 1.0 - aUV.y); gl_Position = vec4(aPosition, 0.0, 1.0); }`;
+  const BLOOM_FRAG_BRIGHT = `precision highp float;
+    in vec2 vUV; out vec4 finalColor; uniform sampler2D uTexture; uniform float uThreshold;
+    void main(void){
+      vec3 c = max(texture(uTexture, vUV).rgb - uThreshold, vec3(0.0));
+      float k = c.r + c.g + c.b;
+      float soft = k / (k + 0.6);        // 軟膝：小亮部線性、大亮部飽和
+      finalColor = vec4(c * soft * 2.2, 1.0); }`;
+  const ensureBloom = () => {
+    const w = Math.max(1, app.renderer.width >> 1), h = Math.max(1, app.renderer.height >> 1);
+    try {
+      if (!bloomRT_A) {
+        bloomRT_A = RenderTexture.create({ width: w, height: h, format: 'rgba16float', resolution: 1, dynamic: true });
+        bloomRT_B = RenderTexture.create({ width: w, height: h, format: 'rgba16float', resolution: 1, dynamic: true });
+        const quadGeo = () => new MeshGeometry({
+          positions: new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]),
+          uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
+          indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+        });
+        // bright pass：取樣 hdrRT → 閾值軟膝
+        const brightShader = new Shader({
+          glProgram: GlProgram.from({ vertex: BLOOM_QUAD_VERT, fragment: BLOOM_FRAG_BRIGHT }),
+          resources: { uTexture: hdrRT.source, uBloomUniforms: new UniformGroup({ uThreshold: { value: BLOOM.threshold, type: 'f32' } }) },
+        });
+        bloomBrightStage = new Container();
+        bloomBrightStage.addChild(new Mesh({ geometry: quadGeo(), shader: brightShader }));
+        // blur pass：取樣 RT_A，掛 BlurFilter
+        bloomBlurFilter = new BlurFilter({ strength: BLOOM.blur, quality: 3 });
+        const blurShader = new Shader({
+          glProgram: GlProgram.from({ vertex: BLOOM_QUAD_VERT,
+            fragment: `precision highp float; in vec2 vUV; out vec4 finalColor; uniform sampler2D uTexture;
+              void main(void){ finalColor = texture(uTexture, vUV); }` }),
+          resources: { uTexture: bloomRT_A.source },
+        });
+        bloomBlurStage = new Container();
+        const blurMesh = new Mesh({ geometry: quadGeo(), shader: blurShader });
+        blurMesh.filters = [bloomBlurFilter];
+        bloomBlurStage.addChild(blurMesh);
+      } else if (bloomRT_A.width !== (app.renderer.width >> 1)) {
+        const w = Math.max(1, app.renderer.width >> 1), h = Math.max(1, app.renderer.height >> 1);
+        bloomRT_A.source.resize(w, h); bloomRT_B.source.resize(w, h);
+      }
+      return true;
+    } catch (e) {
+      console.warn('[bloom] 初始化失敗，關閉 bloom:', e?.message || e);
+      try { bloomRT_A?.destroy(true); bloomRT_B?.destroy(true); } catch {}
+      bloomRT_A = bloomRT_B = null;
+      return false;
+    }
+  };
+  const renderBloom = () => {
+    if (!BLOOM.on || !ensureBloom()) return;
+    app.renderer.render({ container: bloomBrightStage, target: bloomRT_A, clear: true });
+    app.renderer.render({ container: bloomBlurStage, target: bloomRT_B, clear: true });
+  };
   const ensureHdrRT = () => {
     const w = app.renderer.width, h = app.renderer.height;
     try {
@@ -7327,19 +7393,25 @@ async function init() {
           uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
           indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
         });
+        const encodeUniforms = new UniformGroup({ uBloomStrength: { value: BLOOM.on ? BLOOM.strength : 0, type: 'f32' } });
         const shader = new Shader({
           glProgram: GlProgram.from({
             vertex: `in vec2 aPosition; in vec2 aUV; out vec2 vUV;
               void main(void){ vUV = vec2(aUV.x, 1.0 - aUV.y); gl_Position = vec4(aPosition, 0.0, 1.0); }`,
             fragment: `precision highp float;
-              in vec2 vUV; out vec4 finalColor; uniform sampler2D uTexture;
+              in vec2 vUV; out vec4 finalColor; uniform sampler2D uTexture; uniform sampler2D uBloom;
+              uniform float uBloomStrength;
               vec3 l2s(vec3 c){ return mix(c * 12.92, 1.055 * pow(max(c, vec3(0.0)), vec3(1.0/2.4)) - 0.055, step(0.0031308, c)); }
-              void main(void){ vec4 c = texture(uTexture, vUV); finalColor = vec4(l2s(clamp(c.rgb, 0.0, 1.0)), 1.0); }`,
+              void main(void){
+                vec4 c = texture(uTexture, vUV);
+                vec3 lin = c.rgb + texture(uBloom, vUV).rgb * uBloomStrength;
+                finalColor = vec4(l2s(clamp(lin, 0.0, 1.0)), 1.0); }`,
           }),
-          resources: { uTexture: hdrRT.source },
+          resources: { uTexture: hdrRT.source, uBloomUniforms: encodeUniforms },
         });
         hdrEncodeStage = new Container();
         hdrEncodeStage.addChild(new Mesh({ geometry: geo, shader }));
+        // encode 的 uBloom 在 hdrTwoPass 中每幀綁 bloomRT_B.source（bloom 關閉時 strength=0 兜底）
       } else if (hdrRT.width !== w || hdrRT.height !== h) {
         hdrRT.source.resize(w, h);   // 綁定不變，shader 續用同一 source
       }
@@ -7354,6 +7426,12 @@ async function init() {
   const hdrTwoPass = () => {
     if (!ensureHdrRT()) return false;
     app.renderer.render({ container: app.stage, target: hdrRT, clear: true });
+    renderBloom();
+    // encode 的 uBloom 綁 bloomRT_B（每幀更新 source 引用；bloom 關閉時 RT_B 為空=黑）
+    if (bloomRT_B && hdrEncodeStage) {
+      const enc = hdrEncodeStage.children[0];
+      if (enc?.shader?.resources) enc.shader.resources.uBloom = bloomRT_B.source;
+    }
     app.renderer.render({ container: hdrEncodeStage, clear: true });
     return true;
   };
