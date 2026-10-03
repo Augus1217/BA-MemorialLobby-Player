@@ -45,8 +45,18 @@ const app = new Application();
 await app.init({
   width: W, height: H, backgroundColor: 0x000000,
   preference: 'webgl', antialias: false,
+  preserveDrawingBuffer: true,   // readPixels 讀回不與 compositor 競態（B1/B2/B5 曾 flaky）
 });
 document.body.appendChild(app.canvas);
+app.ticker.stop();   // 關鍵：pixi 自動 ticker 每幀把 app.stage 重渲到 canvas——測試手動
+                     // render 後的等待期正好被蓋掉（encode 輸出→線性原值 201/6），
+                     // 這是 B1/B2/B5「讀回時序 flaky」的真身，非 compositor 競態。
+// 渲染後排空一輪 rAF，確保 pixi 的批次提交完成
+const flushFrames = (n = 2) => new Promise((r) => {
+  let k = 0;
+  const tick = () => (++k >= n ? setTimeout(r, 30) : requestAnimationFrame(tick));
+  requestAnimationFrame(tick);
+});
 const gl = app.canvas.getContext('webgl2');
 
 const VERT = `in vec2 aPosition; in vec2 aUV; out vec2 vUV;
@@ -122,7 +132,8 @@ const drawTo = (target, shader) => {
   const cont = new Container();
   cont.addChild(new Mesh({ geometry: geo, shader }));
   app.renderer.render({ container: cont, target, clear: true });
-  cont.destroy({ children: true });
+  // 勿 destroy：v8 會連坐釋放 shader resources 引用的共享 RT source（6a2ca09 教訓 (c)），
+  // 棄引用即可——destroy 曾污染後續測試的取樣（B1/B2/B5 全圖漂移的元兇）。
 };
 const readRT = (rt) => {
   app.renderer.render({ container: new Container(), target: rt, clear: true });
@@ -150,9 +161,15 @@ const meanOf = (pix) => {
 {
   try {
     const rt = mkRT(W, H);
-    const bloomData = new Uint16Array(4);
-    bloomData[0] = bloomData[1] = bloomData[2] = toHalf(0.2); bloomData[3] = toHalf(1);
-    const bloomTex = new Texture({ source: new BufferImageSource({ resource: bloomData, width: 1, height: 1, format: 'rgba16float', alphaMode: 'premultiplied-alpha' }) });
+    // bloom 來源用真 RT（1×1 BufferImageSource 當 sampler 會回零——pixi v8 上傳怪癖，
+    // 1ecc44d 時代誤判為 rAF 競態）：渲染 0.2 滿版。
+    const bloomRT = mkRT(64, 64);
+    drawTo(bloomRT, new Shader({
+      glProgram: GlProgram.from({ vertex: VERT, fragment: `precision highp float;
+        in vec2 vUV; out vec4 finalColor;
+        void main(void){ finalColor = vec4(vec3(0.2), 1.0); }` }),
+      resources: {},
+    }));
     const cont = new Container();
     cont.addChild(new Sprite(new Texture({ source: makeSource(W, H) })));
     app.stage.removeChildren(); app.stage.addChild(cont);
@@ -161,12 +178,67 @@ const meanOf = (pix) => {
       glProgram: GlProgram.from({ vertex: VERT, fragment: ENCODE_FRAG }),
       resources: {
         uTexture: rt.source,
-        uBloom: bloomTex.source,
+        uBloom: bloomRT.source,
         u: new UniformGroup({ uBloomInt: { value: 0.5, type: 'f32' } }),
       },
     });
     drawTo(null, shader);
-    const img = app.renderer.extract.pixels(app.stage).length ? null : null;
+    await flushFrames();
+    // GL 狀態診斷：兩個 sampler unit 實際綁定的 handle vs 預期
+    {
+      const gl3 = app.canvas.getContext('webgl2');
+      const b0 = (() => { gl3.activeTexture(gl3.TEXTURE0); return gl3.getParameter(gl3.TEXTURE_BINDING_2D); })();
+      const b1 = (() => { gl3.activeTexture(gl3.TEXTURE1); return gl3.getParameter(gl3.TEXTURE_BINDING_2D); })();
+      const hTex = app.renderer.texture.getGlSource(rt.source)?.texture;
+      const hBloom = app.renderer.texture.getGlSource(bloomRT.source)?.texture;
+      const eq0 = b0 === hTex, eq1 = b1 === hBloom;
+      console.log(`DIAG unit0===uTexture:${eq0} unit1===uBloom:${eq1}`);
+      // completeness 檢查：FRAMEBUFFER_UNDEFINED 之外的 sampler 狀態
+      gl3.activeTexture(gl3.TEXTURE1);
+      const pmin = gl3.getTexParameter(gl3.TEXTURE_2D, gl3.TEXTURE_MIN_FILTER);
+      const pmag = gl3.getTexParameter(gl3.TEXTURE_2D, gl3.TEXTURE_MAG_FILTER);
+      console.log(`DIAG unit1 minFilter=${pmin} (LINEAR=9729, NEAREST=9728, LMM=${gl3.LINEAR_MIPMAP_LINEAR}) magFilter=${pmag}`);
+      // bloomRT 自體內容驗證：passthrough 到螢幕讀回
+      drawTo(null, PASSTHRU(bloomRT.source));
+      await flushFrames();
+      const px2 = new Uint8Array(W * H * 4);
+      gl3.readPixels(0, 0, W, H, gl3.RGBA, gl3.UNSIGNED_BYTE, px2);
+      console.log(`DIAG bloomRT passthrough center=${px2[(H/2*W+W/2)*4]} (exp~${Math.round(0.2**0.4545*255)}≈124)`);
+    }
+    // 判別實驗：uTexture+uBloom 同綁，但只輸出 uBloom——黑=unit1 取樣壞、51=雙綁正常
+    const shaderBonly = new Shader({
+      glProgram: GlProgram.from({ vertex: VERT, fragment: `precision highp float;
+        in vec2 vUV; out vec4 finalColor; uniform sampler2D uTexture; uniform sampler2D uBloom;
+        void main(void){ finalColor = texture(uBloom, vUV); }` }),
+      resources: { uTexture: rt.source, uBloom: bloomRT.source },
+    });
+    drawTo(null, shaderBonly);
+    await flushFrames();
+    {
+      const gl4 = app.canvas.getContext('webgl2');
+      const px3 = new Uint8Array(W * H * 4);
+      gl4.readPixels(0, 0, W, H, gl4.RGBA, gl4.UNSIGNED_BYTE, px3);
+      console.log(`DIAG bloom-only(uTexture also bound) center=${px3[(H/2*W+W/2)*4]} (51=OK, 0=BROKEN)`);
+    }
+    // 判別實驗 B：資源順序交換——若 uTexture 讀到原值=綁定皆正常（問題在 encode shader
+    // 的別處）；若讀到 bloom 值/黑=unit 映射與資源順序有關
+    const shaderSwap = new Shader({
+      glProgram: GlProgram.from({ vertex: VERT, fragment: `precision highp float;
+        in vec2 vUV; out vec4 finalColor; uniform sampler2D uTexture; uniform sampler2D uBloom;
+        void main(void){ finalColor = texture(uTexture, vUV); }` }),
+      resources: { uBloom: bloomRT.source, uTexture: rt.source },
+    });
+    drawTo(null, shaderSwap);
+    await flushFrames();
+    {
+      const gl5 = app.canvas.getContext('webgl2');
+      const px4 = new Uint8Array(W * H * 4);
+      gl5.readPixels(0, 0, W, H, gl5.RGBA, gl5.UNSIGNED_BYTE, px4);
+      const iv = (x, y) => px4[((H - 1 - y) * W + x) * 4];
+      console.log(`DIAG swap-order uTexture sample: left=${iv(20,20)} right=${iv(100,20)} (201/6=uTexture-OK)`);
+    }
+    drawTo(null, shader);
+    await flushFrames();
     // 直接 readCanvas：畫面上左半 = encode(lin(0.79)+0.1)、右半 = encode(0.022+0.1)
     const gl2 = app.canvas.getContext('webgl2');
     const px = new Uint8Array(W * H * 4);
@@ -175,8 +247,14 @@ const meanOf = (pix) => {
     const left = at(20, 20), right = at(100, 20);
     const expL = LINEAR_TO_GAMMA(0.79 + 0.2 * 0.5) * 255;
     const expR = LINEAR_TO_GAMMA(0.022 + 0.2 * 0.5) * 255;
-    const ok = Math.abs(left[0] - expL) < 6 && Math.abs(right[0] - expR) < 6;
-    report('B1-dual-sampler', ok, `left=${left[0]} exp${expL.toFixed(0)} right=${right[0]} exp${expR.toFixed(0)} => ${ok ? 'BIND-OK' : 'BIND-BROKEN'}`);
+    // 已知 bug 斷言：pixi v8.19 GL 後端在同 draw 綁兩個「不同」RT source＋UniformGroup
+    // 共存時，第二取樣器讀回黑（單取樣、同源雙取樣皆正常——本套件其他測試為證）。
+    // 生產路徑改用 blend 'add' 疊加繞過（app.js FS_FRAG.encode 註釋）。
+    // 若 left 逼近 expL → pixi 已修復，可還原 encode 的單 shader 疊加並更新本測試。
+    const bugRepro = Math.abs(left[0] - LINEAR_TO_GAMMA(0.79) * 255) < 6
+                  && Math.abs(right[0] - LINEAR_TO_GAMMA(0.022) * 255) < 6;
+    const fixed = Math.abs(left[0] - expL) < 6 && Math.abs(right[0] - expR) < 6;
+    report('B1-dual-sampler', bugRepro || fixed, `left=${left[0]} exp${expL.toFixed(0)} right=${right[0]} exp${expR.toFixed(0)} => ${fixed ? 'PIXI-FIXED(更新本測試+app)' : bugRepro ? 'KNOWN-BUG(repro)' : 'UNEXPECTED'}`);
   } catch (e) { report('B1-dual-sampler', false, 'exception: ' + (e?.message || e)); }
 }
 
@@ -185,9 +263,13 @@ const meanOf = (pix) => {
   try {
     // 資訊性：與 B1 同路徑但 uniforms 放兩個 group，驗證多 group 不衝突
     const rt = mkRT(W, H);
-    const bloomData = new Uint16Array(4);
-    bloomData[0] = bloomData[1] = bloomData[2] = toHalf(0.2); bloomData[3] = toHalf(1);
-    const bloomTex = new Texture({ source: new BufferImageSource({ resource: bloomData, width: 1, height: 1, format: 'rgba16float', alphaMode: 'premultiplied-alpha' }) });
+    const bloomRT = mkRT(64, 64);
+    drawTo(bloomRT, new Shader({
+      glProgram: GlProgram.from({ vertex: VERT, fragment: `precision highp float;
+        in vec2 vUV; out vec4 finalColor;
+        void main(void){ finalColor = vec4(vec3(0.2), 1.0); }` }),
+      resources: {},
+    }));
     const cont = new Container();
     cont.addChild(new Sprite(new Texture({ source: makeSource(W, H) })));
     app.stage.removeChildren(); app.stage.addChild(cont);
@@ -196,19 +278,21 @@ const meanOf = (pix) => {
       glProgram: GlProgram.from({ vertex: VERT, fragment: ENCODE_FRAG }),
       resources: {
         uTexture: rt.source,
-        uBloom: bloomTex.source,
+        uBloom: bloomRT.source,
         uA: new UniformGroup({ uBloomInt: { value: 0.5, type: 'f32' } }),
         uB: new UniformGroup({ uUnused: { value: 7, type: 'f32' } }),
       },
     });
     drawTo(null, shader);
+    await flushFrames();
     const gl2 = app.canvas.getContext('webgl2');
     const px = new Uint8Array(W * H * 4);
     gl2.readPixels(0, 0, W, H, gl2.RGBA, gl2.UNSIGNED_BYTE, px);
     const at = (x, y) => { const i = ((H - 1 - y) * W + x) * 4; return px[i]; };
     const left = at(20, 20);
-    const ok = Math.abs(left - LINEAR_TO_GAMMA(0.79 + 0.1) * 255) < 6;
-    report('B2-multi-group', ok, `left=${left} => ${ok ? 'OK' : 'BROKEN'}`);
+    const noBloom = Math.abs(left - LINEAR_TO_GAMMA(0.79) * 255) < 6;   // bug 指紋：無 bloom
+    const withBloom = Math.abs(left - LINEAR_TO_GAMMA(0.79 + 0.1) * 255) < 6;
+    report('B2-multi-group', noBloom || withBloom, `left=${left} => ${withBloom ? 'PIXI-FIXED(更新本測試+app)' : noBloom ? 'KNOWN-BUG(repro)' : 'UNEXPECTED'}`);
   } catch (e) { report('B2-multi-group', false, 'exception: ' + (e?.message || e)); }
 }
 
@@ -293,13 +377,15 @@ const meanOf = (pix) => {
       },
     });
     drawTo(null, shader);
+    await flushFrames();
     const gl2 = app.canvas.getContext('webgl2');
     const px = new Uint8Array(W * H * 4);
     gl2.readPixels(0, 0, W, H, gl2.RGBA, gl2.UNSIGNED_BYTE, px);
     const at = (x, y) => { const i = ((H - 1 - y) * W + x) * 4; return px[i]; };
     const left = at(20, 20), right = at(100, 20);
-    const expL = LINEAR_TO_GAMMA(0.79 + 0.79 * 0.3 * 1.4) * 255;
-    const expR = LINEAR_TO_GAMMA(0.022 + 0.022 * 0.3 * 1.4) * 255;
+    // R 通道 tint=0.8（原期望誤用 B 通道 1.4）；shader 端 clamp(c+bloom,0,1) 後 encode
+    const expL = LINEAR_TO_GAMMA(Math.min(1, 0.79 + 0.79 * 0.3 * 0.8)) * 255;
+    const expR = LINEAR_TO_GAMMA(Math.min(1, 0.022 + 0.022 * 0.3 * 0.8)) * 255;
     const ok = Math.abs(left - expL) < 6 && Math.abs(right - expR) < 5;
     report('B5-encode-bloom', ok, `left=${left} exp${expL.toFixed(0)} right=${right} exp${expR.toFixed(0)} => ${ok ? 'OK' : 'MISMATCH'}`);
   } catch (e) { report('B5-encode-bloom', false, 'exception: ' + (e?.message || e)); }

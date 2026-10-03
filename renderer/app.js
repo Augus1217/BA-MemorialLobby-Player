@@ -443,12 +443,16 @@ async function prepareHdrLights(obj, atlasUrl) {
   const atlas = Assets.get(atlasUrl);
   if (!atlas?.pages) { log('[hdr] atlas 未快取：' + atlasUrl); return; }
   let n = 0;
+  // pmaBake=1（實驗旗標）：PMA 族（_StraightAlphaInput=0）語義測試——遊戲對 PMA 材質
+  // 的貢獻＝lin(rgb)（rgb 已預乘、不衰減），straight 語義的 ×a 會把軟光層按 a 變暗
+  // （CH0284 案：角色 a=1 吻合、背景軟光 a<1 系統性偏暗）。
+  const pmaBake = /(?:[&?#])pmaBake=1/.test(location.hash + location.search);
   for (const page of atlas.pages) {
     const p = await hdrPageData(base + page.name);
     const out = new Uint16Array(p.w * p.h * 4);
     for (let i = 0, j = 0; i < p.u8.length; i += 4, j += 4) {
       const a = p.u8[i+3] / 255;
-      const m = page.pma ? 1 : a;   // 未標 pma＝straight 檔：複刻 loader 的上傳預乘
+      const m = (page.pma || pmaBake) ? 1 : a;   // 未標 pma＝straight 檔：複刻 loader 的上傳預乘
       out[j]   = toHalf(GAMMA_TO_LINEAR(p.u8[i] / 255) * m);
       out[j+1] = toHalf(GAMMA_TO_LINEAR(p.u8[i+1] / 255) * m);
       out[j+2] = toHalf(GAMMA_TO_LINEAR(p.u8[i+2] / 255) * m);
@@ -7315,46 +7319,225 @@ async function init() {
   // 遊戲在線性緩衝合成、輸出前 sRGB encode。sRGB 畫布直渲會讓線性烘焙值與 dst 項
   // 產生空間誤差（Seia 案：全 frame R-B 系統性 +8~12 暖罩）。兩段式：
   //   stage → rgba16float 線性 RT（光槽頁面已線性化、batcher blend 逐項等於遊戲）
-  //         → 全屏 quad sRGB encode → 畫面。
+  //         → [bloom：prefilter→down 鏈→up 鏈] → 全屏 quad sRGB encode → 畫面。
+  // bloom（URP 復刻，鏈路結構＝tests/bloom_unit.html B1-B5 驗證版）：**預設關閉**——
+  // 對像素級校準的管線加後處理必先預設關＋單獨校準（6a2ca09 教訓）；URL 帶
+  // bloomInt>0 才啟用。RT 一律 antialias:false：MSAA RT（renderbuffer+blit
+  // resolve，GlRenderTargetAdaptor）在自訂 shader 雙 sampler 下取樣失效，是上輪
+  // 整合失敗的頭號嫌疑（1ecc44d 筆記）；鏈上 RT 全部同一工廠建立、尺寸變化時
+  // 只 resize source（綁定不變）；重建時棄引用不 destroy（destroy 會連坐釋放
+  // shader resources 引用的共享 source）。
   let hdrRT = null;
   let hdrEncodeStage = null;
+  let bloomChain = null;   // { pre, down[], up[], preS, downS[], upS[], w, h }
+  let bloomAddMesh = null; // 鏈末 bloom 疊加 quad（blend 'add'，疊進 hdrRT）
+  let encodeBloomU = null; // encode 的 bloom uniforms（__setBloom 熱調）
+  const BLOOM = (() => {
+    const q = location.search + location.hash;
+    const num = (name, dflt) => {
+      const m = new RegExp(`[&?#]${name}=(-?[\\d.]+)`).exec(q);
+      return m ? parseFloat(m[1]) : dflt;
+    };
+    return {
+      thr: num('bloomThr', 0.92),
+      knee: num('bloomKnee', 0.5),
+      int: num('bloomInt', 0),
+      scatter: num('bloomScatter', 0.7),
+      tint: [num('bloomTintR', 1), num('bloomTintG', 1), num('bloomTintB', 1)],
+      lv: Math.max(1, Math.min(6, Math.round(num('bloomLv', 5)))),
+    };
+  })();
+  const mkLinearRT = (w, h) => RenderTexture.create({
+    width: Math.max(1, Math.round(w)), height: Math.max(1, Math.round(h)),
+    format: 'rgba16float', resolution: 1, antialias: false, dynamic: true,
+  });
+  const FS_VERT = `in vec2 aPosition; in vec2 aUV; out vec2 vUV;
+    void main(void){ vUV = vec2(aUV.x, 1.0 - aUV.y); gl_Position = vec4(aPosition, 0.0, 1.0); }`;
+  const L2S_GLSL = `vec3 l2s(vec3 c){ return mix(c * 12.92, 1.055 * pow(max(c, vec3(0.0)), vec3(1.0/2.4)) - 0.055, step(0.0031308, c)); }`;
+  const FS_FRAG = {
+    // encode＝原始單取樣版（v2 基線逐位元組同）。bloom 不在此疊加——
+    // pixi v8 GL 後端「同 draw 雙 sampler（不同 source＋UniformGroup 共存）」
+    // 第二取樣器回黑（bloom_unit B1/B2 確定性重現；單取樣皆正常）——
+    // bloom 改由鏈末的 blend 'add' pass 疊進 hdrRT（單取樣＋混合＝已驗證模式）。
+    encode: `precision highp float;
+      in vec2 vUV; out vec4 finalColor; uniform sampler2D uTexture;
+      ${L2S_GLSL}
+      void main(void){ vec4 c = texture(uTexture, vUV); finalColor = vec4(l2s(clamp(c.rgb, 0.0, 1.0)), 1.0); }`,
+    bloomAdd: `precision highp float;
+      in vec2 vUV; out vec4 finalColor; uniform sampler2D uBloomTex;
+      uniform float uBloomInt; uniform vec3 uBloomTint;
+      void main(void){
+        vec3 bloom = texture(uBloomTex, vUV).rgb * uBloomTint * uBloomInt;
+        finalColor = vec4(bloom, 1.0); }`,
+    prefilter: `precision highp float;
+      in vec2 vUV; out vec4 finalColor; uniform sampler2D uTex;
+      uniform float uThr; uniform float uKnee;
+      void main(void){
+        vec3 c = texture(uTex, vUV).rgb;
+        float br = max(c.r, max(c.g, c.b));
+        float knee = uThr * uKnee + 1e-4;
+        float soft = clamp(br - uThr + knee, 0.0, 2.0 * knee);
+        soft = soft * soft / (4.0 * knee + 1e-4);
+        float contribution = max(soft, br - uThr) / max(br, 1e-4);
+        finalColor = vec4(c * contribution, 1.0); }`,
+    down: `precision highp float;
+      in vec2 vUV; out vec4 finalColor; uniform sampler2D uTex;
+      uniform vec2 uTexel;
+      void main(void){
+        vec4 c = texture(uTex, vUV + vec2(-1.0, -1.0) * uTexel)
+               + texture(uTex, vUV + vec2( 1.0, -1.0) * uTexel)
+               + texture(uTex, vUV + vec2(-1.0,  1.0) * uTexel)
+               + texture(uTex, vUV + vec2( 1.0,  1.0) * uTexel);
+        finalColor = c * 0.25; }`,
+    up: `precision highp float;
+      in vec2 vUV; out vec4 finalColor; uniform sampler2D uHigh; uniform sampler2D uLow;
+      uniform vec2 uTexel; uniform float uScatter;
+      void main(void){
+        vec3 c = texture(uHigh, vUV).rgb * 4.0
+               + texture(uHigh, vUV + vec2( 1.0, 0.0) * uTexel).rgb * 2.0
+               + texture(uHigh, vUV + vec2(-1.0, 0.0) * uTexel).rgb * 2.0
+               + texture(uHigh, vUV + vec2(0.0,  1.0) * uTexel).rgb * 2.0
+               + texture(uHigh, vUV + vec2(0.0, -1.0) * uTexel).rgb * 2.0
+               + texture(uHigh, vUV + vec2( 1.0,  1.0) * uTexel).rgb
+               + texture(uHigh, vUV + vec2(-1.0,  1.0) * uTexel).rgb
+               + texture(uHigh, vUV + vec2( 1.0, -1.0) * uTexel).rgb
+               + texture(uHigh, vUV + vec2(-1.0, -1.0) * uTexel).rgb;
+        vec3 high = c / 16.0;
+        vec3 low = texture(uLow, vUV).rgb;
+        finalColor = vec4(mix(high, low, uScatter), 1.0); }`,
+  };
+  const fsGeo = new MeshGeometry({
+    positions: new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]),
+    uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
+    indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+  });
+  const bloomQuadStage = new Container();
+  const bloomQuadMesh = new Mesh({ geometry: fsGeo, shader: null });
+  bloomQuadStage.addChild(bloomQuadMesh);
+  const bloomAddStage = new Container();   // 裝 bloomAddMesh（blend 'add' 疊加 pass 用）
+  const buildEncodeStage = (bloomSrc) => {
+    encodeBloomU = new UniformGroup({
+      uBloomInt: { value: BLOOM.int, type: 'f32' },
+      uBloomTint: { value: new Float32Array(BLOOM.tint), type: 'vec3<f32>' },
+    });
+    // bloomAdd pass（鏈末）：單取樣 uBloomTex＋blend 'add' 疊進 hdrRT。
+    // uBloomInt=0 時整個 pass 跳過 → hdrRT 原封不動 → 基線等同無 bloom。
+    const addShader = new Shader({
+      glProgram: GlProgram.from({ vertex: FS_VERT, fragment: FS_FRAG.bloomAdd }),
+      resources: {
+        uBloomTex: bloomSrc,
+        bloomAddU: encodeBloomU,
+      },
+    });
+    bloomAddMesh = new Mesh({ geometry: fsGeo, shader: addShader });
+    bloomAddMesh.blendMode = 'add';
+    bloomAddStage.removeChildren();   // 棄舊引用不 destroy（鏈重建時避免雙 mesh 疊加鬼影）
+    bloomAddStage.addChild(bloomAddMesh);
+    const encodeShader = new Shader({
+      glProgram: GlProgram.from({ vertex: FS_VERT, fragment: FS_FRAG.encode }),
+      resources: { uTexture: hdrRT.source },
+    });
+    hdrEncodeStage = new Container();
+    hdrEncodeStage.addChild(new Mesh({ geometry: fsGeo, shader: encodeShader }));
+  };
+  const downSize = (w, h, i) => [Math.max(1, w >> (i + 1)), Math.max(1, h >> (i + 1))];
+  const buildBloomChain = (w, h) => {
+    const pre = mkLinearRT(w, h);
+    const down = [], up = [];
+    for (let i = 0; i < BLOOM.lv; i++) {
+      const [dw, dh] = downSize(w, h, i);
+      down.push(mkLinearRT(dw, dh));
+      up.push(mkLinearRT(dw, dh));
+    }
+    const preS = new Shader({
+      glProgram: GlProgram.from({ vertex: FS_VERT, fragment: FS_FRAG.prefilter }),
+      resources: {
+        uTex: hdrRT.source,
+        preU: new UniformGroup({ uThr: { value: BLOOM.thr, type: 'f32' }, uKnee: { value: BLOOM.knee, type: 'f32' } }),
+      },
+    });
+    const downS = down.map((rt, i) => {
+      const sw = i === 0 ? w : (w >> i), sh = i === 0 ? h : (h >> i);   // 取樣源＝down[i-1]（或 pre）的尺寸
+      return new Shader({
+        glProgram: GlProgram.from({ vertex: FS_VERT, fragment: FS_FRAG.down }),
+        resources: {
+          uTex: i === 0 ? pre.source : down[i - 1].source,
+          downU: new UniformGroup({ uTexel: { value: [1 / Math.max(1, sw), 1 / Math.max(1, sh)], type: 'vec2<f32>' } }),
+        },
+      });
+    });
+    const upS = up.map((rt, i) => {
+      const last = i === BLOOM.lv - 1;
+      const high = last ? down[i].source : up[i + 1].source;
+      const hs = last ? [w >> BLOOM.lv, h >> BLOOM.lv] : [w >> (i + 2), h >> (i + 2)];
+      return new Shader({
+        glProgram: GlProgram.from({ vertex: FS_VERT, fragment: FS_FRAG.up }),
+        resources: {
+          uHigh: high,
+          uLow: down[i].source,   // 深層首個 up pass 的 uLow 亦為 down[lv-1]（B4 驗證形）
+          upU: new UniformGroup({
+            uTexel: { value: [1 / Math.max(1, hs[0]), 1 / Math.max(1, hs[1])], type: 'vec2<f32>' },
+            uScatter: { value: BLOOM.scatter, type: 'f32' },
+          }),
+        },
+      });
+    });
+    bloomChain = { pre, down, up, preS, downS, upS, w, h };
+    buildEncodeStage(up[0].source);
+  };
+  const resizeBloomChain = (w, h) => {
+    const c = bloomChain;
+    c.pre.source.resize(w, h);
+    c.down.forEach((rt, i) => { const [dw, dh] = downSize(w, h, i); rt.source.resize(dw, dh); });
+    c.up.forEach((rt, i) => { const [dw, dh] = downSize(w, h, i); rt.source.resize(dw, dh); });
+    c.downS.forEach((s, i) => {
+      const sw = i === 0 ? w : (w >> i), sh = i === 0 ? h : (h >> i);
+      s.resources.downU.uniforms.uTexel = [1 / Math.max(1, sw), 1 / Math.max(1, sh)];
+    });
+    c.upS.forEach((s, i) => {
+      const last = i === BLOOM.lv - 1;
+      const hs = last ? [w >> BLOOM.lv, h >> BLOOM.lv] : [w >> (i + 2), h >> (i + 2)];
+      s.resources.upU.uniforms.uTexel = [1 / Math.max(1, hs[0]), 1 / Math.max(1, hs[1])];
+    });
+    c.w = w; c.h = h;
+  };
   const ensureHdrRT = () => {
     const w = app.renderer.width, h = app.renderer.height;
     try {
       if (!hdrRT) {
-        hdrRT = RenderTexture.create({ width: w, height: h, format: 'rgba16float', resolution: 1, antialias: true, dynamic: true });
-        const geo = new MeshGeometry({
-          positions: new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]),
-          uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
-          indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
-        });
-        const shader = new Shader({
-          glProgram: GlProgram.from({
-            vertex: `in vec2 aPosition; in vec2 aUV; out vec2 vUV;
-              void main(void){ vUV = vec2(aUV.x, 1.0 - aUV.y); gl_Position = vec4(aPosition, 0.0, 1.0); }`,
-            fragment: `precision highp float;
-              in vec2 vUV; out vec4 finalColor; uniform sampler2D uTexture;
-              vec3 l2s(vec3 c){ return mix(c * 12.92, 1.055 * pow(max(c, vec3(0.0)), vec3(1.0/2.4)) - 0.055, step(0.0031308, c)); }
-              void main(void){ vec4 c = texture(uTexture, vUV); finalColor = vec4(l2s(clamp(c.rgb, 0.0, 1.0)), 1.0); }`,
-          }),
-          resources: { uTexture: hdrRT.source },
-        });
-        hdrEncodeStage = new Container();
-        hdrEncodeStage.addChild(new Mesh({ geometry: geo, shader }));
+        hdrRT = mkLinearRT(w, h);
+        if (BLOOM.int > 0) buildBloomChain(w, h);   // 內部會重掛 encode（uBloom→up[0]）
+        else buildEncodeStage(hdrRT.source);
       } else if (hdrRT.width !== w || hdrRT.height !== h) {
         hdrRT.source.resize(w, h);   // 綁定不變，shader 續用同一 source
+        if (bloomChain) resizeBloomChain(w, h);
       }
+      if (BLOOM.int > 0 && !bloomChain) buildBloomChain(w, h);   // __setBloom 動態開啟
       return true;
     } catch (e) {
       console.warn('[hdr] 線性 RT 初始化失敗，退回直渲:', e?.message || e);
       try { hdrRT?.destroy(true); } catch {}
-      hdrRT = null;
+      hdrRT = null; bloomChain = null;
       return false;
     }
+  };
+  const runBloomChain = () => {
+    const draw = (target, shader) => {
+      bloomQuadMesh.shader = shader;
+      app.renderer.render({ container: bloomQuadStage, target, clear: true });
+    };
+    draw(bloomChain.pre, bloomChain.preS);
+    for (let i = 0; i < BLOOM.lv; i++) draw(bloomChain.down[i], bloomChain.downS[i]);
+    for (let i = BLOOM.lv - 1; i >= 0; i--) draw(bloomChain.up[i], bloomChain.upS[i]);
   };
   const hdrTwoPass = () => {
     if (!ensureHdrRT()) return false;
     app.renderer.render({ container: app.stage, target: hdrRT, clear: true });
+    if (BLOOM.int > 0 && bloomChain && bloomAddMesh) {
+      runBloomChain();
+      // 鏈末疊加：up[0]×tint×int 以 blend 'add' 疊進 hdrRT（clear:false 保留場景內容）
+      app.renderer.render({ container: bloomAddStage, target: hdrRT, clear: false });
+    }
     app.renderer.render({ container: hdrEncodeStage, clear: true });
     return true;
   };
@@ -7363,6 +7546,17 @@ async function init() {
     try { app.ticker.remove(appRender, app); } catch {}
     app.render = () => { hdrTwoPass(); };   // ba_debug/exporting 等散點呼叫也走兩段式
     app.ticker.add(() => { hdrTwoPass(); }, null, UPDATE_PRIORITY.LOW);
+    // 校準用熱調（CDP console）：__setBloom('int', 0.3) 等；鏈未建時下幀自動補建
+    window.__setBloom = (k, v) => {
+      const n = Number(v);
+      if (k === 'int') { BLOOM.int = n; if (encodeBloomU) encodeBloomU.uniforms.uBloomInt = n; return { int: BLOOM.int, chain: !!bloomChain }; }
+      if (!bloomChain) return 'NO-CHAIN';
+      if (k === 'thr') { BLOOM.thr = n; bloomChain.preS.resources.preU.uniforms.uThr = n; return BLOOM.thr; }
+      if (k === 'knee') { BLOOM.knee = n; bloomChain.preS.resources.preU.uniforms.uKnee = n; return BLOOM.knee; }
+      if (k === 'scatter') { BLOOM.scatter = n; bloomChain.upS.forEach((s) => { s.resources.upU.uniforms.uScatter = n; }); return BLOOM.scatter; }
+      if (k === 'tint') { BLOOM.tint = n; if (encodeBloomU) encodeBloomU.uniforms.uBloomTint = n; return BLOOM.tint; }
+      return `unknown key ${k}`;
+    };
   }
 
   // Stage 5：字型 + ClickFx（core 已就位，一次到位）
