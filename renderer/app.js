@@ -8541,6 +8541,11 @@ if (BA_DEBUG.probe && BA_DEBUG.probeBeam) {
       }
       if (!spine) return emit('done', { err: 'no spine' });
       emit('ready', { waitedMs: waited, idleName, lobby: currentLobby });
+      // 上報 app 自身的 world→screen 變換（GT 框架對位用：screen = a×world + t）
+      try {
+        const wt = spine.worldTransform;
+        emit('view', { a: +wt.a.toFixed(6), d: +wt.d.toFixed(6), tx: +wt.tx.toFixed(2), ty: +wt.ty.toFixed(2) });
+      } catch {}
 
       // 凍結自動驅動，改固定步長手動推進（確定性；Spine.from 的 autoUpdate 用 Ticker.shared）
       const prevAuto = spine.autoUpdate;
