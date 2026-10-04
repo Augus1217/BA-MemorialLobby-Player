@@ -8369,6 +8369,45 @@ if (BA_DEBUG.probe && BA_DEBUG.probeBeam) {
             mean: (() => { const ss = sp.pts.map(p => sampleAt(p.x, p.y)).filter(Boolean);
               return ss.length ? [0,1,2].map(k => +(ss.reduce((a,s3)=>a+s3[k],0)/ss.length).toFixed(1)) : null; })() } : null; })() };
         emit('sample', rec);
+        // dumpMesh=1：在 t35 錨點 dump 全槽 mesh（CPU 黃金模型輸入——同姿勢零混淆，
+        // 隔離「柵格化/混合/紋理語義」與 runtime 差異）
+        if (/(?:[&?#])dumpMesh=1/.test(location.hash + location.search) && Math.abs(T - 35) < 0.2) {
+          const f32b64 = (arr) => { const u8 = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength); let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+          const dump = [];
+          const wt = spine.worldTransform;   // spine 容器全鏈 transform（charScale/位移）
+          const mtx = [wt.a, wt.b, wt.c, wt.d, wt.tx, wt.ty];
+          for (const sl of spine.skeleton.slots) {
+            const att = sl.getAttachment();
+            if (!att || !att.computeWorldVertices) continue;
+            let n = 0;
+            try { n = att.worldVerticesLength; } catch {}
+            if (!n || n > 8192) continue;
+            const wv = new Float32Array(n);
+            try { att.computeWorldVertices(sl, 0, n, wv, 0, 2); } catch { continue; }
+            for (let vi = 0; vi < n; vi += 2) {
+              const x = wv[vi], y = wv[vi + 1];
+              wv[vi] = wt.a * x + wt.c * y + wt.tx;
+              wv[vi + 1] = wt.b * x + wt.d * y + wt.ty;
+            }
+            const uvs = att.uvs ? Float32Array.from(att.uvs.slice(0, n)) : null;
+            if (!uvs) continue;
+            const region = att.region || {};
+            const page = region.page?.name || region.texture?._source?.label || null;
+            dump.push({
+              slot: sl.data.name, i: sl.data.index, bm: sl.data.blendMode,
+              att: att.name, type: att.constructor.name, page,
+              nTri: (n / 2) | 0,
+              wv: f32b64(wv), uvs: f32b64(uvs),
+              tris: att.triangles ? f32b64(new Uint16Array(att.triangles)) : null,
+              sc: [sl.color.r, sl.color.g, sl.color.b, sl.color.a].map((v) => +v.toFixed(4)),
+              ac: att.color ? [att.color.r, att.color.g, att.color.b, att.color.a].map((v) => +v.toFixed(4)) : [1, 1, 1, 1],
+            });
+          }
+          for (let k = 0; k < dump.length; k += 12) {
+            emit('meshdump', { t: T, chunk: k / 12, total: Math.ceil(dump.length / 12), mtx, slots: dump.slice(k, k + 12) });
+          }
+          emit('meshdumpDone', { t: T, slots: dump.length, mtx });
+        }
         // 採樣後凍結姿勢存證幀（runner capturePage）；之後繼續推進
         emit('capture', { t: T, file: `beam_t${String(Math.round(T)).padStart(2,'0')}` });
         await sleep(450);
