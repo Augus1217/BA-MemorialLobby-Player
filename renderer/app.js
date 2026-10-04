@@ -359,6 +359,7 @@ const log = (s) => console.log('[lobby]', s);
 const fixAdditiveSlots = (obj) => {
   // plain=1：完全跳過 slot 處理＝純 pixi spine 直渲（對照 Skeleton Viewer 語義用）
   if (/(?:[&?#])plain=1/.test(location.hash + location.search)) return 0;
+  if (RENDER_MODE === 'plain') return 0;   // 逐廳 plain 模式＝同上
   let n = 0;
   for (const slot of obj.skeleton.slots) {
     if (HDR_MODE && /light|flare/i.test(slot.data.name)) continue;   // hdr：prepareHdrLights 全權
@@ -389,6 +390,8 @@ const GAMMA_TO_LINEAR = (x) => x <= 0.04045 ? x/12.92 : Math.pow((x+0.055)/1.055
 // fold 在 shader（vColor.rgb = aColor.rgb×aColor.a）——故在打包點對 straight rgb 做 G2L、
 // alpha 原樣，fold 後乘數＝G2L(r)×a，與遊戲逐項相等（白頂點色兩者同為 a，基線不受影響）。
 // 精度：8-bit unorm 屬性，G2L 後為線性域量化（暗色 tint 階梯略粗）；clamp 防爆位。
+// 十輪裁定：plain 模式（LGG 組廳）＝gamma 語義，頂點色走原始邏輯（VC_G2L_ACTIVE=false）。
+let VC_G2L_ACTIVE = false;   // loadLobby 依 RENDER_MODE 更新（模組載入期先關）
 if (HDR_MODE && !/(?:^|[?&])vcg2l=0/.test(location.hash + location.search) && !(globalThis.__BA_TEST_DISABLE_VCG2L)) {
   Object.defineProperty(BatchableSpineSlot.prototype, 'color', {
     get() {
@@ -397,18 +400,33 @@ if (HDR_MODE && !/(?:^|[?&])vcg2l=0/.test(location.hash + location.search) && !(
       const parentAlpha = this.renderable.groupAlpha;
       const mixedA = (slotColor.a * parentAlpha) * 255;
       let r = slotColor.r, g = slotColor.g, b = slotColor.b;
-      if (parentColor !== 0xFFFFFF) {   // 容器 tint 併入 straight 域（ABGR 低 Byte=R，同原實作）
-        r *= (parentColor & 0xFF) / 255;
-        g *= ((parentColor >> 8) & 0xFF) / 255;
-        b *= ((parentColor >> 16) & 0xFF) / 255;
+      if (VC_G2L_ACTIVE) {
+        if (parentColor !== 0xFFFFFF) {   // 容器 tint 併入 straight 域（ABGR 低 Byte=R，同原實作）
+          r *= (parentColor & 0xFF) / 255;
+          g *= ((parentColor >> 8) & 0xFF) / 255;
+          b *= ((parentColor >> 16) & 0xFF) / 255;
+        }
+        const R = Math.min(255, Math.max(0, Math.round(GAMMA_TO_LINEAR(Math.max(r, 0)) * 255)));
+        const G = Math.min(255, Math.max(0, Math.round(GAMMA_TO_LINEAR(Math.max(g, 0)) * 255)));
+        const B = Math.min(255, Math.max(0, Math.round(GAMMA_TO_LINEAR(Math.max(b, 0)) * 255)));
+        return ((mixedA << 24) | (B << 16) | (G << 8) | R);
       }
-      const R = Math.min(255, Math.max(0, Math.round(GAMMA_TO_LINEAR(Math.max(r, 0)) * 255)));
-      const G = Math.min(255, Math.max(0, Math.round(GAMMA_TO_LINEAR(Math.max(g, 0)) * 255)));
-      const B = Math.min(255, Math.max(0, Math.round(GAMMA_TO_LINEAR(Math.max(b, 0)) * 255)));
-      return ((mixedA << 24) | (B << 16) | (G << 8) | R);
+      // 原始邏輯（plain 語義：gamma 域直乘，pixi fold 補 ×a）
+      if (parentColor !== 0xFFFFFF) {
+        const pr = parentColor & 0xFF, pg = (parentColor >> 8) & 0xFF, pb = (parentColor >> 16) & 0xFF;
+        return ((mixedA << 24) | (((slotColor.b * pb) | 0) << 16) | (((slotColor.g * pg) | 0) << 8) | ((slotColor.r * pr) | 0));
+      }
+      return ((mixedA << 24) | ((slotColor.b * 255) << 16) | ((slotColor.g * 255) << 8) | (slotColor.r * 255));
     },
   });
 }
+
+// ---- 逐廳渲染模式（十輪裁定）----------------------------------------------
+// 分隔特徵 4/4：lobby_post_config 有 LGG 覆寫（g/gm）→ plain（gamma 合成＝遊戲觀感）；
+// 無 LGG → v2（線性合成原貌）。URL mode=v2|plain 強制、mode=auto 走規則；
+// 預設 v2（現行行為不變；auto 是 opt-in）。
+const RENDER_MODE_URL = /(?:[&?#])mode=(v2|plain|auto)/.exec(location.hash + location.search)?.[1] || null;
+let RENDER_MODE = 'v2';   // 當前 lobby 生效模式（loadLobby 開頭依 URL/規則更新）
 // Float32 → half float（three.js DataUtils 同款位元轉換）
 const _f32view = new Float32Array(1);
 const _i32view = new Int32Array(_f32view.buffer);
@@ -484,7 +502,7 @@ function loadMatFamily() {   // 惰性載入（IS_ELECTRON_PROD 屬模組後段�
   return MAT_FAMILY_LOAD;
 }
 async function prepareHdrLights(obj, atlasUrl) {
-  if (!HDR_MODE || !obj?.skeleton || !atlasUrl) return;
+  if (!HDR_MODE || RENDER_MODE === 'plain' || !obj?.skeleton || !atlasUrl) return;
   const t0 = performance.now();
   const base = atlasUrl.slice(0, atlasUrl.lastIndexOf('/') + 1);
   // hdrOnly=<regex>：隔離診斷——名稱不符的光槽整個移除（color.a=0 會被動畫 RGBA 軌贖身）
@@ -6479,6 +6497,16 @@ setTimeout(() => {
 let loadGen = 0;   // loadLobby 世代計數（見 loadLobby 內 alive 守衛）
 async function loadLobby(name) {
   if (exporting) return;
+  // 逐廳渲染模式（十輪裁定）：mode=auto 時 LGG 覆寫有者走 plain、無者走 v2
+  RENDER_MODE = (() => {
+    if (RENDER_MODE_URL && RENDER_MODE_URL !== 'auto') return RENDER_MODE_URL;
+    if (RENDER_MODE_URL === 'auto') {
+      const c = baPostCfgFor(name);
+      return (c && (c.g || c.gm)) ? 'plain' : 'v2';
+    }
+    return 'v2';
+  })();
+  VC_G2L_ACTIVE = HDR_MODE && RENDER_MODE !== 'plain';
   // 世代守衛：快速連切（或開機與側欄點擊撞期）時，只有最新一次能跑完；
   // 被超車的舊流程在每個 await 檢查點安靜出局，避免回頭拆掉新大廳的資源。
   const gen = ++loadGen;
@@ -7912,6 +7940,10 @@ async function init() {
     for (let i = BLOOM.lv - 2; i >= 0; i--) draw(bloomChain.up[i], bloomChain.upS[i]);
   };
   const hdrTwoPass = () => {
+    if (RENDER_MODE === 'plain') {   // 逐廳 plain：跳過線性 RT/encode，直渲 gamma 畫布
+      app.renderer.render({ container: app.stage, clear: true });
+      return true;
+    }
     if (!ensureHdrRT()) return false;
     app.renderer.render({ container: app.stage, target: hdrRT, clear: true });
     if (BLOOM.int > 0 && bloomChain && bloomAddMesh) {
