@@ -28,7 +28,7 @@ public class GT implements ApplicationListener {
 
     public GT(String dir, String skel, String out, String anim, float time, int w, int h, float ma, float mtxTxIn, float mt, String chain) {
         this.dir = dir; skelName = skel; outPng = out; animName = anim;
-        targetTime = time; W = w; H = h; mtxA = ma; mtxTy = mt;
+        targetTime = time; W = w; H = h; mtxA = ma; mtxTx = mtxTxIn; mtxTy = mt;
     }
 
     public void create() {
@@ -52,7 +52,6 @@ public class GT implements ApplicationListener {
             state.addAnimation(0, c, true, 0);
         }
         camera.setToOrtho(false, W, H);
-        camera.up.set(0, -1, 0);   // y-down：與 pixi 截圖座標同向
         camera.update();
     }
 
@@ -82,7 +81,7 @@ public class GT implements ApplicationListener {
             }
             float cx = (bx0 + bx1) / 2f, cy = (by0 + by1) / 2f;
             float mm = 1.16f;
-            camera.setToOrtho(true, Math.max((bx1 - bx0) * mm, 1), Math.max((by1 - by0) * mm, 1));
+            camera.setToOrtho(false, Math.max((bx1 - bx0) * mm, 1), Math.max((by1 - by0) * mm, 1));
             camera.position.set(cx, cy, 0);
         }
         camera.update();

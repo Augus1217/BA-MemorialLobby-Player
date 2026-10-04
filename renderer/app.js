@@ -456,15 +456,33 @@ async function prefillHdrPageData(atlasUrl) {
 // ---- 自研像素級光線管線 v2：頁面級線性化＋線性 RT＋sRGB encode ----------------
 // 遊戲（URP 線性專案）的機制：sRGB 貼圖硬體解碼取樣 → 線性緩衝合成（Blend One/OMISA，
 // 頂點色 PMA 合成經 PMAGammaToTargetSpace）→ 輸出前 encode。我們逐項複刻：
-//   ① 頁面線性化（本函式）：atlas 檔皆未標 pma（遊戲資料）＝straight 檔，spine-pixi
-//      loader 原本在上傳時 CPU 預乘——此處以 lin(rgb)×a 的 rgba16float 頁面取代之
-//      （預乘＋線性化皆為逐 texel 运算，頁面級一次完成；零 alpha texel 歸零＝洩漏保護）。
-//   ② 頂點色：不中和 att.color、不烤因子——batcher 的 colorBit PMA 打包
-//      （vColor.rgb = aColor.rgb×aColor.a）自然供給 ×slot.a×att.a（pmaVertexColors=true 詮釋）。
+//   ① 頁面線性化（本函式）：**分族語義**（docs/light_census.csv 材質族，
+//      assets/data/lobby_mat_family.json）——
+//      - straight 族（_StraightAlphaInput=1，172 廳）：loader 不預乘、shader 乘 a
+//        → 烘焙 = lin(rgb)×a（線性域預乘）。
+//      - PMA 族（_StraightAlphaInput=0，75 廳）：遊戲 loader 在 **gamma 域**上傳前
+//        預乘（pmaBake m=1 實驗 ×1.66 否證「不預乘」；用戶 CH0284 viewer 截圖
+//        （straight 模式）＝實機 ±2-3 證實「預乘後貢獻 ∝ rgb×a」）→ 烘焙 =
+//        G2L(rgb×a)（gamma 域預乘再線性化；soft edge 比 straight 族暗，兩族真差異）。
+//      mixed 5 廳／無 dump 29 廳暫以 straight（保守＝現行行為），待逐頁材質 dump。
+//      pmaLegacy=1：PMA 頁退回 lin(rgb)×a（A/B 校準用）；pmaBake=1：m=1 實驗（存疑已否證）。
+//   ② 頂點色：batcher 打包點 G2L(straight rgb)（上方 PMAGammaToTargetSpace patch）、
+//      fold（×a）自然供給，與遊戲 shader 逐項相等。
 //   ③ blend 尊重 skel（材料 dump 證實 _SrcBlend/_DstBlend=One/OMISA 與 skel 一致；
 //      blendModeMaterials 空 → additive 槽同用頁面材質）。
 //   ④ 線性 RT＋encode（app.init 後的 hdrTwoPass）。
 // kivo 的 Screen 修復全面移除（fixAdditiveSlots 在 hdr 下跳過光槽）。
+const MAT_FAMILY_CACHE = {};
+let MAT_FAMILY_LOAD = null;
+function loadMatFamily() {   // 惰性載入（IS_ELECTRON_PROD 屬模組後段，top-level fetch 會 TDZ）
+  if (!MAT_FAMILY_LOAD) {
+    MAT_FAMILY_LOAD = fetch(assetUrl('assets/data/lobby_mat_family.json'))
+      .then((r) => r.json())
+      .then((fam) => { Object.assign(MAT_FAMILY_CACHE, fam); log('[hdr] 材質族映射載入：' + Object.keys(fam).length + ' 廳'); return fam; })
+      .catch((e) => { log('[hdr] 材質族映射載入失敗: ' + (e?.message || e)); return null; });
+  }
+  return MAT_FAMILY_LOAD;
+}
 async function prepareHdrLights(obj, atlasUrl) {
   if (!HDR_MODE || !obj?.skeleton || !atlasUrl) return;
   const t0 = performance.now();
@@ -474,20 +492,34 @@ async function prepareHdrLights(obj, atlasUrl) {
   const atlas = Assets.get(atlasUrl);
   if (!atlas?.pages) { log('[hdr] atlas 未快取：' + atlasUrl); return; }
   let n = 0;
-  // pmaBake=1（實驗旗標）：PMA 族（_StraightAlphaInput=0）語義測試——遊戲對 PMA 材質
-  // 的貢獻＝lin(rgb)（rgb 已預乘、不衰減），straight 語義的 ×a 會把軟光層按 a 變暗
-  // （CH0284 案：角色 a=1 吻合、背景軟光 a<1 系統性偏暗）。
+  // 頁面族判定：spine 目錄名（atlasUrl 路徑段；URL 可能含 ./ 段，先正規化）
+  // → census 材質族；PMA 族頁面走 gamma 域預乘語義（上註），其餘 straight。
+  const _segs = atlasUrl.split('?')[0].split('#')[0].split('/').filter((s) => s && s !== '.' && s !== '..');
+  const dirName = _segs[_segs.length - 2] || '';
+  await loadMatFamily();
+  let fam = null;
+  try { fam = (globalThis.__MAT_FAMILY || {})[dirName] || MAT_FAMILY_CACHE[dirName] || null; } catch {}
+  const pmaLegacy = /(?:[&?#])pmaLegacy=1/.test(location.hash + location.search);
+  // pmaBake=1（實驗旗標）：PMA 語義測試舊分支——完全跳過預乘（lin(rgb) 無衰減）。
+  // CH0284 案 ×1.66≈1/a 已否證（遊戲貢獻 ∝ rgb×a），保留供查證。
   const pmaBake = /(?:[&?#])pmaBake=1/.test(location.hash + location.search);
   for (const page of atlas.pages) {
     const p = await hdrPageData(base + page.name);
     const out = new Uint16Array(p.w * p.h * 4);
+    // 頁面烘焙乘數語義：straight=線性域預乘（×a）；PMA=gamma 域預乘後線性化（G2L(rgb×a)）
     for (let i = 0, j = 0; i < p.u8.length; i += 4, j += 4) {
       const a = p.u8[i+3] / 255;
-      const m = (page.pma || pmaBake) ? 1 : a;   // 未標 pma＝straight 檔：複刻 loader 的上傳預乘
-      out[j]   = toHalf(GAMMA_TO_LINEAR(p.u8[i] / 255) * m);
-      out[j+1] = toHalf(GAMMA_TO_LINEAR(p.u8[i+1] / 255) * m);
-      out[j+2] = toHalf(GAMMA_TO_LINEAR(p.u8[i+2] / 255) * m);
-      out[j+3] = toHalf(a);
+      let r = p.u8[i] / 255, g = p.u8[i+1] / 255, b = p.u8[i+2] / 255;
+      if (fam === 'PMA' && !pmaLegacy && !pmaBake) {
+        // PMA 族：loader gamma 域預乘（byte 域 rgb×a）→ sRGB 解碼 = G2L(rgb×a)
+        r = GAMMA_TO_LINEAR(r * a); g = GAMMA_TO_LINEAR(g * a); b = GAMMA_TO_LINEAR(b * a);
+      } else if (pmaBake) {
+        r = GAMMA_TO_LINEAR(r); g = GAMMA_TO_LINEAR(g); b = GAMMA_TO_LINEAR(b);   // m=1：無預乘
+      } else {
+        // straight 族（含 mixed/? 保守預設）：shader 線性域乘 a = lin(rgb)×a
+        r = GAMMA_TO_LINEAR(r) * a; g = GAMMA_TO_LINEAR(g) * a; b = GAMMA_TO_LINEAR(b) * a;
+      }
+      out[j] = toHalf(r); out[j+1] = toHalf(g); out[j+2] = toHalf(b); out[j+3] = toHalf(a);
     }
     const src = new BufferImageSource({ resource: out, width: p.w, height: p.h, format: 'rgba16float', alphaMode: 'premultiplied-alpha' });
     try { src.style.addressModeU = 'clamp-to-edge'; src.style.addressModeV = 'clamp-to-edge'; } catch {}
@@ -502,7 +534,7 @@ async function prepareHdrLights(obj, atlasUrl) {
       }
     }
   }
-  log('[hdr] 頁面線性化 ' + n + ' 頁，耗時 ' + (performance.now() - t0).toFixed(0) + 'ms');
+  log('[hdr] 頁面線性化 ' + n + ' 頁（fam=' + (fam || 'null') + ', dir=' + dirName + ', url=' + atlasUrl + '），耗時 ' + (performance.now() - t0).toFixed(0) + 'ms');
 }
 
 
