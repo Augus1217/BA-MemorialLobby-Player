@@ -1,5 +1,6 @@
 import { Application, Assets, Texture, Sprite, MeshSimple, Container, BlurFilter, ColorMatrixFilter, Cache, UniformGroup, GlProgram, Filter, BufferImageSource, RenderTexture, Mesh, MeshGeometry, Shader, UPDATE_PRIORITY } from 'pixi.js';
 import { Spine, ScaleTimeline, SpineTexture } from '@esotericsoftware/spine-pixi-v8';
+import { BatchableSpineSlot } from '@esotericsoftware/spine-pixi-v8/dist/BatchableSpineSlot.js';
 import { Vector2 } from '@esotericsoftware/spine-core';
 import { i as initClickFx } from '../assets/clickfx/clickFx.js';
 
@@ -380,6 +381,34 @@ const fixAdditiveSlots = (obj) => {
 // 詮釋已被實測否定（全屏飽和；實機 beam 細微），詳見 docs/game_shader_ref/README.md。
 const HDR_MODE = !/(?:^|&)hdr=0/.test(location.hash + location.search);
 const GAMMA_TO_LINEAR = (x) => x <= 0.04045 ? x/12.92 : Math.pow((x+0.055)/1.055, 2.4);
+
+// ---- 頂點色 PMAGammaToTargetSpace（九輪 shader 鐵譜）--------------------------------
+// 遊戲（URP 線性專案）shader：vertexColor = PMAGammaToTargetSpace(v.vertexColor)。
+// spine-unity runtime 打包 PMA 頂點色（rgb×a）→ shader 端 G2L(rgb/a)×a＝G2L(straight)×a。
+// pixi-spine 打包 straight rgb（Spine.js transformAttachments：skeleton×slot×att）、
+// fold 在 shader（vColor.rgb = aColor.rgb×aColor.a）——故在打包點對 straight rgb 做 G2L、
+// alpha 原樣，fold 後乘數＝G2L(r)×a，與遊戲逐項相等（白頂點色兩者同為 a，基線不受影響）。
+// 精度：8-bit unorm 屬性，G2L 後為線性域量化（暗色 tint 階梯略粗）；clamp 防爆位。
+if (HDR_MODE && !/(?:^|[?&])vcg2l=0/.test(location.hash + location.search) && !(globalThis.__BA_TEST_DISABLE_VCG2L)) {
+  Object.defineProperty(BatchableSpineSlot.prototype, 'color', {
+    get() {
+      const slotColor = this.data.color;
+      const parentColor = this.renderable.groupColor;
+      const parentAlpha = this.renderable.groupAlpha;
+      const mixedA = (slotColor.a * parentAlpha) * 255;
+      let r = slotColor.r, g = slotColor.g, b = slotColor.b;
+      if (parentColor !== 0xFFFFFF) {   // 容器 tint 併入 straight 域（ABGR 低 Byte=R，同原實作）
+        r *= (parentColor & 0xFF) / 255;
+        g *= ((parentColor >> 8) & 0xFF) / 255;
+        b *= ((parentColor >> 16) & 0xFF) / 255;
+      }
+      const R = Math.min(255, Math.max(0, Math.round(GAMMA_TO_LINEAR(Math.max(r, 0)) * 255)));
+      const G = Math.min(255, Math.max(0, Math.round(GAMMA_TO_LINEAR(Math.max(g, 0)) * 255)));
+      const B = Math.min(255, Math.max(0, Math.round(GAMMA_TO_LINEAR(Math.max(b, 0)) * 255)));
+      return ((mixedA << 24) | (B << 16) | (G << 8) | R);
+    },
+  });
+}
 // Float32 → half float（three.js DataUtils 同款位元轉換）
 const _f32view = new Float32Array(1);
 const _i32view = new Int32Array(_f32view.buffer);
