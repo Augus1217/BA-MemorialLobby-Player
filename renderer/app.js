@@ -5973,6 +5973,60 @@ try { if (localStorage.getItem('ba_post') === '0') baPostOn = false; } catch {}
 // unlit 重現直接套會爆白）。panini/chroma/LGG 兩種模式都套。
 let POST_MODE = 'mild';
 try { POST_MODE = localStorage.getItem('ba_post_mode') === 'faithful' ? 'faithful' : 'mild'; } catch {}
+// ---- 任務3：URP 後處理鏈（encode 內、線性域；鐵譜順序見 FS_FRAG.encode）----
+// chain=1 才啟用（v2 基線逐位元組保留）。tm：none（遊戲 PPPV 無 Tonemapping
+// 元件＝URP 預設 None）/ neutral / aces。ex：曝光覆寫（預設跟隨 lobby cfg.e）。
+// con/sat/gain/lift/gam：鏈參數覆寫（預設跟隨 lobby cfg）。
+const HDR_POST = (() => {
+  const q = location.search + location.hash;
+  const num = (name, dflt) => {
+    const m = new RegExp(`[&?#]${name}=(-?[\\d.eE+]+)`).exec(q);
+    return m ? parseFloat(m[1]) : dflt;
+  };
+  const tmS = /(?:[&?#])tm=(\w+)/.exec(q);
+  return {
+    on: /(?:[&?#])chain=1/.test(q),
+    tm: tmS ? ({ none: 0, neutral: 1, aces: 2 }[tmS[1]] ?? 0) : 0,
+    exOverride: num('ex', NaN),
+    conOverride: num('con', NaN),
+    satOverride: num('sat', NaN),
+    gainOverride: num('gain', NaN),
+    liftOverride: num('lift', NaN),
+    gamOverride: num('gam', NaN),
+  };
+})();
+let hdrPostU = null;   // encode 的鏈 uniforms（applyPostGrade 依 lobby 更新）
+let hdrPostCfgPending = null;   // encode 建立前套用的 cfg（buildEncodeStage 補套）
+const setVec3InPlace = (u, vals) => (u && u.length === 3 && u.set) ? (u.set(vals), true) : false;
+// __setPost：鏈參數熱調（CDP console）。__getPost：讀目前 uniforms（診斷）。
+window.__setPost = (k, v) => {
+  if (!hdrPostU) return 'NO-GROUP';
+  const p = hdrPostU.uniforms;
+  if (k === 'ex') p.uExp = Number(v);
+  else if (k === 'con') p.uCon = Number(v);
+  else if (k === 'sat') p.uSat = Number(v);
+  else if (k === 'gam') setVec3InPlace(p.uGam, [v, v, v]);
+  else if (k === 'gain') setVec3InPlace(p.uGain, [v, v, v]);
+  else if (k === 'tm') p.uTone = Number(v);
+  else if (k === 'chain') p.uChain = Number(v);
+  else return `unknown ${k}`;
+  hdrPostU.update();
+  return true;
+};
+window.__getPost = () => hdrPostU ? { uChain: hdrPostU.uniforms.uChain, uExp: hdrPostU.uniforms.uExp, uCon: hdrPostU.uniforms.uCon, uGam: Array.from(hdrPostU.uniforms.uGam || []), uTone: hdrPostU.uniforms.uTone, pending: hdrPostCfgPending } : null;
+window.__grabMean = () => {
+  const gl2 = app.canvas.getContext('webgl2');
+  app.render();
+  const pw = gl2.drawingBufferWidth, ph = gl2.drawingBufferHeight;
+  const px = new Uint8Array(pw * ph * 4);
+  gl2.readPixels(0, 0, pw, ph, gl2.RGBA, gl2.UNSIGNED_BYTE, px);
+  let r = 0, g = 0, b = 0, n = 0;
+  const cx = Math.floor(pw / 2), cy = Math.floor(ph / 2);
+  for (let dy = -50; dy <= 50; dy += 10) for (let dx = -50; dx <= 50; dx += 10) {
+    const o = ((cy + dy) * pw + (cx + dx)) * 4; r += px[o]; g += px[o+1]; b += px[o+2]; n++;
+  }
+  return [Math.round(r/n), Math.round(g/n), Math.round(b/n)];
+};
 const baPostCfgFor = (lobby) => {
   const key = (lobby || '').toLowerCase();
   if (POST_CONFIG[key]) return POST_CONFIG[key];
@@ -6013,17 +6067,39 @@ function applyPostGrade(lobby) {
   if (!ensurePostFilter()) return null;
   const cfg = baPostOn ? baPostCfgFor(lobby) : null;
   const w = ensurePostWrap();
+  // chain=1：逐像素分級移入 encode（線性域、URP 順序），baPostFilter 只留
+  // 空間效果（panini/CA，分級參數中和＝srgb2lin/lin2srgb 往返恆等）。
+  if (HDR_POST.on) hdrPostCfgPending = cfg ?? false;   // encode 未建時暫存（首次 render 才建）
+  if (HDR_POST.on && hdrPostU) {
+    const p = hdrPostU.uniforms;
+    if (cfg) {
+      const ex = Number.isNaN(HDR_POST.exOverride) ? (cfg.e ?? 1) : HDR_POST.exOverride;
+      const con = Number.isNaN(HDR_POST.conOverride) ? (cfg.c ?? 1) : HDR_POST.conOverride;
+      const sat = Number.isNaN(HDR_POST.satOverride) ? (cfg.s ?? 1) : HDR_POST.satOverride;
+      const gain = Number.isNaN(HDR_POST.gainOverride) ? (cfg.g || [1, 1, 1]) : [HDR_POST.gainOverride, HDR_POST.gainOverride, HDR_POST.gainOverride];
+      const lift = Number.isNaN(HDR_POST.liftOverride) ? (cfg.l || [0, 0, 0]) : [HDR_POST.liftOverride, HDR_POST.liftOverride, HDR_POST.liftOverride];
+      const gam = Number.isNaN(HDR_POST.gamOverride) ? (cfg.gm || [1, 1, 1]) : [HDR_POST.gamOverride, HDR_POST.gamOverride, HDR_POST.gamOverride];
+      const cf = cfg.cf || [1, 1, 1];
+      setVec3InPlace(p.uGain, gain); setVec3InPlace(p.uLift, lift);
+      setVec3InPlace(p.uGam, gam); setVec3InPlace(p.uCF, cf);
+      p.uChain = 1; p.uExp = ex; p.uCon = con; p.uSat = sat; p.uTone = HDR_POST.tm;
+      log(`[chain-diag] hdrPostU=${!!hdrPostU} uExp=${p.uExp} uCon=${p.uCon} uGam=${Array.from(p.uGam||[])} uTone=${p.uTone}`);
+    } else {
+      p.uChain = 0;   // 無 cfg：純 encode（＝基線行為）
+    }
+    hdrPostU.update();
+  }
   if (!cfg) { syncFlashFilters(); return null; }
   const u = baPostFilter.resources.baPostUniforms.uniforms;
   u.uOn = 1;
-  u.uExp = POST_MODE === 'mild' ? 1 : (cfg.e ?? 1);
-  u.uCon = cfg.c ?? 1;
-  u.uSat = cfg.s ?? 1;
+  u.uExp = HDR_POST.on ? 1 : (POST_MODE === 'mild' ? 1 : (cfg.e ?? 1));
+  u.uCon = HDR_POST.on ? 1 : (cfg.c ?? 1);
+  u.uSat = HDR_POST.on ? 1 : (cfg.s ?? 1);
   u.uChroma = cfg.ch ?? 0;
-  u.uGain = cfg.g || [1, 1, 1];
-  u.uLift = cfg.l || [0, 0, 0];
-  u.uGam = cfg.gm || [1, 1, 1];
-  u.uCF = cfg.cf || [1, 1, 1];
+  u.uGain = HDR_POST.on ? [1, 1, 1] : (cfg.g || [1, 1, 1]);
+  u.uLift = HDR_POST.on ? [0, 0, 0] : (cfg.l || [0, 0, 0]);
+  u.uGam = HDR_POST.on ? [1, 1, 1] : (cfg.gm || [1, 1, 1]);
+  u.uCF = HDR_POST.on ? [1, 1, 1] : (cfg.cf || [1, 1, 1]);
   u.uPanini = postPaniniParams(cfg);
   baPostFilter.resources.baPostUniforms.update();
   syncFlashFilters();   // flashBlur（DOF）需與 baPostFilter 共存，統一走 sync
@@ -7421,10 +7497,174 @@ async function init() {
     // pixi v8 GL 後端「同 draw 雙 sampler（不同 source＋UniformGroup 共存）」
     // 第二取樣器回黑（bloom_unit B1/B2 確定性重現；單取樣皆正常）——
     // bloom 改由鏈末的 blend 'add' pass 疊進 hdrRT（單取樣＋混合＝已驗證模式）。
+    // chain=1：URP LutBuilderHdr 等價逐像素鏈（線性域，鐵譜順序＝
+    //   ×postExposure → saturate(LinearToLogC)（LUT 域）→ LogCToLinear →
+    //   contrast(LogC) → ×ColorFilter → LGG(c×gain 後 pow(c,gamma)) → sat →
+    //   tonemap(none/Neutral/ACES，LUT builder 末端) → LinearToSRGB）。
+    // 遊戲 PPPV 無 Tonemapping 元件（URP 預設 None）→ tm 預設 none。
+    // uChain=0 時走原始 encode（基線逐位元組不變）。
     encode: `precision highp float;
       in vec2 vUV; out vec4 finalColor; uniform sampler2D uTexture;
+      uniform float uChain; uniform float uExp; uniform float uCon; uniform float uSat;
+      uniform vec3 uGain; uniform vec3 uLift; uniform vec3 uGam; uniform vec3 uCF;
+      uniform float uTone;
       ${L2S_GLSL}
-      void main(void){ vec4 c = texture(uTexture, vUV); finalColor = vec4(l2s(clamp(c.rgb, 0.0, 1.0)), 1.0); }`,
+      const float MIDGRAY = 0.4135884;
+      float srgb2linE(float c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
+      float lin2srgbE(float c) { return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055; }
+      float log10E(float x) { return log(x) / 2.302585093; }
+
+      // ===== URP 2021.3 鐵譜移植：Color.hlsl（NeutralTonemap/LinearToLogC）＋ACES.hlsl（AcesTonemap fitting）=====
+      // HLSL row-major → GLSL column-major 已轉置；mul(M,v) → M*v
+      const mat3 AP1_2_XYZ_MAT = mat3(0.6624541811, 0.2722287168, -0.0055746495, 0.1340042065, 0.6740817658, 0.0040607335, 0.1561876870, 0.0536895174, 1.0103391003);
+      const mat3 XYZ_2_AP1_MAT = mat3(1.6410233797, -0.6636628587, 0.0117218943, -0.3248032942, 1.6153315917, -0.0082844420, -0.2364246952, 0.0167563477, 0.9883948585);
+      const mat3 D60_2_D65_CAT = mat3(0.98722400, -0.00759836, 0.00307257, -0.00611327, 1.00186000, -0.00509595, 0.0159533, 0.0053302, 1.0816800);
+      const mat3 XYZ_2_REC709_MAT = mat3(3.2409699419, -0.9692436363, 0.0556300797, -1.5373831776, 1.8759675015, -0.2039769589, -0.4986107603, 0.0415550574, 1.0569715142);
+      const mat3 AP0_2_AP1_MAT = mat3(1.4514393161, -0.0765537734, 0.0083161484, -0.2365107469, 1.1762296998, -0.0060324498, -0.2149285693, -0.0996759264, 0.9977163014);
+      const vec3 AP1_RGB2Y = vec3(0.272229, 0.674082, 0.0536895);
+      const float RRT_GLOW_GAIN = 0.05;
+      const float RRT_GLOW_MID = 0.08;
+      const float RRT_RED_SCALE = 0.82;
+      const float RRT_RED_PIVOT = 0.03;
+      const float RRT_RED_HUE = 0.0;
+      const float RRT_RED_WIDTH = 135.0;
+      const float RRT_SAT_FACTOR = 0.96;
+      const float ODT_SAT_FACTOR = 0.93;
+      const float DIM_SURROUND_GAMMA = 0.9811;
+      float urpMin3(float a, float b, float c) { return min(a, min(b, c)); }
+      float urpMax3(float a, float b, float c) { return max(a, max(b, c)); }
+      float rgb_2_saturation(vec3 rgb) {
+        const float TINY = 1e-4;
+        float mi = urpMin3(rgb.r, rgb.g, rgb.b);
+        float ma = urpMax3(rgb.r, rgb.g, rgb.b);
+        return (max(ma, TINY) - max(mi, TINY)) / max(ma, 1e-2);
+      }
+      float rgb_2_yc(vec3 rgb) {
+        const float ycRadiusWeight = 1.75;
+        float r = rgb.x, g = rgb.y, b = rgb.z;
+        float k = b * (b - g) + g * (g - r) + r * (r - b);
+        k = max(k, 0.0);
+        float chroma = sqrt(k);
+        return (b + g + r + ycRadiusWeight * chroma) / 3.0;
+      }
+      float sigmoid_shaper(float x) {
+        float t = max(1.0 - abs(x / 2.0), 0.0);
+        float y = 1.0 + sign(x) * (1.0 - t * t);
+        return y / 2.0;
+      }
+      float glow_fwd(float ycIn, float glowGainIn, float glowMid) {
+        float glowGainOut;
+        if (ycIn <= 2.0 / 3.0 * glowMid) glowGainOut = glowGainIn;
+        else if (ycIn >= 2.0 * glowMid) glowGainOut = 0.0;
+        else glowGainOut = glowGainIn * (glowMid / ycIn - 1.0 / 2.0);
+        return glowGainOut;
+      }
+      float rgb_2_hue(vec3 rgb) {
+        float hue;
+        if (rgb.x == rgb.y && rgb.y == rgb.z) hue = 0.0;
+        else hue = (180.0 / 3.14159265358979) * atan(sqrt(3.0) * (rgb.y - rgb.z), 2.0 * rgb.x - rgb.y - rgb.z);
+        if (hue < 0.0) hue = hue + 360.0;
+        return hue;
+      }
+      float center_hue(float hue, float centerH) {
+        float hueCentered = hue - centerH;
+        if (hueCentered < -180.0) hueCentered = hueCentered + 360.0;
+        else if (hueCentered > 180.0) hueCentered = hueCentered - 360.0;
+        return hueCentered;
+      }
+      vec3 XYZ_2_xyY(vec3 XYZ) {
+        float divisor = max(dot(XYZ, vec3(1.0)), 1e-4);
+        return vec3(XYZ.xy / divisor, XYZ.y);
+      }
+      vec3 xyY_2_XYZ(vec3 xyY) {
+        float m = xyY.z / max(xyY.y, 1e-4);
+        vec3 XYZ = vec3(xyY.x, xyY.z, 1.0 - xyY.x - xyY.y);
+        XYZ.xz *= m;
+        return XYZ;
+      }
+      vec3 darkSurround_to_dimSurround(vec3 linearCV) {
+        vec3 XYZ = AP1_2_XYZ_MAT * linearCV;
+        vec3 xyY = XYZ_2_xyY(XYZ);
+        xyY.z = clamp(xyY.z, 0.0, 65504.0);
+        xyY.z = pow(xyY.z, DIM_SURROUND_GAMMA);
+        XYZ = xyY_2_XYZ(xyY);
+        return XYZ_2_AP1_MAT * XYZ;
+      }
+      vec3 NeutralCurve(vec3 x, float a, float b, float c, float d, float e, float f) {
+        return ((x * (a * x + c * b) + d * e) / (x * (a * x + b) + d * f)) - e / f;
+      }
+      vec3 neutralTonemap(vec3 x) {
+        x = max(vec3(0.0), x);
+        const float a = 0.2, b = 0.29, c = 0.24, d = 0.272, e = 0.02, f = 0.3;
+        const float whiteLevel = 5.3;
+        const float whiteClip = 1.0;
+        vec3 whiteScale = vec3(1.0) / NeutralCurve(vec3(whiteLevel), a, b, c, d, e, f);
+        x = NeutralCurve(x * whiteScale, a, b, c, d, e, f);
+        x *= whiteScale;
+        x /= vec3(whiteClip);
+        return x;
+      }
+      vec3 acesTonemap(vec3 aces) {
+        // --- Glow module ---
+        float saturation = rgb_2_saturation(aces);
+        float ycIn = rgb_2_yc(aces);
+        float s = sigmoid_shaper((saturation - 0.4) / 0.2);
+        float addedGlow = 1.0 + glow_fwd(ycIn, RRT_GLOW_GAIN * s, RRT_GLOW_MID);
+        aces *= addedGlow;
+        // --- Red modifier ---
+        float hue = rgb_2_hue(aces);
+        float centeredHue = center_hue(hue, RRT_RED_HUE);
+        float hueWeight = smoothstep(0.0, 1.0, 1.0 - abs(2.0 * centeredHue / RRT_RED_WIDTH));
+        hueWeight *= hueWeight;
+        aces.r += hueWeight * saturation * (RRT_RED_PIVOT - aces.r) * (1.0 - RRT_RED_SCALE);
+        // --- ACES to RGB rendering space ---
+        vec3 acescg = max(vec3(0.0), AP0_2_AP1_MAT * aces);
+        // --- Global desaturation ---
+        acescg = mix(vec3(dot(acescg, AP1_RGB2Y)), acescg, RRT_SAT_FACTOR);
+        // --- Luminance fitting (RRT.a1.0.3 + ODT.Academy.RGBmonitor_100nits_dim.a1.0.3) ---
+        const float a = 2.785085, b = 0.107772, c = 2.936045, d = 0.887122, e = 0.806889;
+        vec3 x = acescg;
+        vec3 rgbPost = (x * (a * x + b)) / (x * (c * x + d) + e);
+        // --- Dim surround ---
+        vec3 linearCV = darkSurround_to_dimSurround(rgbPost);
+        // --- Desaturation ---
+        linearCV = mix(vec3(dot(linearCV, AP1_RGB2Y)), linearCV, ODT_SAT_FACTOR);
+        // --- AP1 → XYZ → D60→D65 → Rec709 ---
+        vec3 XYZ = AP1_2_XYZ_MAT * linearCV;
+        XYZ = D60_2_D65_CAT * XYZ;
+        return XYZ_2_REC709_MAT * XYZ;
+      }
+      // Alexa LogC (El1000)，Unity 2021.3 Color.hlsl ParamsLogC 鐵譜（含線性 toe）
+      const float LOGC_CUT = 0.011361, LOGC_A = 5.555556, LOGC_B = 0.047996;
+      const float LOGC_C = 0.244161, LOGC_D = 0.386036, LOGC_E = 5.301883, LOGC_F = 0.092819;
+      float lin2logc(float x) { return x > LOGC_CUT ? LOGC_C * log10E(max(LOGC_A * x + LOGC_B, 0.0)) + LOGC_D : LOGC_E * x + LOGC_F; }
+      float logc2lin(float x) { return x > LOGC_E * LOGC_CUT + LOGC_F ? (pow(10.0, (x - LOGC_D) / LOGC_C) - LOGC_B) / LOGC_A : (x - LOGC_F) / LOGC_E; }
+      vec3 gradeChain(vec3 lin) {
+        lin *= uExp;
+        vec3 lg = vec3(lin2logc(lin.r), lin2logc(lin.g), lin2logc(lin.b));
+        lg = clamp(lg, 0.0, 1.0);   // UberPost: saturate(LinearToLogC(input))（LUT 域 [0,1]）
+        lg = (lg - MIDGRAY) * uCon + MIDGRAY;
+        lin = vec3(logc2lin(lg.r), logc2lin(lg.g), logc2lin(lg.b));
+        lin *= uCF;
+        lin = max(lin, 0.0);
+        lin = lin * uGain + uLift;
+        lin = sign(lin) * pow(abs(lin), uGam);
+        float luma = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+        lin = vec3(luma) + uSat * (lin - vec3(luma));
+        if (uTone > 1.5) lin = acesTonemap(lin);
+        else if (uTone > 0.5) lin = neutralTonemap(lin);
+        return lin;
+      }
+      void main(void){
+        vec4 c = texture(uTexture, vUV);
+        if (uChain > 0.5) {
+          vec3 lin = clamp(c.rgb, 0.0, 1.0);
+          lin = clamp(gradeChain(lin), 0.0, 1.0);
+          finalColor = vec4(l2s(lin), 1.0);
+        } else {
+          finalColor = vec4(l2s(clamp(c.rgb, 0.0, 1.0)), 1.0);
+        }
+      }`,
     bloomAdd: `precision highp float;
       in vec2 vUV; out vec4 finalColor; uniform sampler2D uBloomTex;
       uniform float uBloomInt; uniform vec3 uBloomTint;
@@ -7538,12 +7778,43 @@ async function init() {
     bloomAddMesh.blendMode = 'add';
     bloomAddStage.removeChildren();   // 棄舊引用不 destroy（鏈重建時避免雙 mesh 疊加鬼影）
     bloomAddStage.addChild(bloomAddMesh);
+    hdrPostU = new UniformGroup({
+      uChain: { value: HDR_POST.on ? 1 : 0, type: 'f32' },
+      uExp: { value: 1, type: 'f32' },
+      uCon: { value: 1, type: 'f32' },
+      uSat: { value: 1, type: 'f32' },
+      uTone: { value: HDR_POST.tm, type: 'f32' },
+      uGain: { value: new Float32Array([1, 1, 1]), type: 'vec3<f32>' },
+      uLift: { value: new Float32Array([0, 0, 0]), type: 'vec3<f32>' },
+      uGam: { value: new Float32Array([1, 1, 1]), type: 'vec3<f32>' },
+      uCF: { value: new Float32Array([1, 1, 1]), type: 'vec3<f32>' },
+    });
     const encodeShader = new Shader({
       glProgram: GlProgram.from({ vertex: FS_VERT, fragment: FS_FRAG.encode }),
-      resources: { uTexture: hdrRT.source },
+      resources: { uTexture: hdrRT.source, hdrPostU },
     });
     hdrEncodeStage = new Container();
     hdrEncodeStage.addChild(new Mesh({ geometry: fsGeo, shader: encodeShader }));
+    if (HDR_POST.on && hdrPostCfgPending) applyPostGradePending();
+  };
+  const applyPostGradePending = () => {   // 把暫存 cfg 套進剛建好的 hdrPostU
+    const cfg = hdrPostCfgPending;
+    const p = hdrPostU.uniforms;
+    if (cfg) {
+      const ex = Number.isNaN(HDR_POST.exOverride) ? (cfg.e ?? 1) : HDR_POST.exOverride;
+      const con = Number.isNaN(HDR_POST.conOverride) ? (cfg.c ?? 1) : HDR_POST.conOverride;
+      const sat = Number.isNaN(HDR_POST.satOverride) ? (cfg.s ?? 1) : HDR_POST.satOverride;
+      const gain = Number.isNaN(HDR_POST.gainOverride) ? (cfg.g || [1, 1, 1]) : [HDR_POST.gainOverride, HDR_POST.gainOverride, HDR_POST.gainOverride];
+      const lift = Number.isNaN(HDR_POST.liftOverride) ? (cfg.l || [0, 0, 0]) : [HDR_POST.liftOverride, HDR_POST.liftOverride, HDR_POST.liftOverride];
+      const gam = Number.isNaN(HDR_POST.gamOverride) ? (cfg.gm || [1, 1, 1]) : [HDR_POST.gamOverride, HDR_POST.gamOverride, HDR_POST.gamOverride];
+      const cf = cfg.cf || [1, 1, 1];
+      setVec3InPlace(p.uGain, gain); setVec3InPlace(p.uLift, lift);
+      setVec3InPlace(p.uGam, gam); setVec3InPlace(p.uCF, cf);
+      p.uChain = 1; p.uExp = ex; p.uCon = con; p.uSat = sat; p.uTone = HDR_POST.tm;
+    } else {
+      p.uChain = 0;
+    }
+    hdrPostU.update();
   };
   const downSize = (w, h, i) => [Math.max(1, w >> (i + 1)), Math.max(1, h >> (i + 1))];
   // URP 流程（SetupBloom 鐵譜）：down[0]=prefilter(半解析度)、down[i]=BlurV(BlurH(down[i-1]))、
