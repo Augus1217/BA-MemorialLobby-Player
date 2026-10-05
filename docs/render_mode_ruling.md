@@ -51,9 +51,22 @@ sumire, tomoe, tsubaki, wakamo, yoshimi, yuuka（皆 `_home`）
 
 其餘 177 廳（含 CH0230/CH0284/Aris/Atsuko/Serika/Hoshino 系）＝plain 組。
 
+## 十一輪更新（2026-10-05 用戶回饋）
+
+1. **T3 廳要 plain**（用戶裁定）→ 規則更新：`mode=auto` = T3 或有 LGG → plain；
+   其餘（T1/T2 無 LGG）→ v2。v2 組由 99 縮至 84 廳（15 個 T3 移入 plain 組）。
+   tier 資料：assets/data/lobby_light_tier.json（census 280 廳）。
+2. **烘焙語義更正**：用戶實機比對（CH0070 截圖）否證「PMA 族 bake=G2L(rgb×a)」——
+   BG/window_Blur（22.5% mid-alpha）在該烘焙下貢獻只剩 0.38×＝「背景窗射出來的光不見了」；
+   遊戲窗區實測＝G2L(rgb)×a（舊烘焙）命中（窗區 [251.3,253.0,242.9] vs 遊戲 [250.7,253.7,238.9]）。
+   **兩族統一 bake＝G2L(rgb)×a（線性域預乘）**：straight 族＝硬體解碼後 shader ×a；
+   PMA 族＝自訂 loader 解碼到線性後預乘（「CPU byte 運算必在 gamma 域」的推論鏈
+   在此斷裂——自訂 loader 不走 byte 數學）。top_light（page3，0 mid-alpha）不受影響；
+   身體部分（頂點色 G2L）維持正確——用戶確認「身體已經快要一模一樣」。
+3. 驗證：CH0070 mode=auto 窗區恢復 [251.3,253.0,242.9]；Akane_home（T3）mode=auto
+   無烘焙 log（plain）；Hanako_home（T1 無 LGG）有烘焙 log（v2）；單元 16/16。
+
 ## 後續
 
-1. 用戶目視驗證：兩組各抽 3-5 廳 `#mode=auto` vs `#mode=v2` vs 遊戲——特別是 v2 組的
-   邊緣廳（shiroko/akane/tsubaki 等 T3 廳，光層極少，理論上兩模式應該都很接近遊戲）。
-2. 若規則獲確認 → 把 `mode=auto` 設為預設。
-3. CH0230 的溫和 C 曲線殘差（實機 mids −14/−11/−16）仍開放。
+1. 用戶目視驗證：v2 組（84 廳）抽驗 `#mode=auto` vs 遊戲；確認後把 `mode=auto` 設為預設。
+2. CH0230 的溫和 C 曲線殘差（實機 mids −14/−11/−16）仍開放。

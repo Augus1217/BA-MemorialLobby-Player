@@ -474,16 +474,13 @@ async function prefillHdrPageData(atlasUrl) {
 // ---- 自研像素級光線管線 v2：頁面級線性化＋線性 RT＋sRGB encode ----------------
 // 遊戲（URP 線性專案）的機制：sRGB 貼圖硬體解碼取樣 → 線性緩衝合成（Blend One/OMISA，
 // 頂點色 PMA 合成經 PMAGammaToTargetSpace）→ 輸出前 encode。我們逐項複刻：
-//   ① 頁面線性化（本函式）：**分族語義**（docs/light_census.csv 材質族，
-//      assets/data/lobby_mat_family.json）——
-//      - straight 族（_StraightAlphaInput=1，172 廳）：loader 不預乘、shader 乘 a
-//        → 烘焙 = lin(rgb)×a（線性域預乘）。
-//      - PMA 族（_StraightAlphaInput=0，75 廳）：遊戲 loader 在 **gamma 域**上傳前
-//        預乘（pmaBake m=1 實驗 ×1.66 否證「不預乘」；用戶 CH0284 viewer 截圖
-//        （straight 模式）＝實機 ±2-3 證實「預乘後貢獻 ∝ rgb×a」）→ 烘焙 =
-//        G2L(rgb×a)（gamma 域預乘再線性化；soft edge 比 straight 族暗，兩族真差異）。
-//      mixed 5 廳／無 dump 29 廳暫以 straight（保守＝現行行為），待逐頁材質 dump。
-//      pmaLegacy=1：PMA 頁退回 lin(rgb)×a（A/B 校準用）；pmaBake=1：m=1 實驗（存疑已否證）。
+//   ① 頁面線性化（本函式）：**兩族統一 G2L(rgb)×a（線性域預乘）**。
+//      straight 族＝硬體 sRGB 解碼後 shader 乘 a；PMA 族＝自訂 loader 解碼到線性後
+//      預乘上傳（shader 不再 ×a）——兩族最終貢獻相同＝G2L(rgb)×a。
+//      【十一輪更正】曾依「CPU byte 運算必在 gamma 域」推論 PMA 族 bake=G2L(rgb×a)，
+//      被用戶實機否證：CH0070 BG/window_Blur（22.5% mid-alpha）在 G2L(rgb×a) 下
+//      貢獻只剩 0.38×＝「背景窗光不見了」；遊戲窗區實測＝G2L(rgb)×a（舊烘焙）命中。
+//      pmaBake=1（m=1 無預乘）保留供查證（CH0284 flare ×1.66 已否證）。
 //   ② 頂點色：batcher 打包點 G2L(straight rgb)（上方 PMAGammaToTargetSpace patch）、
 //      fold（×a）自然供給，與遊戲 shader 逐項相等。
 //   ③ blend 尊重 skel（材料 dump 證實 _SrcBlend/_DstBlend=One/OMISA 與 skel 一致；
@@ -492,6 +489,17 @@ async function prefillHdrPageData(atlasUrl) {
 // kivo 的 Screen 修復全面移除（fixAdditiveSlots 在 hdr 下跳過光槽）。
 const MAT_FAMILY_CACHE = {};
 let MAT_FAMILY_LOAD = null;
+const LIGHT_TIER_CACHE = {};
+let LIGHT_TIER_LOAD = null;
+function loadLightTier() {   // census 光層層級（T3→plain 規則用）
+  if (!LIGHT_TIER_LOAD) {
+    LIGHT_TIER_LOAD = fetch(assetUrl('assets/data/lobby_light_tier.json'))
+      .then((r) => r.json())
+      .then((t) => { Object.assign(LIGHT_TIER_CACHE, t); return t; })
+      .catch(() => null);
+  }
+  return LIGHT_TIER_LOAD;
+}
 function loadMatFamily() {   // 惰性載入（IS_ELECTRON_PROD 屬模組後段，top-level fetch 會 TDZ）
   if (!MAT_FAMILY_LOAD) {
     MAT_FAMILY_LOAD = fetch(assetUrl('assets/data/lobby_mat_family.json'))
@@ -517,9 +525,7 @@ async function prepareHdrLights(obj, atlasUrl) {
   await loadMatFamily();
   let fam = null;
   try { fam = (globalThis.__MAT_FAMILY || {})[dirName] || MAT_FAMILY_CACHE[dirName] || null; } catch {}
-  const pmaLegacy = /(?:[&?#])pmaLegacy=1/.test(location.hash + location.search);
-  // pmaBake=1（實驗旗標）：PMA 語義測試舊分支——完全跳過預乘（lin(rgb) 無衰減）。
-  // CH0284 案 ×1.66≈1/a 已否證（遊戲貢獻 ∝ rgb×a），保留供查證。
+  // pmaBake=1（實驗旗標）：m=1 無預乘（lin(rgb) 無衰減）——CH0284 flare ×1.66 已否證，存查證用。
   const pmaBake = /(?:[&?#])pmaBake=1/.test(location.hash + location.search);
   for (const page of atlas.pages) {
     const p = await hdrPageData(base + page.name);
@@ -528,13 +534,10 @@ async function prepareHdrLights(obj, atlasUrl) {
     for (let i = 0, j = 0; i < p.u8.length; i += 4, j += 4) {
       const a = p.u8[i+3] / 255;
       let r = p.u8[i] / 255, g = p.u8[i+1] / 255, b = p.u8[i+2] / 255;
-      if (fam === 'PMA' && !pmaLegacy && !pmaBake) {
-        // PMA 族：loader gamma 域預乘（byte 域 rgb×a）→ sRGB 解碼 = G2L(rgb×a)
-        r = GAMMA_TO_LINEAR(r * a); g = GAMMA_TO_LINEAR(g * a); b = GAMMA_TO_LINEAR(b * a);
-      } else if (pmaBake) {
+      if (pmaBake) {
         r = GAMMA_TO_LINEAR(r); g = GAMMA_TO_LINEAR(g); b = GAMMA_TO_LINEAR(b);   // m=1：無預乘
       } else {
-        // straight 族（含 mixed/? 保守預設）：shader 線性域乘 a = lin(rgb)×a
+        // 兩族統一：線性域預乘 = G2L(rgb)×a（十一輪更正，見函式頭註）
         r = GAMMA_TO_LINEAR(r) * a; g = GAMMA_TO_LINEAR(g) * a; b = GAMMA_TO_LINEAR(b) * a;
       }
       out[j] = toHalf(r); out[j+1] = toHalf(g); out[j+2] = toHalf(b); out[j+3] = toHalf(a);
@@ -6497,10 +6500,14 @@ setTimeout(() => {
 let loadGen = 0;   // loadLobby 世代計數（見 loadLobby 內 alive 守衛）
 async function loadLobby(name) {
   if (exporting) return;
-  // 逐廳渲染模式（十輪裁定）：mode=auto 時 LGG 覆寫有者走 plain、無者走 v2
+  // 逐廳渲染模式（十/十一輪裁定）：mode=auto 時 T3（無光層）或有 LGG 覆寫 → plain、
+  // 其餘（T1/T2 且無 LGG）→ v2。用戶裁定錨點：T3→plain；Hanako/CH0070→v2；CH0230/CH0284→plain。
+  await loadLightTier();
   RENDER_MODE = (() => {
     if (RENDER_MODE_URL && RENDER_MODE_URL !== 'auto') return RENDER_MODE_URL;
     if (RENDER_MODE_URL === 'auto') {
+      const k = String(name);
+      if (LIGHT_TIER_CACHE[k] === 'T3' || LIGHT_TIER_CACHE[k.toLowerCase()] === 'T3') return 'plain';
       const c = baPostCfgFor(name);
       return (c && (c.g || c.gm)) ? 'plain' : 'v2';
     }
