@@ -67,7 +67,32 @@ sumire, tomoe, tsubaki, wakamo, yoshimi, yuuka（皆 `_home`）
 3. 驗證：CH0070 mode=auto 窗區恢復 [251.3,253.0,242.9]；Akane_home（T3）mode=auto
    無烘焙 log（plain）；Hanako_home（T1 無 LGG）有烘焙 log（v2）；單元 16/16。
 
+## 十三輪更新（2026-10-06 用戶回饋二）：LGG 規則破功，遊戲實際開關未解
+
+用戶裁定兩則：**yuuka_home → plain**（v2 反而壞）、**koharu_home → v2**（「目前感覺沒被修，
+太亮了」）。LGG 規則在這兩廳破功（yuuka 無 LGG 被判 v2、koharu 有 LGG 被判 plain）→ 4/6。
+
+**「太亮了」根因＝十三輪審計的 cf=(2,2,2) 補丁**：`_C` profile（ColorAdjustments——曝光/
+cf/contrast 所在）實證非 idle 後處理（曝光若生效全庫 45× 爆白，plain 命中遊戲）——cf=2 被
+我錯誤套進 idle＝koharu plain×2。已回退 15 筆 _C 欄位（cf×14、c×1）；lift（主 profile）保留。
+
+**逐廳分隔特徵搜剿（全部失敗）**：以六廳實測（探針修正大小寫污染——LOBBY 必須用 index
+原大小寫，小寫會 fallback 渲染成 Airi0_home）——LGG 有無 4/6、元件激活矩陣 ✗、tier ✗、
+材質族 ✗、idle 期 additive 覆蓋（CH0230 2.32× 光卻 plain；Koharu 0.16× 光卻 v2——**方向反轉**）✗、
+主光槽貼圖軟度 ✗、SkeletonData 旗標 ✗、plain-vs-v2 分歧幅度/色罩 ✗（CH0230 23.0 plain
+vs Hanako 16.5 v2 交疊）。
+
+**目視證據**：Koharu plain＝置物櫃背景被添加光層洗成慘白（gamma 合成對亮底+半透明層的
+爆洗），v2＝深藍飽和（遊戲方向）；CH0230 plain 命中遊戲（2.32× 光照樣對）。逐廳差異真實
+存在但觸發器不在 spine/PPV 可算特徵裡——**最後嫌疑＝lobby prefab（ui-uilobbyelement bundle）
+的 Volume 綁定/圖層激活**（遊戲實際的逐廳開關），待解碼。
+
+**現行措施**：`assets/data/lobby_render_mode_override.json` 顯式映射（用戶裁定錨點，
+現有 yuuka_home→plain、koharu_home→v2），loadLobby 最優先讀取；規則（T3/LGG）退為 fallback。
+Hanako/CH0070 維持 v2（用戶裁定）。koharu 請重看（cf 毒已除，現為乾淨 v2）。
+
 ## 後續
 
-1. 用戶目視驗證：v2 組（84 廳）抽驗 `#mode=auto` vs 遊戲；確認後把 `mode=auto` 設為預設。
-2. CH0230 的溫和 C 曲線殘差（實機 mids −14/−11/−16）仍開放。
+1. **解碼 lobby prefab 的 Volume 綁定**（koharu vs yuuka vs ch0070 對比）＝遊戲實際判斷方式。
+2. 用戶重看 koharu（乾淨 v2）與 hanako/ch0070。
+3. CH0230 溫和 C 曲線殘差仍開放。

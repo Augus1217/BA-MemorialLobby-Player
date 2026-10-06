@@ -500,6 +500,17 @@ function loadLightTier() {   // census 光層層級（T3→plain 規則用）
   }
   return LIGHT_TIER_LOAD;
 }
+const MODE_OVERRIDE = {};
+let MODE_OVERRIDE_LOAD = null;
+function loadModeOverride() {
+  if (!MODE_OVERRIDE_LOAD) {
+    MODE_OVERRIDE_LOAD = fetch(assetUrl('assets/data/lobby_render_mode_override.json'))
+      .then((r) => r.json())
+      .then((m) => { Object.assign(MODE_OVERRIDE, m); return m; })
+      .catch(() => null);
+  }
+  return MODE_OVERRIDE_LOAD;
+}
 function loadMatFamily() {   // 惰性載入（IS_ELECTRON_PROD 屬模組後段，top-level fetch 會 TDZ）
   if (!MAT_FAMILY_LOAD) {
     MAT_FAMILY_LOAD = fetch(assetUrl('assets/data/lobby_mat_family.json'))
@@ -6504,11 +6515,12 @@ async function loadLobby(name) {
   // plain（gamma 合成＝viewer 語義）；其餘（T1/T2 無 LGG）→ v2（線性合成）。
   // 用戶裁定錨點：T3→plain；Hanako/CH0070→v2；CH0230/CH0284→plain。
   // URL mode=v2|plain 可強制覆寫（舊全庫 v2 行為＝mode=v2）。
-  await loadLightTier();
+  await Promise.all([loadLightTier(), loadModeOverride()]);
   RENDER_MODE = (() => {
     if (RENDER_MODE_URL && RENDER_MODE_URL !== 'auto') return RENDER_MODE_URL;
-    const k = String(name);
-    if (LIGHT_TIER_CACHE[k] === 'T3' || LIGHT_TIER_CACHE[k.toLowerCase()] === 'T3') return 'plain';
+    const k = String(name).toLowerCase();
+    if (MODE_OVERRIDE[k]) return MODE_OVERRIDE[k];   // 用戶裁定錨點（規則未解前的顯式映射）
+    if (LIGHT_TIER_CACHE[String(name)] === 'T3' || LIGHT_TIER_CACHE[k] === 'T3') return 'plain';
     const c = baPostCfgFor(name);
     return (c && (c.g || c.gm)) ? 'plain' : 'v2';
   })();
@@ -8711,6 +8723,30 @@ if (BA_DEBUG.probe && BA_DEBUG.probeBeam) {
               bbox: [Math.round(x0), Math.round(y0), Math.round(x1), Math.round(y1)] });
           }
           emit('slots', { slots: additive });
+        }
+        // 最後錨點（idle 末）：同款 additive 槽 dump——idle 期光覆蓋（逐廳渲染模式規則用）
+        if (ai === anchors.length) {
+          const world3 = new Float32Array(4096);
+          const additiveIdle = [];
+          for (const slot of spine.skeleton.slots) {
+            if (slot.data.blendMode === 0) continue;
+            const att = slot.getAttachment();
+            if (!att || !att.computeWorldVertices) continue;
+            const n = att.worldVerticesLength;
+            if (n > world3.length) continue;
+            att.computeWorldVertices(slot, 0, n, world3, 0, 2);
+            let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+            for (let i = 0; i < n; i += 2) {
+              const g = spine.toGlobal({ x: world3[i], y: world3[i+1] });
+              x0 = Math.min(x0, g.x); x1 = Math.max(x1, g.x);
+              y0 = Math.min(y0, g.y); y1 = Math.max(y1, g.y);
+            }
+            const ac = att.color;
+            additiveIdle.push({ slot: slot.data.name, bm: slot.data.blendMode,
+              a: +slot.color.a.toFixed(2), attA: ac ? +ac.a.toFixed(2) : null,
+              bbox: [Math.round(x0), Math.round(y0), Math.round(x1), Math.round(y1)] });
+          }
+          emit('slotsIdle', { slots: additiveIdle });
         }
         const phase = T < introDur ? `intro ${T.toFixed(1)}` : `idle ${(T - introDur).toFixed(1)}`;
         const beam = toScreen('light_BG3');
