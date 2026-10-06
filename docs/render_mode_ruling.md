@@ -28,7 +28,8 @@ tier／材質族在兩組間分布近乎相同（T1 56%/59%、straight 63%/60%�
 
 ## 運行時接線（renderer/app.js）
 
-- `RENDER_MODE`：URL `mode=v2|plain` 強制；`mode=auto` 走規則；**預設 v2（現行行為不變）**。
+- **十二輪起 `mode=auto` 為預設**（用戶核准 2026-10-05）：T3 或有 LGG → plain、其餘 → v2。
+  URL `mode=v2|plain` 可強制覆寫（舊全庫 v2 行為＝`mode=v2`）。
 - plain 模式＝跳過 fixAdditiveSlots／prepareHdrLights／線性 RT encode，直渲 gamma 畫布；
   頂點色 G2L 同步關閉（VC_G2L_ACTIVE）＝純 viewer 語義。
 - 驗證：ch0284_home `mode=auto` zone all=[152.1,140.0,166.5]＝plain 基線原值（實機 ±3）；

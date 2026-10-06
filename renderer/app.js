@@ -426,7 +426,7 @@ if (HDR_MODE && !/(?:^|[?&])vcg2l=0/.test(location.hash + location.search) && !(
 // 無 LGG → v2（線性合成原貌）。URL mode=v2|plain 強制、mode=auto 走規則；
 // 預設 v2（現行行為不變；auto 是 opt-in）。
 const RENDER_MODE_URL = /(?:[&?#])mode=(v2|plain|auto)/.exec(location.hash + location.search)?.[1] || null;
-let RENDER_MODE = 'v2';   // 當前 lobby 生效模式（loadLobby 開頭依 URL/規則更新）
+let RENDER_MODE = 'v2';   // 當前 lobby 生效模式（loadLobby 開頭依規則更新；未指定 mode＝auto）
 // Float32 → half float（three.js DataUtils 同款位元轉換）
 const _f32view = new Float32Array(1);
 const _i32view = new Int32Array(_f32view.buffer);
@@ -6500,18 +6500,17 @@ setTimeout(() => {
 let loadGen = 0;   // loadLobby 世代計數（見 loadLobby 內 alive 守衛）
 async function loadLobby(name) {
   if (exporting) return;
-  // 逐廳渲染模式（十/十一輪裁定）：mode=auto 時 T3（無光層）或有 LGG 覆寫 → plain、
-  // 其餘（T1/T2 且無 LGG）→ v2。用戶裁定錨點：T3→plain；Hanako/CH0070→v2；CH0230/CH0284→plain。
+  // 逐廳渲染模式（十/十一輪裁定，十二輪起為預設）：T3（無光層）或有 LGG 覆寫 →
+  // plain（gamma 合成＝viewer 語義）；其餘（T1/T2 無 LGG）→ v2（線性合成）。
+  // 用戶裁定錨點：T3→plain；Hanako/CH0070→v2；CH0230/CH0284→plain。
+  // URL mode=v2|plain 可強制覆寫（舊全庫 v2 行為＝mode=v2）。
   await loadLightTier();
   RENDER_MODE = (() => {
     if (RENDER_MODE_URL && RENDER_MODE_URL !== 'auto') return RENDER_MODE_URL;
-    if (RENDER_MODE_URL === 'auto') {
-      const k = String(name);
-      if (LIGHT_TIER_CACHE[k] === 'T3' || LIGHT_TIER_CACHE[k.toLowerCase()] === 'T3') return 'plain';
-      const c = baPostCfgFor(name);
-      return (c && (c.g || c.gm)) ? 'plain' : 'v2';
-    }
-    return 'v2';
+    const k = String(name);
+    if (LIGHT_TIER_CACHE[k] === 'T3' || LIGHT_TIER_CACHE[k.toLowerCase()] === 'T3') return 'plain';
+    const c = baPostCfgFor(name);
+    return (c && (c.g || c.gm)) ? 'plain' : 'v2';
   })();
   VC_G2L_ACTIVE = HDR_MODE && RENDER_MODE !== 'plain';
   // 世代守衛：快速連切（或開機與側欄點擊撞期）時，只有最新一次能跑完；
