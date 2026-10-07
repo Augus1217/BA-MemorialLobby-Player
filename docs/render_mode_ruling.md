@@ -88,9 +88,16 @@ vs Hanako 16.5 v2 交疊）。
 的 Volume 綁定/圖層激活**（遊戲實際的逐廳開關），待解碼。
 
 **十四輪結案（2026-10-07 用戶重看）**：**koharu_home → plain**（cf 毒除去後重看翻案；
-先前 v2 判斷受 cf=2 污染）。LGG 規則回升 **5/6**——唯一例外 yuuka_home（T2、idle 覆蓋僅
-0.14×、無 LGG；候選精化：無 LGG 且 idle 光覆蓋低 → plain，儀器已備待更多裁定樣本）。
-Hanako/CH0070 維持 v2（用戶裁定，並排圖已供重看未翻案）。
+先前 v2 判斷受 cf=2 污染）。Hanako/CH0070 維持 v2（並排圖供重看未翻案）。
+
+**Q&A 逐廳判定（2026-10-07/08 起）**：規則法（LGG/idle 覆蓋/過曝比）逐一被新樣本打破
+（ch0285 有 LGG 卻需要 v2——燈柱過曝實測 plain 3.61%/p95 231 vs 遊戲 2.6%/206 vs
+v2 1.07%/201；ch0284 plain 卻有 4.79× 過曝比——其亮窗的過曝是合法的）。
+**結論：單一特徵規則不存在，逐廳「我們 vs 遊戲」截圖對照是唯一可靠儀器**；
+用戶提供截圖對 → 量測亮區/過曝/p95 → 定 override。已知映射見
+lobby_render_mode_override.json（yuuka→plain、koharu→plain、ch0285→v2、
+hanako/ch0070→v2 用戶裁定）。另：mild 的 LGG gm<1 為提亮，plain+mild 會再疊 +8%，
+比對時注意 POST=0 與否。
 
 ## 十五輪更新（2026-10-07）：koharu 翻案 plain ＋ 規則精化
 

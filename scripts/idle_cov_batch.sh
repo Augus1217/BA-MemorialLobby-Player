@@ -13,7 +13,7 @@ while read -r LOBBY; do
   if grep -q "^${LOBBY}," "$OUT" 2>/dev/null; then continue; fi
   rm -f /tmp/bq/beam_beam_t*.png "/tmp/bq/beam_${LOBBY}.json"
   DISPLAY=:0 PROBE_MODE=beam LOBBY="$LOBBY" WIDTH=1300 HEIGHT=1006 \
-    EXTRA="&camera=0&psOnly=zzz&waterStr=0&plain=1&hdr=0&POST=0" TIMEOUT_MS=360 \
+    EXTRA="&camera=0&psOnly=zzz&waterStr=0&plain=1&hdr=0&POST=0" TIMEOUT_MS=360000 \
     ./node_modules/.bin/electron tests/interact_main.js >/dev/null 2>&1
   RES=$(python3 - "$LOBBY" <<'PYEOF'
 import json, sys
