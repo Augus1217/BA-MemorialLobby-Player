@@ -7514,7 +7514,10 @@ async function init() {
       return;
     }
   } catch { showErr(t('msg.noWebGL2')); return; }
-  await app.init({ resizeTo: window, antialias: true, backgroundColor: 0x05060d, autoDensity: true });
+  // 背景色＝遊戲 clear 透出色：CH0284 實機最暗 0.5% 像素 [30.5,23.6,36.5]（十六輪獵紗結論——
+  // 舊 0x05060d 讓所有半透明層底下墊近黑，暗部紗全滅）。URL bgOverride=0xRRGGBB 可實驗。
+  const bgOv = /(?:[&?#])bgOverride=0x([0-9a-fA-F]{6})/.exec(location.hash + location.search);
+  await app.init({ resizeTo: window, antialias: true, backgroundColor: bgOv ? parseInt(bgOv[1], 16) : 0x1f1825, autoDensity: true });
   const canvas = app.canvas;
   document.getElementById('app').appendChild(canvas);
 
