@@ -87,9 +87,10 @@ vs Hanako 16.5 v2 交疊）。
 存在但觸發器不在 spine/PPV 可算特徵裡——**最後嫌疑＝lobby prefab（ui-uilobbyelement bundle）
 的 Volume 綁定/圖層激活**（遊戲實際的逐廳開關），待解碼。
 
-**現行措施**：`assets/data/lobby_render_mode_override.json` 顯式映射（用戶裁定錨點，
-現有 yuuka_home→plain、koharu_home→v2），loadLobby 最優先讀取；規則（T3/LGG）退為 fallback。
-Hanako/CH0070 維持 v2（用戶裁定）。koharu 請重看（cf 毒已除，現為乾淨 v2）。
+**十四輪結案（2026-10-07 用戶重看）**：**koharu_home → plain**（cf 毒除去後重看翻案；
+先前 v2 判斷受 cf=2 污染）。LGG 規則回升 **5/6**——唯一例外 yuuka_home（T2、idle 覆蓋僅
+0.14×、無 LGG；候選精化：無 LGG 且 idle 光覆蓋低 → plain，儀器已備待更多裁定樣本）。
+Hanako/CH0070 維持 v2（用戶裁定，並排圖已供重看未翻案）。
 
 ## 後續
 
