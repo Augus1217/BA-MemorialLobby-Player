@@ -92,8 +92,25 @@ vs Hanako 16.5 v2 交疊）。
 0.14×、無 LGG；候選精化：無 LGG 且 idle 光覆蓋低 → plain，儀器已備待更多裁定樣本）。
 Hanako/CH0070 維持 v2（用戶裁定，並排圖已供重看未翻案）。
 
+## 十五輪更新（2026-10-07）：koharu 翻案 plain ＋ 規則精化
+
+**koharu_home → plain**（cf 毒除去後用戶重看翻案，f4581f8）。規則狀態：LGG 5/6（唯一例外 yuuka）。
+
+**任務 2 結論（prefab Volume 綁定解碼）**：Volume 行為不在任何 bundle——三個 PPPV profile
+（main/_C/_D）在 spinelobbies-<lobby>-_mxdependency-assets bundle，由 il2cpp 運行時載入掛載
+（`PPPV_Lobby_<名字>` 慣例），**沒有靜態逐廳開關可解碼**。遊戲的判斷方式只能以經驗特徵逼近。
+
+**精化規則（六廳全 fits）**：
+- plain ⟸ T3，或有 LGG 覆寫（ch0230/ch0284/koharu 錨點），或無 LGG 但 idle 光覆蓋低（yuuka 0.14）
+- v2 ⟸ 無 LGG 且 idle 期全屏 additive 光覆蓋 ≥0.8 視口（hanako 1.59/ch0070 1.00 錨點）
+- 物理故事：有 LGG 的廳，遊戲分級把線性合成推回 plain 觀感；無 LGG 的廳暴露線性原貌，
+  誤差可見性取決於全屏軟光層的存在。
+
+**任務 1（全庫 idle 覆蓋普查）**：`scripts/idle_cov_batch.sh`（slotsIdle 儀器，可續跑，
+逐廳清 userData）背景執行中 → docs/idle_cov.csv → assets/data/lobby_idle_cov.json，
+規則已接線（無普查資料的廳保守走 v2=舊行為）。
+
 ## 後續
 
-1. **解碼 lobby prefab 的 Volume 綁定**（koharu vs yuuka vs ch0070 對比）＝遊戲實際判斷方式。
-2. 用戶重看 koharu（乾淨 v2）與 hanako/ch0070。
-3. CH0230 溫和 C 曲線殘差仍開放。
+1. 普查完成後：全庫模式表定案＋抽樣用戶目視驗證。
+2. CH0230 溫和 C 曲線殘差、暖色暗層（GT 有 plain 無）仍開放。

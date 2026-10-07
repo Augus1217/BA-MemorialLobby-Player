@@ -501,13 +501,14 @@ function loadLightTier() {   // census 光層層級（T3→plain 規則用）
   return LIGHT_TIER_LOAD;
 }
 const MODE_OVERRIDE = {};
+const IDLE_COV = {};   // idle 期 additive 光覆蓋（slotsIdle 儀器普查；v2 規則用）
 let MODE_OVERRIDE_LOAD = null;
 function loadModeOverride() {
   if (!MODE_OVERRIDE_LOAD) {
-    MODE_OVERRIDE_LOAD = fetch(assetUrl('assets/data/lobby_render_mode_override.json'))
-      .then((r) => r.json())
-      .then((m) => { Object.assign(MODE_OVERRIDE, m); return m; })
-      .catch(() => null);
+    MODE_OVERRIDE_LOAD = Promise.all([
+      fetch(assetUrl('assets/data/lobby_render_mode_override.json')).then((r) => r.json()).then((m) => { Object.assign(MODE_OVERRIDE, m); }).catch(() => {}),
+      fetch(assetUrl('assets/data/lobby_idle_cov.json')).then((r) => r.json()).then((m) => { Object.assign(IDLE_COV, m); }).catch(() => {}),
+    ]);
   }
   return MODE_OVERRIDE_LOAD;
 }
@@ -6519,10 +6520,14 @@ async function loadLobby(name) {
   RENDER_MODE = (() => {
     if (RENDER_MODE_URL && RENDER_MODE_URL !== 'auto') return RENDER_MODE_URL;
     const k = String(name).toLowerCase();
-    if (MODE_OVERRIDE[k]) return MODE_OVERRIDE[k];   // 用戶裁定錨點（規則未解前的顯式映射）
+    if (MODE_OVERRIDE[k]) return MODE_OVERRIDE[k];   // 用戶裁定錨點
     if (LIGHT_TIER_CACHE[String(name)] === 'T3' || LIGHT_TIER_CACHE[k] === 'T3') return 'plain';
     const c = baPostCfgFor(name);
-    return (c && (c.g || c.gm)) ? 'plain' : 'v2';
+    if (c && (c.g || c.gm)) return 'plain';          // LGG 覆寫 → plain（ch0230/ch0284/koharu 錨點）
+    // 無 LGG：全屏軟光層存在（idle 覆蓋 ≥0.8 視口）→ v2（hanako 1.59/ch0070 1.00 錨點）；
+    // 覆蓋低（yuuka 0.14）→ plain（合成誤差不可見）。無普查資料的廳 → v2（保守=舊行為）。
+    const cov = IDLE_COV[String(name)] ?? IDLE_COV[k];
+    return (cov != null && cov < 0.8) ? 'plain' : 'v2';
   })();
   VC_G2L_ACTIVE = HDR_MODE && RENDER_MODE !== 'plain';
   // 世代守衛：快速連切（或開機與側欄點擊撞期）時，只有最新一次能跑完；
