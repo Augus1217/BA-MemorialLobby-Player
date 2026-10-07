@@ -2379,12 +2379,25 @@ let flashBlurOn = false;
 // URP gaussianMaxRadius 是 UV 單位，換算像素需乘解析度；dofScale 可調（hash dofScale=）。
 const dofScaleHash = Number((/(?:^|&)dofScale=(\d+(?:\.\d+)?)/.exec(location.hash + location.search) || [])[1]) || 8;
 const dofScale = () => dofScaleHash * ((app.renderer && app.renderer.height) / 1080 || 1);
+let bgBlurFilter = null;
+function syncBgBlur() {
+  // 全層模糊（Q&A 實驗：遊戲 DoF 為深度制，本骨架無深度——先以全層近似驗證方向）
+  const targets = [bg, scene, ...extras, spine].filter(Boolean);
+  if (!BG_BLUR) {
+    for (const t of targets) { try { t.filters = null; } catch {} }
+    return;
+  }
+  if (!bgBlurFilter) bgBlurFilter = new BlurFilter({ strength: BG_BLUR, quality: 3 });
+  bgBlurFilter.strength = BG_BLUR * ((app.renderer && app.renderer.height) / 1080 || 1);
+  for (const t of targets) { try { t.filters = [bgBlurFilter]; } catch {} }
+}
 function syncFlashFilters() {
   if (!postWrap) return;
   const fs = [];
   if (flashBlurOn && flashBlur) fs.push(flashBlur);
   if (baPostOn && baPostFilter) fs.push(baPostFilter);
   postWrap.filters = fs;
+  syncBgBlur();
 }
 // Drive the #whiteflash DOM overlay (live view) + keep it in sync each frame.
 function tickWhiteFlash() {
@@ -9089,6 +9102,8 @@ const WATER_Z2Y = 0.25;   // mesh z（米制深度）→ pixi y 係數（透視�
 // 弧光強度：遊戲端弧光明顯亮於貼圖原值（mesh 頂點色通道含負值、機制未明），
 // 以遊戲截圖校準（waterStr=3.0≈遊戲弧線亮度）。
 const WATER_STR = Number(/(?:[&?#])waterStr=([\d.]+)/.exec(location.search + location.hash)?.[1]) || 0;
+// bgBlur=<px>：BG/scene 層持續高斯模糊（遊戲 DoF 失焦模擬實驗；0=關）
+const BG_BLUR = Number(/(?:[&?#])bgBlur=([\d.]+)/.exec(location.search + location.hash)?.[1]) || 0;
 // 預設 0（關閉）：FX_water_wave_1 的資料存在，但遊戲 idle 畫面中找不到可指認的
 // 弧形波光（伽馬提亮檢視左下水面只有短線光斑＋彩虹色散＋白亮水體）——
 // mesh 的視覺貢獻未證實（材質 _Color alpha=0＋頂點色負值，實際渲染可能極淡/不可見）。

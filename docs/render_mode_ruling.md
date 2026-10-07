@@ -91,13 +91,17 @@ vs Hanako 16.5 v2 交疊）。
 先前 v2 判斷受 cf=2 污染）。Hanako/CH0070 維持 v2（並排圖供重看未翻案）。
 
 **Q&A 逐廳判定（2026-10-07/08 起）**：規則法（LGG/idle 覆蓋/過曝比）逐一被新樣本打破
-（ch0285 有 LGG 卻需要 v2——燈柱過曝實測 plain 3.61%/p95 231 vs 遊戲 2.6%/206 vs
-v2 1.07%/201；ch0284 plain 卻有 4.79× 過曝比——其亮窗的過曝是合法的）。
-**結論：單一特徵規則不存在，逐廳「我們 vs 遊戲」截圖對照是唯一可靠儀器**；
-用戶提供截圖對 → 量測亮區/過曝/p95 → 定 override。已知映射見
-lobby_render_mode_override.json（yuuka→plain、koharu→plain、ch0285→v2、
-hanako/ch0070→v2 用戶裁定）。另：mild 的 LGG gm<1 為提亮，plain+mild 會再疊 +8%，
-比對時注意 POST=0 與否。
+（ch0284 plain 卻有 4.79× 過曝比——其亮窗的過曝是合法的）。已知映射見
+lobby_render_mode_override.json（yuuka→plain、koharu→plain、hanako/ch0070→v2）。
+另：mild 的 LGG gm<1 為提亮，plain+mild 會再疊 +8%，比對時注意 POST=0 與否。
+
+**ch0285（生塩乃愛睡衣）案例結案＝相位混淆**：用戶報「檯燈亮了許多」（雙截圖）。
+實測：FX_Screen_01 槽 alpha 被 Idle_01 動畫驅動脈衝（idle-5s 0.58↔末錨點 1.0），
+plain 光柱過曝在 **0.00%～3.97%** 劇烈擺動（t08 光暈近熄、t12 峰值）——遊戲截圖
+2.6% 落在此範圍內。雙截圖相位未匹配，「亮了許多」極可能是脈衝相位差。
+ch0285 的 v2 override 已回退（證據被相位污染）；待相位匹配比較（遊戲抓脈衝峰值
+vs 我們 t12 峰值）後定案。全屏 blur 實驗（bgBlur 6/12）否證：區域均值不動、
+角色糊掉，DoF 近似不成立。**新比對協議：光暈脈衝廳必須相位匹配比較**。
 
 ## 十五輪更新（2026-10-07）：koharu 翻案 plain ＋ 規則精化
 
