@@ -4518,28 +4518,50 @@ function wallSegSync(fps) {
     b.classList.toggle('on', Number(b.dataset.f) === Number(fps));
   });
 }
-function fillWallLobbySelect(current) {
-  const sel = document.getElementById('setWallLobby');
-  if (!sel) return;
-  if (!sel.options.length && ORDER.length) {
-    const frag = document.createDocumentFragment();
-    const optFollow = document.createElement('option');
-    optFollow.value = '';
-    optFollow.textContent = t('set.wall.followPlayer');
-    frag.appendChild(optFollow);
-    for (const key of ORDER) {
-      const info = lobbyGroupInfo(key);
-      const rec = studentForLobby(key);
-      const label = (studentDisplay(rec) || prettyName(key))
-        + (info.labels.length ? ' · ' + info.labels.join(' ') : '');
-      const o = document.createElement('option');
-      o.value = key;
-      o.textContent = label;
-      frag.appendChild(o);
+// 桌布大廳列表（取代下拉選單）：搜尋＋圖示列，點擊即換（無縫熱替換）
+let _wallLobbyQuery = '';
+function renderWallLobbyList(current) {
+  const list = document.getElementById('setWallList');
+  if (!list) return;
+  const q = (_wallLobbyQuery || '').toLowerCase();
+  const frag = document.createDocumentFragment();
+  const mkRow = (key, label, ico) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'sb-item' + ((key || '') === (current || '') ? ' cur' : '');
+    b.dataset.key = key || '';
+    if (ico) {
+      const img = document.createElement('img');
+      img.className = 'sb-ico';
+      img.src = assetUrl(`assets/students/${ico}`);
+      img.alt = '';
+      b.appendChild(img);
     }
-    sel.appendChild(frag);
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = label;
+    b.appendChild(name);
+    return b;
+  };
+  if (!q) frag.appendChild(mkRow('', t('set.wall.followPlayer'), null));
+  let shown = 0;
+  for (const key of ORDER) {
+    const info = lobbyGroupInfo(key);
+    const rec = studentForLobby(key);
+    const label = (studentDisplay(rec) || prettyName(key))
+      + (info.labels.length ? ' · ' + info.labels.join(' ') : '');
+    if (q && !(label.toLowerCase().includes(q) || key.toLowerCase().includes(q))) continue;
+    const ico = STUDENT_ICONS[costumeIconKey(key) || info.core] || STUDENT_ICONS[info.core];
+    frag.appendChild(mkRow(key, label, ico));
+    shown++;
   }
-  if (current !== undefined) sel.value = current || '';
+  if (q && shown === 0) {
+    const d = document.createElement('div');
+    d.className = 'sb-empty';
+    d.textContent = t('set.wall.noMatch');
+    frag.appendChild(d);
+  }
+  list.replaceChildren(frag);
 }
 async function refreshWallTab() {
   if (!window.ba?.wallpaperStatus) return;
@@ -4547,7 +4569,7 @@ async function refreshWallTab() {
   try { s = await window.ba.wallpaperStatus(); } catch {}
   if (!s) return;
   _wallStatus = s;
-  fillWallLobbySelect(s.config.lobby);
+  renderWallLobbyList(s.config.lobby);
   const st = document.getElementById('setWallStatus');
   if (st) {
     st.textContent = s.active
@@ -8286,8 +8308,17 @@ async function init() {
       else await window.ba.wallpaperStart?.();
       refreshWallTab();
     });
-    document.getElementById('setWallLobby')?.addEventListener('change', (e) => {
-      window.ba.wallpaperSetConfig?.({ lobby: e.target.value || '' });
+    document.getElementById('setWallList')?.addEventListener('click', (e) => {
+      const b = e.target.closest('.sb-item');
+      if (!b) return;
+      // 即時標選＋套用（config 廣播後 refreshWallTab 會再對齊）
+      document.querySelectorAll('#setWallList .sb-item.cur').forEach((x) => x.classList.remove('cur'));
+      b.classList.add('cur');
+      window.ba.wallpaperSetConfig?.({ lobby: b.dataset.key || '' });
+    });
+    document.getElementById('setWallSearch')?.addEventListener('input', (e) => {
+      _wallLobbyQuery = e.target.value || '';
+      renderWallLobbyList(_wallStatus?.config.lobby);
     });
     document.getElementById('setWallSoundCk')?.addEventListener('change', (e) => {
       window.ba.wallpaperSetConfig?.({ sound: !!e.target.checked });

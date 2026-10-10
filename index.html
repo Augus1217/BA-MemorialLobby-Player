@@ -403,6 +403,11 @@
       background: linear-gradient(135deg, rgba(96,150,255,.55), rgba(76,120,240,.45));
       border-color: rgba(140,180,255,.8); color: #fff;
     }
+    /* 桌布分頁：角色搜尋＋列表（複用 .sb-item / .sb-ico / .sb-empty 樣式） */
+    .wall-search { width: 100%; box-sizing: border-box; background: rgba(255,255,255,.08); color:#e6ecff;
+      border:none; border-radius:6px; padding:7px 10px; outline:none; }
+    .wall-search::placeholder { color: rgba(210,220,255,.5); }
+    .wall-list { max-height: 235px; overflow-y: auto; background: rgba(10,14,40,.25); border-radius: 6px; padding: 3px 2px; }
     #settingsPanel::-webkit-scrollbar { width: 8px; }
     #settingsPanel::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 4px; }
     .set-section { border-top: 1px solid rgba(130,160,255,.14); padding-top: 12px; margin-top: 14px; }
@@ -921,8 +926,9 @@
         </div>
         <div class="panel-row">
           <span class="lbl" data-i18n="set.wall.lobby">桌布大廳</span>
-          <select id="setWallLobby" style="background:rgba(255,255,255,.08); color:#e6ecff; border:none; border-radius:6px; padding:6px 8px; max-width:280px;"></select>
         </div>
+        <input type="search" id="setWallSearch" data-i18n-ph="set.wall.search" placeholder="搜尋角色…">
+        <div id="setWallList" class="wall-list" style="margin-top:6px;"></div>
         <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setWallSoundCk"> <span data-i18n="set.wall.sound">桌布播放音樂</span></label>
         <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setWallInteractCk"> <span data-i18n="set.wall.interact">互動模式（桌布可點擊）</span></label>
         <div class="panel-row">

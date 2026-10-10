@@ -167,7 +167,9 @@
     "set.wall.statusOff": "桌布未啟動",
     "set.wall.noteWayland": "此系統沒有 X11/XWayland，桌布可能無法顯示。",
     "set.wall.noteWin": "Windows 桌面層掛載即將支援，目前以全螢幕視窗呈現。",
-    "set.wall.noteNoFs": "此系統無法偵測全螢幕，暫停功能停用。"
+    "set.wall.noteNoFs": "此系統無法偵測全螢幕，暫停功能停用。",
+    "set.wall.search": "搜尋角色…",
+    "set.wall.noMatch": "沒有符合的角色"
   },
   "zh-CN": {
     "boot.checking": "检查更新中……",
@@ -337,7 +339,9 @@
     "set.wall.statusOff": "壁纸未启动",
     "set.wall.noteWayland": "此系统没有 X11/XWayland，壁纸可能无法显示。",
     "set.wall.noteWin": "Windows 桌面层挂载即将支持，目前以全屏窗口呈现。",
-    "set.wall.noteNoFs": "此系统无法检测全屏，暂停功能停用。"
+    "set.wall.noteNoFs": "此系统无法检测全屏，暂停功能停用。",
+    "set.wall.search": "搜索角色…",
+    "set.wall.noMatch": "没有符合的角色"
   },
   "ja": {
     "boot.checking": "確認中です……",
@@ -507,7 +511,9 @@
     "set.wall.statusOff": "壁紙は未起動",
     "set.wall.noteWayland": "このシステムには X11/XWayland がないため、壁紙が表示されない可能性があります。",
     "set.wall.noteWin": "Windows のデスクトップ層への取り付けは近日対応。現在は全画面ウィンドウとして表示されます。",
-    "set.wall.noteNoFs": "このシステムでは全画面を検出できないため、一時停止機能は無効です。"
+    "set.wall.noteNoFs": "このシステムでは全画面を検出できないため、一時停止機能は無効です。",
+    "set.wall.search": "キャラを検索…",
+    "set.wall.noMatch": "一致するキャラがいません"
   },
   "en": {
     "boot.checking": "Checking for updates...",
@@ -677,7 +683,9 @@
     "set.wall.statusOff": "Wallpaper not running",
     "set.wall.noteWayland": "No X11/XWayland on this system; the wallpaper may not be visible.",
     "set.wall.noteWin": "Windows desktop-layer mounting is coming soon; shown as a fullscreen window for now.",
-    "set.wall.noteNoFs": "Fullscreen detection unavailable on this system; pause disabled."
+    "set.wall.noteNoFs": "Fullscreen detection unavailable on this system; pause disabled.",
+    "set.wall.search": "Search characters…",
+    "set.wall.noMatch": "No matching character"
   },
   "ko": {
     "boot.checking": "업데이트 확인 중...",
@@ -847,6 +855,8 @@
     "set.wall.statusOff": "배경화면이 실행되지 않음",
     "set.wall.noteWayland": "이 시스템에는 X11/XWayland이 없어 배경화면이 표시되지 않을 수 있습니다.",
     "set.wall.noteWin": "Windows 데스크톱 레이어 장착은 곧 지원 예정입니다. 현재는 전체 화면 창으로 표시됩니다.",
-    "set.wall.noteNoFs": "이 시스템에서는 전체 화면을 감지할 수 없어 일시정지 기능이 비활성화됩니다."
+    "set.wall.noteNoFs": "이 시스템에서는 전체 화면을 감지할 수 없어 일시정지 기능이 비활성화됩니다.",
+    "set.wall.search": "캐릭터 검색…",
+    "set.wall.noMatch": "일치하는 캐릭터가 없습니다"
   }
 }
