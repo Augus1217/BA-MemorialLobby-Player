@@ -25,7 +25,7 @@ function iconImage() {
   return nativeImage.createEmpty();
 }
 
-function buildMenu(showPlayer) {
+function buildMenu(showPlayer, onOpenWallpaperSettings) {
   const t = (z, e) => (zh() ? z : e);
   let s;
   try { s = wallpaper.status(); } catch { s = { active: false, config: {}, autostart: false }; }
@@ -35,6 +35,11 @@ function buildMenu(showPlayer) {
     s.active
       ? { label: t('停止桌布', 'Stop Wallpaper'), click: () => { try { wallpaper.stop(); } catch {} } }
       : { label: t('啟動桌布', 'Start Wallpaper'), click: () => { try { wallpaper.start(); } catch {} } },
+    {
+      label: t('選擇桌布大廳…', 'Choose Wallpaper Lobby…'),
+      enabled: !!s.active,
+      click: () => { try { onOpenWallpaperSettings && onOpenWallpaperSettings(); } catch {} },
+    },
     {
       label: t('互動模式（可點擊桌布）', 'Interactive (clickable)'),
       type: 'checkbox',
@@ -58,7 +63,7 @@ function buildMenu(showPlayer) {
   tray.setToolTip('BA Memorial Lobby' + (s.active ? (s.paused ? ' ⏸' : ' 🖼') : ''));
 }
 
-function createTray({ showPlayer }) {
+function createTray({ showPlayer, onOpenWallpaperSettings }) {
   if (tray) return tray;
   try {
     tray = new Tray(iconImage());
@@ -67,10 +72,10 @@ function createTray({ showPlayer }) {
     tray = null;
     return null;
   }
-  buildMenu(showPlayer);
+  buildMenu(showPlayer, onOpenWallpaperSettings);
   wallpaper.onState(() => {
     if (tray && !tray.isDestroyed()) {
-      try { buildMenu(showPlayer); } catch {}
+      try { buildMenu(showPlayer, onOpenWallpaperSettings); } catch {}
     }
   });
   return tray;

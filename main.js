@@ -34,6 +34,19 @@ function showPlayer() {
   }
   createWindow();
 }
+// tray「選擇桌布大廳」→ 開播放器並跳到設定桌布分頁（視窗剛建立時掛起，載入完補送）
+let pendingOpenWall = false;
+function openWallpaperSettings() {
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.webContents.send('open-wallpaper-settings');
+  } else {
+    pendingOpenWall = true;
+    showPlayer();
+  }
+}
 if (!gotTheLock) {
   app.quit();
 } else {
@@ -139,6 +152,12 @@ function createWindow() {
 
   win.webContents.on('console-message', (e, level, message) => {
     console.log('[renderer]', message);
+  });
+  win.webContents.on('did-finish-load', () => {
+    if (pendingOpenWall) {
+      pendingOpenWall = false;
+      setTimeout(() => { try { if (win && !win.isDestroyed()) win.webContents.send('open-wallpaper-settings'); } catch {} }, 800);
+    }
   });
   if (process.env.CAPTURE) {
     const file = process.env.CAPTURE;
@@ -850,7 +869,7 @@ app.whenReady().then(async () => {
     }
   }
   createWindow();
-  try { createTray({ showPlayer }); } catch (e) { console.error('[tray] init failed:', e.message); }
+  try { createTray({ showPlayer, onOpenWallpaperSettings: openWallpaperSettings }); } catch (e) { console.error('[tray] init failed:', e.message); }
   // --wallpaper CLI（開機自啟）→ 直接進桌布；packaged 下設定 enabled 亦自動恢復
   // （dev 模式需明確 --wallpaper 或 BA_WALLPAPER=1，避免開發時意外蓋桌面）
   const wantWallpaper = process.argv.includes('--wallpaper') || process.env.BA_WALLPAPER === '1';

@@ -8316,6 +8316,11 @@ async function init() {
     window.ba.onWallpaperState?.(() => {
       if (document.getElementById('setTabWall')?.style.display === '') refreshWallTab();
     });
+    // tray「選擇桌布大廳」→ 開設定並跳桌布分頁
+    window.ba.onOpenWallpaperSettings?.(() => {
+      toggleSettingsPanel(true);
+      switchSettingsTab('wall');
+    });
   }
   // 管理空間工具列（靜態元素，只綁一次）
   document.getElementById('setSpaceSearch')?.addEventListener('input', (e) => {
@@ -8513,7 +8518,7 @@ async function onSpaceVerify() {
   syncVoiceLangSegs();
 
   if (ORDER.length) {
-    const m = location.hash.match(/[?#]lobby=([^&]+)/);
+    const m = location.hash.match(/(?:[&?#])lobby=([^&]+)/);
     // 開機 lobby：deep-link > 上次看的（localStorage）> index 首位。
     // 自動化（autostart/PROBE）固定走首位，保證 determinism。
     let remembered = null;
@@ -9291,11 +9296,13 @@ function initLobbyWater(lobbyKey) {
   destroyLobbyWater();
   const def = LOBBY_PARTICLES?.[lobbyKey]?.waterMesh;
   if (!def?.verts_xz?.length || !spine) { log(`[particles] water 跳過（def=${!!def} spine=${!!spine}）`); return; }
+  // screen_map＝對遊戲截圖的單幀校準；十七輪背景色變更後校準失效已標記為
+  // screen_map_obsolete——缺 calibration 就跳過，不可硬炸（有 mesh 無 map 的 lobby 會整頁 uncaught）
+  const sm = def.screen_map;
+  if (!sm) { log('[particles] water 跳過（screen_map 校準缺失，待重校）'); return; }
   log('[particles] water 前置 OK，載入貼圖…');
   const n = def.vertCount;
   // mesh (x, z) → pixi 編輯單位：x 水平、z 深度（遊戲透視相機投成畫面 y）。
-  // screen_map 為對遊戲截圖的單幀校準（線性透視粗近似，待實機序列幀精修）。
-  const sm = def.screen_map;
   const positions = new Float32Array(n * 2);
   const uvs = new Float32Array(n * 2);
   for (let i = 0; i < n; i++) {

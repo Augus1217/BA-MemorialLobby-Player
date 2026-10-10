@@ -45,6 +45,7 @@ let powerBound = false;
 const workers = new Map();   // display.id → worker record
 const wcIndex = new Map();   // webContents.id → worker record
 const stateCbs = [];
+const retiring = new Map();  // display.id → [舊 worker records]（無縫換角：新的 ready 才拆）
 let cursorTimer = null, fsTimer = null, watchdogTimer = null, displayDebounce = null, winHealthTimer = null;
 
 // ---------------------------------------------------------------------------
@@ -95,7 +96,8 @@ function prodHtmlPath() {
 function createWorker(display, index) {
   const cfg = loadConfig();
   const lobby = (cfg.perScreen && cfg.perScreen[String(index)]) || cfg.lobby || '';
-  const hash = `wallpaper=1&autostart=1${lobby ? '&lobby=' + encodeURIComponent(lobby) : ''}`;
+  // lobby 放 hash 最前（renderer 舊正則 /[?#]lobby=/ 只認 #/? 開頭；放寬見 app.js）
+  const hash = `${lobby ? 'lobby=' + encodeURIComponent(lobby) + '&' : ''}wallpaper=1&autostart=1`;
   const isWin = process.platform === 'win32';
   const win = new BrowserWindow({
     x: display.bounds.x,
@@ -130,7 +132,8 @@ function createWorker(display, index) {
     reloads: 0, reloading: false, bootStage: 'new',
   };
   workers.set(display.id, rec);
-  wcIndex.set(win.webContents.id, rec);
+  const wcId = win.webContents.id;   // 建立時抓定：closed 後 win.webContents 會 throw
+  wcIndex.set(wcId, rec);
 
   win.webContents.on('console-message', (_e, _level, message) => {
     if (isDev) console.log('[wallpaper]', message);
@@ -146,8 +149,10 @@ function createWorker(display, index) {
     else failWorker(rec, `renderer gone (${details.reason})`);
   });
   win.on('closed', () => {
-    wcIndex.delete(win.webContents.id);
-    if (workers.get(display.id) === rec) workers.delete(display.id);
+    try {
+      wcIndex.delete(wcId);
+      if (workers.get(display.id) === rec) workers.delete(display.id);
+    } catch {}
   });
 
   win.once('ready-to-show', () => {
@@ -186,13 +191,42 @@ function createWorkers() {
   displays.forEach((d, i) => createWorker(d, i));
 }
 function destroyWorkers() {
-  for (const w of [...workers.values()]) {
+  const all = [...workers.values(), ...[...retiring.values()].flat()];
+  for (const w of all) {
     // Windows：先從 WorkerW 卸下再銷毀（SetParent(NULL)）
-    if (process.platform === 'win32') { try { winMount()?.detachWorker(w.win); } catch {} }
-    try { w.win.destroy(); } catch {}
+    if (process.platform === 'win32' && w.win && !w.win.isDestroyed()) {
+      try { winMount()?.detachWorker(w.win); } catch {}
+    }
+    try { if (w.win && !w.win.isDestroyed()) w.win.destroy(); } catch {}
   }
   workers.clear();
   wcIndex.clear();
+  retiring.clear();
+}
+
+// 無縫換角：為每個現役 worker 先建新 worker（隱藏），ready 顯示後才拆舊的——
+// 桌面不會出現「桌布消失幾秒」的空窗；新 worker 起不來 → failWorker 回退保留舊的。
+function swapWorkers() {
+  for (const [did, rec] of [...workers.entries()]) {
+    rec.retired = true;
+    if (!retiring.has(did)) retiring.set(did, []);
+    retiring.get(did).push(rec);
+    workers.delete(did);
+    wcIndex.delete(rec.win.webContents.id);   // 舊的不再接心跳/stage
+    createWorker(rec.display, rec.index);
+  }
+}
+// 新 worker 就位 → 拆掉同一顯示器的所有 retiring 舊 worker
+function retireFor(displayId) {
+  const list = retiring.get(displayId);
+  if (!list) return;
+  retiring.delete(displayId);
+  for (const r of list) {
+    if (process.platform === 'win32' && r.win && !r.win.isDestroyed()) {
+      try { winMount()?.detachWorker(r.win); } catch {}
+    }
+    try { if (r.win && !r.win.isDestroyed()) r.win.destroy(); } catch {}
+  }
 }
 function restartWorkers() {
   if (!active) return;
@@ -233,10 +267,24 @@ function reloadWorker(w) {
 }
 function failWorker(w, why) {
   console.error('[wallpaper] worker failed:', why, `(display ${w.index})`);
+  const wcId = w.win && !w.win.isDestroyed() ? (() => { try { return w.win.webContents.id; } catch { return null; } })() : null;
   try { w.win.destroy(); } catch {}
   workers.delete(w.display.id);
-  wcIndex.delete(w.win.webContents.id);
+  if (wcId !== null) wcIndex.delete(wcId);
   if (workers.size === 0 && active) {
+    // 換角失敗 → 回退：把 retiring 的舊 worker 重新扶正（桌布不中斷）
+    for (const [did, list] of [...retiring.entries()]) {
+      const keep = list.find((r) => r.win && !r.win.isDestroyed());
+      if (keep) {
+        retiring.set(did, list.filter((r) => r !== keep));
+        keep.retired = false;
+        workers.set(did, keep);
+        wcIndex.set(keep.win.webContents.id, keep);
+        notify('BA Memorial Lobby', `桌布更新失敗，保留原桌布（${why}）`);
+        broadcastState();
+        return;
+      }
+    }
     active = false;
     stopPollers();
     notify('BA Memorial Lobby', '桌布已停止（worker 無法啟動）');
@@ -489,11 +537,11 @@ function setConfig(patch) {
   if (prev.fps !== cfg.fps || prev.pauseBattery !== cfg.pauseBattery) applyBattery();
   if (!prev.pauseFullscreen && cfg.pauseFullscreen === false) { /* noop */ }
   if (prev.pauseFullscreen !== cfg.pauseFullscreen && !cfg.pauseFullscreen) { lastFsState = false; setPaused(false); }
-  // lobby/sound 變更 → 重建 worker（renderer 於載入時讀 config）
+  // lobby/sound 變更 → 無縫換角（新 worker ready 顯示後才拆舊的；renderer 於載入時讀 config）
   if (active && (prev.lobby !== cfg.lobby
     || JSON.stringify(prev.perScreen) !== JSON.stringify(cfg.perScreen)
     || prev.sound !== cfg.sound)) {
-    restartWorkers();
+    swapWorkers();
   }
   if ('enabled' in p && p.enabled && !active) start();
   if ('enabled' in p && !p.enabled && active) stop();
@@ -531,6 +579,7 @@ ipcMain.on('wallpaper-stage', (e, stage) => {
     w.reloading = false;
     w.lastBeat = Date.now();
     try { if (!w.win.isVisible() && !TYPE_OVERRIDE) w.win.showInactive(); } catch {}
+    retireFor(w.display.id);   // 無縫換角：新的就位才拆舊的
     console.log(`[wallpaper] worker ${w.index} ready`);
     // 驗收旋鈕：CAPTURE_WORKER=<file> 在就緒後截第一個 worker（自動化測試用）
     if (process.env.CAPTURE_WORKER) {

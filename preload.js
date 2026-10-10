@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('ba', {
   wallpaperSetAutostart: (on) => ipcRenderer.invoke('wallpaper-set-autostart', !!on),
   wallpaperBeat: () => ipcRenderer.send('wallpaper-heartbeat'),
   wallpaperStage: (s) => ipcRenderer.send('wallpaper-stage', String(s || '')),
+  onOpenWallpaperSettings: (cb) => ipcRenderer.on('open-wallpaper-settings', () => { try { cb(); } catch {} }),
   onWallpaperCursor: (cb) => ipcRenderer.on('wallpaper-cursor', (_, p) => { try { cb(p); } catch {} }),
   onWallpaperFps: (cb) => ipcRenderer.on('wallpaper-fps', (_, v) => { try { cb(v); } catch {} }),
   onWallpaperPaused: (cb) => ipcRenderer.on('wallpaper-pause', (_, v) => { try { cb(v); } catch {} }),
