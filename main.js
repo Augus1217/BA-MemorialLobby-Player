@@ -10,8 +10,40 @@ const tar = require('tar');
 
 const DEV_URL = 'http://127.0.0.1:5173';
 const isDev = !app.isPackaged;
+const wallpaper = require('./wallpaper');
+const { createTray } = require('./tray');
 let win = null;
 let vite = null;
+
+// Linux Wayland session：Electron 預設仍走 X11(XWayland)，明確 pin 住——
+// type:'desktop' 桌布視窗（_NET_WM_WINDOW_TYPE_DESKTOP）只有在 X11 下有正規路線
+// （wallpaper-mode 計畫：GNOME Wayland 原生不支援 → XWayland 備援）。
+if (process.platform === 'linux' && !process.env.ELECTRON_OZONE_PLATFORM_HINT && !process.env.OZONE_PLATFORM) {
+  app.commandLine.appendSwitch('ozone-platform-hint', 'x11');
+}
+
+// 單例鎖（wallpaper-mode 計畫）：第二實例把意圖轉交首實例——
+// 帶 --wallpaper 的 argv → 首實例啟動桌布；否則聚焦主視窗。
+const gotTheLock = app.requestSingleInstanceLock();
+function showPlayer() {
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    return;
+  }
+  createWindow();
+}
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_e, argv) => {
+    if (argv.includes('--wallpaper')) {
+      try { wallpaper.start(); } catch (e) { console.error('[wallpaper] second-instance start failed:', e.message); }
+    }
+    showPlayer();
+  });
+}
 
 function findNode() {
   if (process.env.NODE_BIN) return process.env.NODE_BIN;
@@ -800,6 +832,7 @@ ipcMain.handle('assets-manage-delete', async (event, keys) => {
 });
 
 app.whenReady().then(async () => {
+  if (!gotTheLock) return;
   // Register app:// protocol for serving assets in production
   if (!isDev) {
     protocol.handle('app', (request) => {
@@ -817,12 +850,22 @@ app.whenReady().then(async () => {
     }
   }
   createWindow();
+  try { createTray({ showPlayer }); } catch (e) { console.error('[tray] init failed:', e.message); }
+  // --wallpaper CLI（開機自啟）→ 直接進桌布；packaged 下設定 enabled 亦自動恢復
+  // （dev 模式需明確 --wallpaper 或 BA_WALLPAPER=1，避免開發時意外蓋桌面）
+  const wantWallpaper = process.argv.includes('--wallpaper') || process.env.BA_WALLPAPER === '1';
+  try {
+    if (wantWallpaper) wallpaper.start();
+    else if (!isDev) wallpaper.restoreIfEnabled();
+  } catch (e) { console.error('[wallpaper] start failed:', e.message); }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on('window-all-closed', () => {
+  // 桌布運行中時 worker 視窗還在，本事件不會觸發；真正全部關閉＝桌布已停 → 照舊退出
+  if (wallpaper.isActive()) return;
   if (vite) vite.kill();
   if (process.platform !== 'darwin') app.quit();
 });

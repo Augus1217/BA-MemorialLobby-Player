@@ -26,12 +26,15 @@
     "files": [
       "dist/**",
       "main.js",
+      "wallpaper.js",
+      "tray.js",
       "preload.js",
       "package.json",
       "index.prod.html",
       "assets/ui/ui_i18n.json",
       "assets/bgm/Theme_152_Title.ogg",
-      "favicon.ico"
+      "favicon.ico",
+      "build/icon.png"
     ],
     "linux": {
       "target": [

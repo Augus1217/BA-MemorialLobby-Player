@@ -34,4 +34,18 @@ contextBridge.exposeInMainWorld('ba', {
   verifyPacks: () => ipcRenderer.invoke('assets-verify'),
   repairPacks: (keys) => ipcRenderer.invoke('assets-repair', keys),
   cleanOrphans: () => ipcRenderer.invoke('assets-clean-orphans'),
+  // ---- 桌布模式（wallpaper.js：worker 心跳/設定；manager 設定分頁控制）----
+  wallpaperConfig: () => ipcRenderer.invoke('wallpaper-config'),
+  wallpaperStatus: () => ipcRenderer.invoke('wallpaper-status'),
+  wallpaperSetConfig: (patch) => ipcRenderer.invoke('wallpaper-set-config', patch),
+  wallpaperStart: () => ipcRenderer.invoke('wallpaper-start'),
+  wallpaperStop: () => ipcRenderer.invoke('wallpaper-stop'),
+  wallpaperGetAutostart: () => ipcRenderer.invoke('wallpaper-get-autostart'),
+  wallpaperSetAutostart: (on) => ipcRenderer.invoke('wallpaper-set-autostart', !!on),
+  wallpaperBeat: () => ipcRenderer.send('wallpaper-heartbeat'),
+  wallpaperStage: (s) => ipcRenderer.send('wallpaper-stage', String(s || '')),
+  onWallpaperCursor: (cb) => ipcRenderer.on('wallpaper-cursor', (_, p) => { try { cb(p); } catch {} }),
+  onWallpaperFps: (cb) => ipcRenderer.on('wallpaper-fps', (_, v) => { try { cb(v); } catch {} }),
+  onWallpaperPaused: (cb) => ipcRenderer.on('wallpaper-pause', (_, v) => { try { cb(v); } catch {} }),
+  onWallpaperState: (cb) => ipcRenderer.on('wallpaper-state', (_, v) => { try { cb(v); } catch {} }),
 });

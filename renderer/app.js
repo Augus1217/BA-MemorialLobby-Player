@@ -381,6 +381,11 @@ const fixAdditiveSlots = (obj) => {
 // blend 尊重 skel（additive=One/One、normal=OMISA）。因子 ×4.89 的 straight 頂點色
 // 詮釋已被實測否定（全屏飽和；實機 beam 細微），詳見 docs/game_shader_ref/README.md。
 const HDR_MODE = !/(?:^|&)hdr=0/.test(location.hash + location.search);
+
+// ---- 桌布模式（wallpaper.js worker 專用，#wallpaper=1&autostart=1）----
+// 無 HUD、無 TTS、ticker.maxFPS=fps、BGM 預設靜音；游標/暫停/fps 由 main 下發。
+const WALLPAPER_MODE = /(?:^|[?#&])wallpaper=1/.test(location.search + location.hash);
+let WCFG = { fps: 30, sound: false, interact: false };
 const GAMMA_TO_LINEAR = (x) => x <= 0.04045 ? x/12.92 : Math.pow((x+0.055)/1.055, 2.4);
 
 // ---- 頂點色 PMAGammaToTargetSpace（九輪 shader 鐵譜）--------------------------------
@@ -1597,6 +1602,22 @@ function toggleBgm() {
     setBgm(bgmForLobby(currentLobby));
   }
   log(`BGM: ${bgmOn ? '開' : '關'}`);
+}
+
+// ---- 桌布：全螢幕前景/電池暫停（main 端 wallpaper.js 下發）----
+// 暫停＝ticker 停止＋BGM 靜音（使用者正看全螢幕內容時，背景不該耗 GPU/出聲）
+let wallpaperPaused = false;
+function setWallpaperPaused(p) {
+  p = !!p;
+  if (p === wallpaperPaused) return;
+  wallpaperPaused = p;
+  try { if (p) app.ticker.stop(); else app.ticker.start(); } catch {}
+  try {
+    if (bgmAudio) {
+      if (p) bgmAudio.pause();
+      else if (bgmOn) bgmAudio.play().catch(() => {});
+    }
+  } catch {}
 }
 
 // BGM 對照以角色核心名建檔（如 Airi_home），但 currentLobby 可能是資源複製版
@@ -7479,10 +7500,24 @@ async function loadBootData() {
 
 // ---- init：四個純粹的 stage ----
 async function init() {
-  // Stage 0：intro 音軌 fire-and-forget（首訪 intro 未裝 → 靜默）
-  startIntroAudioEarly();
-  // Web 自動播放需手勢解鎖：loading 期間點一下即有音樂
-  unlockIntroAudioOnGesture();
+  // 桌布模式：main 端 wallpaper.js 拉起的 worker。設定由 host 下發（fps/sound/interact）。
+  // 常駐桌面不該出聲 → BGM 預設靜音（config.sound=true 才開）。
+  if (WALLPAPER_MODE) {
+    document.body.classList.add('wallpaperMode');
+    try {
+      const wcfg = await window.ba?.wallpaperConfig?.();
+      if (wcfg) WCFG = { ...WCFG, ...wcfg };
+    } catch {}
+    if (!WCFG.sound) bgmOn = false;
+    try { window.ba?.wallpaperStage?.('booting'); } catch {}
+  }
+
+  // Stage 0：intro 音軌 fire-and-forget（首訪 intro 未裝 → 靜默）；桌布不起音軌
+  if (!WALLPAPER_MODE) {
+    startIntroAudioEarly();
+    // Web 自動播放需手勢解鎖：loading 期間點一下即有音樂
+    unlockIntroAudioOnGesture();
+  }
 
   // Stage 1：i18n（Pages 靜態檔案，瞬間完成）
   await loadI18n();
@@ -7520,6 +7555,11 @@ async function init() {
   await app.init({ resizeTo: window, antialias: true, backgroundColor: bgOv ? parseInt(bgOv[1], 16) : 0x1f1825, autoDensity: true });
   const canvas = app.canvas;
   document.getElementById('app').appendChild(canvas);
+
+  // 桌布：fps 上限（預設 30；電池/設定變更由 main 下發 onWallpaperFps）
+  if (WALLPAPER_MODE) {
+    app.ticker.maxFPS = Math.max(10, Number(WCFG.fps) || 30);
+  }
 
   // ---- 自研線性合成管線（hdr；hdr=0 退回直渲）--------------------------------
   // 遊戲在線性緩衝合成、輸出前 sRGB encode。sRGB 畫布直渲會讓線性烘焙值與 dst 項
@@ -8063,6 +8103,23 @@ async function init() {
   });
   document.addEventListener('mouseleave', () => { mouse.active = false; });
   window.addEventListener('blur', () => { mouse.active = false; });
+  if (WALLPAPER_MODE) {
+    // Linux 無 setIgnoreMouseEvents forward → main 端輪詢游標下發（眼球/相機跟隨）；
+    // Win/mac 走原生 forward，此監聽不會被觸發（main 不發）。
+    window.ba?.onWallpaperCursor?.((p) => {
+      if (!p) return;
+      mouse.x = p.x;
+      mouse.y = p.y;
+      mouse.active = true;
+    });
+    window.ba?.onWallpaperFps?.((v) => {
+      const n = Number(v);
+      if (n >= 5) app.ticker.maxFPS = n;
+    });
+    window.ba?.onWallpaperPaused?.((p) => setWallpaperPaused(p));
+    // 心跳：watchdog 偵測 renderer 掛死 → 自動 reload
+    setInterval(() => { try { window.ba?.wallpaperBeat?.(); } catch {} }, 2000);
+  }
   btnCtlBgm.addEventListener('click', toggleBgm);
   // Skip button mirrors the game: UILobby.OnClickMemoryLobbySkip opens a
   // UIPopup_System confirm first; MemoryLobbySkip() runs only on OK.
@@ -8355,6 +8412,8 @@ async function onSpaceVerify() {
       ? m[1]
       : (remembered && LOBBY_INDEX[remembered] ? remembered : ORDER[0]);
     await loadLobby(first);
+    // 桌布 worker：資產就緒才 show（免開機閃屏）；watchdog 由此進入心跳巡檢
+    if (WALLPAPER_MODE) { try { window.ba?.wallpaperStage?.('ready'); } catch {} }
   } else {
     showErr(t('msg.emptyIndex'));
   }
