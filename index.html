@@ -855,6 +855,7 @@
   <div id="settingsPanel">
     <div class="set-tabs">
       <button id="setTabBtnMain" class="on" data-i18n="set.title">設定</button>
+      <button id="setTabBtnWall" data-i18n="set.wall.tab">桌布</button>
       <button id="setTabBtnSpace" data-i18n="set.space.title">管理空間</button>
       <button id="setTabBtnRank" data-i18n="set.rankTitle">人氣排行</button>
       <button id="setTabBtnAbout" data-i18n="set.about">關於</button>
@@ -909,6 +910,34 @@
     </div>
 
     </div><!-- /setTabMain -->
+
+    <div id="setTabWall" style="display:none;">
+      <div class="set-section">
+        <div class="set-head" data-i18n="set.wall.title">互動桌布</div>
+        <div id="setWallStatus" style="font-size: 14px; color:#c6d2f5; margin:4px 0 8px;"></div>
+        <div style="margin: 6px 0 10px;">
+          <button id="setWallToggle" class="btnTxt primary" data-i18n="set.wall.start">啟動桌布</button>
+        </div>
+        <div class="panel-row">
+          <span class="lbl" data-i18n="set.wall.lobby">桌布大廳</span>
+          <select id="setWallLobby" style="background:rgba(255,255,255,.08); color:#e6ecff; border:none; border-radius:6px; padding:6px 8px; max-width:280px;"></select>
+        </div>
+        <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setWallSoundCk"> <span data-i18n="set.wall.sound">桌布播放音樂</span></label>
+        <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setWallInteractCk"> <span data-i18n="set.wall.interact">互動模式（桌布可點擊）</span></label>
+        <div class="panel-row">
+          <span class="lbl" data-i18n="set.wall.fps">影格率上限</span>
+          <div class="segs" id="setWallFpsSegs">
+            <button data-f="15">15</button>
+            <button data-f="24">24</button>
+            <button data-f="30" class="on">30</button>
+          </div>
+        </div>
+        <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setWallFullCk" checked> <span data-i18n="set.wall.fullscreen">有全螢幕應用在前時暫停</span></label>
+        <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setWallBatteryCk" checked> <span data-i18n="set.wall.battery">電池供電時降低影格率</span></label>
+        <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setWallAutostartCk"> <span data-i18n="set.wall.autostart">開機自動啟動桌布</span></label>
+        <div id="setWallNote" style="font-size: 13px; color:#9aa4e0; margin-top:8px; line-height:1.7;"></div>
+      </div>
+    </div>
 
     <div id="setTabSpace" style="display:none;">
       <div id="setSpaceSummary" style="font-size: 14px; color:#c6d2f5; margin-bottom:4px;"></div>

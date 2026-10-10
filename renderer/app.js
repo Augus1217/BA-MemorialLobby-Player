@@ -4500,7 +4500,7 @@ function syncRotateHint() {
 }
 // ---- 設定／關於／管理空間分頁（共用視窗）----
 function switchSettingsTab(tab) {
-  for (const k of ['Main', 'Space', 'Rank', 'About']) {
+  for (const k of ['Main', 'Wall', 'Space', 'Rank', 'About']) {
     document.getElementById('setTab' + k).style.display = tab === k.toLowerCase() ? '' : 'none';
     document.getElementById('setTabBtn' + k)?.classList.toggle('on', tab === k.toLowerCase());
   }
@@ -4508,6 +4508,75 @@ function switchSettingsTab(tab) {
   if (tab === 'about') { syncAboutSection(); fitSteamWidget(); }
   if (tab === 'space') refreshSpaceManager();
   if (tab === 'rank') renderRankList();
+  if (tab === 'wall') refreshWallTab();
+}
+
+// ---- 桌布分頁狀態同步（wallpaper.js host → UI）----
+let _wallStatus = null;
+function wallSegSync(fps) {
+  document.querySelectorAll('#setWallFpsSegs button').forEach((b) => {
+    b.classList.toggle('on', Number(b.dataset.f) === Number(fps));
+  });
+}
+function fillWallLobbySelect(current) {
+  const sel = document.getElementById('setWallLobby');
+  if (!sel) return;
+  if (!sel.options.length && ORDER.length) {
+    const frag = document.createDocumentFragment();
+    const optFollow = document.createElement('option');
+    optFollow.value = '';
+    optFollow.textContent = t('set.wall.followPlayer');
+    frag.appendChild(optFollow);
+    for (const key of ORDER) {
+      const info = lobbyGroupInfo(key);
+      const rec = studentForLobby(key);
+      const label = (studentDisplay(rec) || prettyName(key))
+        + (info.labels.length ? ' · ' + info.labels.join(' ') : '');
+      const o = document.createElement('option');
+      o.value = key;
+      o.textContent = label;
+      frag.appendChild(o);
+    }
+    sel.appendChild(frag);
+  }
+  if (current !== undefined) sel.value = current || '';
+}
+async function refreshWallTab() {
+  if (!window.ba?.wallpaperStatus) return;
+  let s = null;
+  try { s = await window.ba.wallpaperStatus(); } catch {}
+  if (!s) return;
+  _wallStatus = s;
+  fillWallLobbySelect(s.config.lobby);
+  const st = document.getElementById('setWallStatus');
+  if (st) {
+    st.textContent = s.active
+      ? (s.paused ? t('set.wall.statusPaused') : t('set.wall.statusOn', { n: Math.max(1, s.workers.length) }))
+      : t('set.wall.statusOff');
+  }
+  const btn = document.getElementById('setWallToggle');
+  if (btn) btn.textContent = s.active ? t('set.wall.stop') : t('set.wall.start');
+  const cks = {
+    setWallSoundCk: !!s.config.sound,
+    setWallInteractCk: !!s.config.interact,
+    setWallFullCk: !!s.config.pauseFullscreen,
+    setWallBatteryCk: !!s.config.pauseBattery,
+    setWallAutostartCk: !!s.autostart,
+  };
+  for (const [id, v] of Object.entries(cks)) {
+    const el = document.getElementById(id);
+    if (el) el.checked = v;
+  }
+  wallSegSync(s.config.fps);
+  const note = document.getElementById('setWallNote');
+  if (note) {
+    const c = s.capabilities || {};
+    const bits = [];
+    if (c.x11Available === false) bits.push(t('set.wall.noteWayland'));
+    if (c.workerW) bits.push(t('set.wall.noteWin'));
+    if (c.fullscreenPause === false) bits.push(t('set.wall.noteNoFs'));
+    note.textContent = bits.join(' ');
+  }
 }
 // ---- Steam widget 自動縮放（原生 646px，窄視窗等比縮）----
 function fitSteamWidget() {
@@ -8205,6 +8274,49 @@ async function init() {
   document.getElementById('setRankRefresh')?.addEventListener('click', () => renderRankList(true));
   document.getElementById('setRankJoin')?.addEventListener('click', () => switchSettingsTab('main'));
   document.getElementById('setTabBtnAbout')?.addEventListener('click', () => switchSettingsTab('about'));
+  // ---- 桌布設定分頁（W3）：僅 Electron 顯示；控制 wallpaper.js host ----
+  if (!window.ba?.__electron) {
+    document.getElementById('setTabBtnWall')?.remove();
+  } else {
+    document.getElementById('setTabBtnWall')?.addEventListener('click', () => switchSettingsTab('wall'));
+    document.getElementById('setWallToggle')?.addEventListener('click', async () => {
+      const s = _wallStatus || (await window.ba.wallpaperStatus?.().catch(() => null));
+      if (!s) return;
+      if (s.active) await window.ba.wallpaperStop?.();
+      else await window.ba.wallpaperStart?.();
+      refreshWallTab();
+    });
+    document.getElementById('setWallLobby')?.addEventListener('change', (e) => {
+      window.ba.wallpaperSetConfig?.({ lobby: e.target.value || '' });
+    });
+    document.getElementById('setWallSoundCk')?.addEventListener('change', (e) => {
+      window.ba.wallpaperSetConfig?.({ sound: !!e.target.checked });
+    });
+    document.getElementById('setWallInteractCk')?.addEventListener('change', (e) => {
+      window.ba.wallpaperSetConfig?.({ interact: !!e.target.checked });
+    });
+    document.getElementById('setWallFullCk')?.addEventListener('change', (e) => {
+      window.ba.wallpaperSetConfig?.({ pauseFullscreen: !!e.target.checked });
+    });
+    document.getElementById('setWallBatteryCk')?.addEventListener('change', (e) => {
+      window.ba.wallpaperSetConfig?.({ pauseBattery: !!e.target.checked });
+    });
+    document.getElementById('setWallAutostartCk')?.addEventListener('change', async (e) => {
+      const on = await window.ba.wallpaperSetAutostart?.(!!e.target.checked).catch(() => null);
+      if (on !== null && e.target.checked !== !!on) e.target.checked = !!on;
+    });
+    document.getElementById('setWallFpsSegs')?.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      const fps = Number(b.dataset.f) || 30;
+      wallSegSync(fps);
+      window.ba.wallpaperSetConfig?.({ fps });
+    });
+    // host 廣播狀態變更（tray/worker 啟停）→ 分頁開著就即時同步
+    window.ba.onWallpaperState?.(() => {
+      if (document.getElementById('setTabWall')?.style.display === '') refreshWallTab();
+    });
+  }
   // 管理空間工具列（靜態元素，只綁一次）
   document.getElementById('setSpaceSearch')?.addEventListener('input', (e) => {
     _spaceQuery = e.target.value || '';
