@@ -27,6 +27,7 @@
       "dist/**",
       "main.js",
       "wallpaper.js",
+      "wallpaper-win.js",
       "tray.js",
       "preload.js",
       "package.json",
@@ -35,6 +36,9 @@
       "assets/bgm/Theme_152_Title.ogg",
       "favicon.ico",
       "build/icon.png"
+    ],
+    "asarUnpack": [
+      "node_modules/koffi/**"
     ],
     "linux": {
       "target": [
@@ -116,6 +120,7 @@
   "dependencies": {
     "@esotericsoftware/spine-pixi-v8": "^4.2.119",
     "fflate": "^0.8.3",
+    "koffi": "^3.3.3",
     "pixi.js": "^8.19.0",
     "tar": "^7.5.22"
   }

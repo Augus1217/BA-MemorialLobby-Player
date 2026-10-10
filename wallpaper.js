@@ -16,6 +16,15 @@ const isDev = !app.isPackaged;
 const FORWARD_OK = process.platform === 'win32' || process.platform === 'darwin';
 // 測試/除錯旋鈕：BA_WALLPAPER_TYPE=normal → 以一般視窗代理桌布（不動真桌面）
 const TYPE_OVERRIDE = process.env.BA_WALLPAPER_TYPE || null;
+// Windows WorkerW 掛載（koffi）——只在 win32 惰性載入，載入失敗 = 降級成全螢幕窗
+let _winMod;
+function winMount() {
+  if (process.platform !== 'win32') return null;
+  if (_winMod !== undefined) return _winMod;
+  try { _winMod = require('./wallpaper-win'); }
+  catch (e) { console.error('[wallpaper] wallpaper-win load failed:', e.message); _winMod = null; }
+  return _winMod;
+}
 
 const DEFAULT_CFG = {
   enabled: false,       // 期望狀態：app 啟動時（packaged）自動恢復桌布
@@ -36,7 +45,7 @@ let powerBound = false;
 const workers = new Map();   // display.id → worker record
 const wcIndex = new Map();   // webContents.id → worker record
 const stateCbs = [];
-let cursorTimer = null, fsTimer = null, watchdogTimer = null, displayDebounce = null;
+let cursorTimer = null, fsTimer = null, watchdogTimer = null, displayDebounce = null, winHealthTimer = null;
 
 // ---------------------------------------------------------------------------
 // config 持久化
@@ -143,6 +152,15 @@ function createWorker(display, index) {
     try {
       if (win.isDestroyed()) return;
       applyIgnoreMouse(rec);
+      // Windows：掛進 WorkerW（桌面層）；失敗 = 降級為 frameless 全螢幕窗＋通知
+      if (process.platform === 'win32') {
+        const m = winMount();
+        if (m) {
+          const r = m.attachWorker(win, display);
+          rec.winHost = r.ok ? r.host : null;
+          if (!r.ok) notify('BA Memorial Lobby', `桌布掛載失敗：${r.reason}`);
+        }
+      }
       // 代理測試模式（BA_WALLPAPER_TYPE=normal）即時顯示；真桌布等 stage=ready
       if (TYPE_OVERRIDE) win.show();
     } catch {}
@@ -166,7 +184,11 @@ function createWorkers() {
   displays.forEach((d, i) => createWorker(d, i));
 }
 function destroyWorkers() {
-  for (const w of [...workers.values()]) { try { w.win.destroy(); } catch {} }
+  for (const w of [...workers.values()]) {
+    // Windows：先從 WorkerW 卸下再銷毀（SetParent(NULL)）
+    if (process.platform === 'win32') { try { winMount()?.detachWorker(w.win); } catch {} }
+    try { w.win.destroy(); } catch {}
+  }
   workers.clear();
   wcIndex.clear();
 }
@@ -247,7 +269,13 @@ function fsCheckLinux() {
     });
   });
 }
-function fsCheckWin() { /* W4 實作 */ }
+function fsCheckWin() {
+  // W4：SHQueryUserNotificationState（全螢幕 app/D3D 獨占/簡報模式/鎖屏 → 暫停）
+  const m = winMount();
+  if (!m) return;
+  const fs = !!m.isFullscreenFront();
+  if (fs !== lastFsState) { lastFsState = fs; setPaused(fs); }
+}
 function setPaused(p) {
   p = !!p;
   if (p === paused) return;
@@ -285,6 +313,10 @@ function startPollers() {
   cursorTimer = setInterval(sendCursor, 80);
   watchdogTimer = setInterval(watchdogTick, 5000);
   fsTimer = setInterval(fsCheck, 2000);
+  // Windows：WorkerW 被系統回收/explorer 重啟 → 5s 健康巡檢重掛
+  if (process.platform === 'win32') {
+    winHealthTimer = setInterval(winHealthTick, 5000);
+  }
   if (!powerBound) {
     powerBound = true;
     powerMonitor.on('on-battery', applyBattery);
@@ -292,10 +324,24 @@ function startPollers() {
   }
   applyBattery();
 }
+function winHealthTick() {
+  if (!active) return;
+  const m = winMount();
+  if (!m) return;
+  for (const w of [...workers.values()]) {
+    if (!w.win || w.win.isDestroyed()) continue;
+    try {
+      if (m.healthCheck(w.win, w.display) === 'degraded') {
+        w.winHost = null;
+      }
+    } catch {}
+  }
+}
 function stopPollers() {
   if (cursorTimer) { clearInterval(cursorTimer); cursorTimer = null; }
   if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
   if (fsTimer) { clearInterval(fsTimer); fsTimer = null; }
+  if (winHealthTimer) { clearInterval(winHealthTimer); winHealthTimer = null; }
 }
 
 // 多螢幕變動 → 重建（debounce）
@@ -412,6 +458,7 @@ function status() {
     capabilities: {
       desktopType: process.platform !== 'win32',
       workerW: process.platform === 'win32',
+      workerWMounted: process.platform === 'win32' ? !!winMount() : null,
       cursorForward: FORWARD_OK,
       cursorPoll: true,
       // linux 需 DISPLAY（X11/XWayland）才有全螢幕偵測；Wayland 原生無解（計畫標註）
@@ -421,6 +468,7 @@ function status() {
     },
     workers: [...workers.values()].map((w) => ({
       displayIndex: w.index, ready: w.ready, stage: w.bootStage, reloads: w.reloads,
+      winHost: process.platform === 'win32' ? !!w.winHost : undefined,
     })),
   };
 }
