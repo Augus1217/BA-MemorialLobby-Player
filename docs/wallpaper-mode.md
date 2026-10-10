@@ -60,6 +60,17 @@
 
 日誌前綴：main `[wallpaper]`／`[wallpaper-win]`／`[tray]`；worker console 以 `[wallpaper]` 轉發（僅 dev）。
 
+## 已知陷阱：Linux `focusable:false` → override-redirect
+
+**Chromium 的 X11/ozone backend 對 `focusable:false` 的視窗一律建 override-redirect（OR）**，
+與 `type:'desktop'` 無關。OR 視窗繞過 KWin 管理（不進 `_NET_CLIENT_LIST`），KWin 以
+Unmanaged 層渲染 → **蓋過面板、圖示與所有視窗**（實測 KWin 6.6.6 / Ubuntu 26.04 Wayland session）。
+
+診斷指紋：`xwininfo -id <win> | grep Override` = yes；`xprop -root _NET_CLIENT_LIST_STACKING` 找不到該視窗。
+
+修法＝Linux worker 用 `focusable: true`＋`showInactive()`（不搶焦點；`ignoreMouseEvents(true)`
+下也不會收到點擊）。修正後：OR=no、進 stacking list 且在最底層、面板/圖示/視窗全部在其上。
+
 ## 驗收
 
 ```bash

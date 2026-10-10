@@ -106,7 +106,9 @@ function createWorker(display, index) {
     // mac/linux：type:'desktop' 原生桌面層（mac=kCGDesktopWindowLevel-1、linux=_NET_WM_WINDOW_TYPE_DESKTOP）
     type: TYPE_OVERRIDE || (isWin ? 'normal' : 'desktop'),
     frame: false,
-    focusable: false,     // 桌布不搶焦點（滑鼠事件仍可收）
+    // Linux：focusable:false 會讓 Chromium 建 override-redirect 視窗（KWin 不管理 →
+    // Unmanaged 層蓋過面板/所有視窗；實測 KWin 6.6 Wayland）。改 true＋showInactive 不搶焦點。
+    focusable: process.platform === 'linux',
     skipTaskbar: true,
     resizable: false,
     movable: false,
@@ -528,7 +530,7 @@ ipcMain.on('wallpaper-stage', (e, stage) => {
     w.ready = true;
     w.reloading = false;
     w.lastBeat = Date.now();
-    try { if (!w.win.isVisible() && !TYPE_OVERRIDE) w.win.show(); } catch {}
+    try { if (!w.win.isVisible() && !TYPE_OVERRIDE) w.win.showInactive(); } catch {}
     console.log(`[wallpaper] worker ${w.index} ready`);
     // 驗收旋鈕：CAPTURE_WORKER=<file> 在就緒後截第一個 worker（自動化測試用）
     if (process.env.CAPTURE_WORKER) {
