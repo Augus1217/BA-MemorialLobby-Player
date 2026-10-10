@@ -539,12 +539,13 @@
     body.focusMode #hud, body.focusMode #fx, body.focusMode #btnStudents,
     body.focusMode #sidePanel, body.focusMode #exportPanel,
     body.focusMode #skipConfirm, body.focusMode #settingsPanel { display: none !important; }
-    /* 桌布模式（wallpaper.js worker）：UI 全隱、游標隱藏；互動/游標由主程序下發 */
+    /* 桌布模式（wallpaper.js worker）：UI 全隱（對話框除外＝互動回饋）；
+       游標不可 hide——Chromium 對 focusable 視窗的游標會被 compositor 採用，
+       hide 掉會讓滑鼠移過桌面時整個消失 */
     body.wallpaperMode #hud, body.wallpaperMode #fx, body.wallpaperMode #btnStudents,
     body.wallpaperMode #sidePanel, body.wallpaperMode #exportPanel, body.wallpaperMode #skipConfirm,
     body.wallpaperMode #settingsPanel, body.wallpaperMode #loadingScreen, body.wallpaperMode #infoPanel,
-    body.wallpaperMode #chatDialog, body.wallpaperMode #toast, body.wallpaperMode #whiteflash { display: none !important; }
-    body.wallpaperMode { cursor: none; }
+    body.wallpaperMode #toast, body.wallpaperMode #whiteflash { display: none !important; }
 
     /* ---- 角色介紹面板（ⓘ）---- */
     #infoPanel {
