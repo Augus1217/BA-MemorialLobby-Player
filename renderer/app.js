@@ -4573,6 +4573,43 @@ function renderWallLobbyList(current) {
   }
   list.replaceChildren(frag);
 }
+// ---- 桌布啟動過渡：_wallStarting 起至「active 且全部 worker ready」----
+// worker 載資產需數秒，期間按鈕/狀態列顯示「啟動中…」並鎖鈕，避免「已啟動但桌面還沒變」空窗。
+let _wallStarting = false;
+function wallBootPending(s) {
+  return _wallStarting && !(s?.active && s.workers?.length && s.workers.every((w) => w.ready));
+}
+function syncWallRunState(s) {
+  const booting = wallBootPending(s);
+  const st = document.getElementById('setWallStatus');
+  if (st) {
+    st.textContent = booting
+      ? t('set.wall.starting')
+      : (s.active
+        ? (s.paused ? t('set.wall.statusPaused') : t('set.wall.statusOn', { n: Math.max(1, s.workers.length) }))
+        : t('set.wall.statusOff'));
+  }
+  const btn = document.getElementById('setWallToggle');
+  if (btn) {
+    btn.disabled = booting;
+    btn.textContent = booting ? t('set.wall.starting') : (s.active ? t('set.wall.stop') : t('set.wall.start'));
+  }
+}
+function pollWallBoot() {
+  const t0 = Date.now();
+  const timer = setInterval(async () => {
+    let s = null;
+    try { s = await window.ba.wallpaperStatus(); } catch {}
+    // 就緒（或 20s 逾時保險）→ 解除過渡；期間只輕量刷新狀態列＋按鈕，不重建大廳列表
+    if (!s || !wallBootPending(s) || Date.now() - t0 > 20000) {
+      _wallStarting = false;
+      clearInterval(timer);
+      refreshWallTab();
+      return;
+    }
+    syncWallRunState(s);
+  }, 600);
+}
 async function refreshWallTab() {
   if (!window.ba?.wallpaperStatus) return;
   let s = null;
@@ -4580,14 +4617,7 @@ async function refreshWallTab() {
   if (!s) return;
   _wallStatus = s;
   renderWallLobbyList(s.config.lobby);
-  const st = document.getElementById('setWallStatus');
-  if (st) {
-    st.textContent = s.active
-      ? (s.paused ? t('set.wall.statusPaused') : t('set.wall.statusOn', { n: Math.max(1, s.workers.length) }))
-      : t('set.wall.statusOff');
-  }
-  const btn = document.getElementById('setWallToggle');
-  if (btn) btn.textContent = s.active ? t('set.wall.stop') : t('set.wall.start');
+  syncWallRunState(s);
   const cks = {
     setWallSoundCk: !!s.config.sound,
     setWallInteractCk: !!s.config.interact,
@@ -8314,9 +8344,16 @@ async function init() {
     document.getElementById('setWallToggle')?.addEventListener('click', async () => {
       const s = _wallStatus || (await window.ba.wallpaperStatus?.().catch(() => null));
       if (!s) return;
-      if (s.active) await window.ba.wallpaperStop?.();
-      else await window.ba.wallpaperStart?.();
-      refreshWallTab();
+      if (s.active) {
+        await window.ba.wallpaperStop?.();
+        refreshWallTab();
+      } else {
+        // 過渡：立即顯示「啟動中…」並鎖鈕，全部 worker 就緒後才轉「停止桌布」
+        _wallStarting = true;
+        syncWallRunState({ ...s, active: true, workers: [] });
+        try { await window.ba.wallpaperStart?.(); } catch { _wallStarting = false; }
+        pollWallBoot();
+      }
     });
     document.getElementById('setWallList')?.addEventListener('click', (e) => {
       const b = e.target.closest('.sb-item');
