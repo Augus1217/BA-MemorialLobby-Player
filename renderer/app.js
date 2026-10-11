@@ -267,7 +267,8 @@ function applyCtlI18n() {
 // 註冊 FontFace。未載入前以系統字體 fallback，註冊成功後瀏覽器自動重繪。
 async function loadGameFonts() {
   const defs = [
-    { family: 'BA MPlus1p',    file: 'assets/fonts/BA-MPLUS1p-Medium.ttf',      fmt: 'truetype' },
+    // MPLUS 已隨 Assets repo cb8687d 停用（改用遊戲真實對話字體）——
+    // 舊引用會在全新用戶端 404（core 包無此檔），一律以 BA MalgunGothic 領頭。
     { family: 'BA NotoSansTC', file: 'assets/fonts/BA-NotoSansTC-Medium.otf',   fmt: 'opentype' },
     { family: 'BA NotoSans',   file: 'assets/fonts/BA-NotoSans-Regular.ttf',    fmt: 'truetype' },
     // 對話框主字體（ja/jp/kr/en 設計意圖＝JP client UseLocalizeFont 解析到 Malgun
@@ -1342,7 +1343,7 @@ function subtitleFor(voiceId) {
   return r ? r.text : null;
 }
 // Language the balloon text was picked from (drives the game's font swap:
-// tw/zh -> Noto Sans TC, ja/jp -> M PLUS 1p, en -> Noto Sans).
+// tw/zh -> Noto Sans TC, ja/jp/kr/en -> Malgun Gothic, en fallback Noto Sans).
 function subtitleLang(voiceId) {
   const r = subtitlePick(voiceId);
   return r ? r.lang : null;
@@ -4788,8 +4789,10 @@ async function mixVoicePcm(timeline, duration) {
 // 的 CSS 規則（9-slice Lobby_balloon/2.png、padding、min-height、字體/行高/間距、
 // positionChat 錨點 + flip）把氣泡直接畫上輸出畫布。
 function balloonFont(lang) {
-  if (lang === 'ja' || lang === 'jp') return `'BA MPlus1p','M PLUS 1p','Noto Sans JP','Noto Sans TC',sans-serif`;
-  if (lang === 'en') return `'BA NotoSans','Noto Sans','Segoe UI',sans-serif`;
+  // 與 #chatDialog 的 --chatFont 同步（導出畫面必須跟螢幕一致）：
+  // ja/kr/en 以 BA MalgunGothic 領頭（見 index.html 對話框字體統一輪）
+  if (lang === 'ja' || lang === 'jp') return `'BA MalgunGothic','Malgun Gothic','Noto Sans JP','Noto Sans TC',sans-serif`;
+  if (lang === 'en') return `'BA MalgunGothic','Malgun Gothic','BA NotoSans','Noto Sans','Segoe UI',sans-serif`;
   return `'BA NotoSansTC','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif`;
 }
 function wrapCanvasText(ctx, text, maxW) {
@@ -5035,7 +5038,7 @@ async function startAnimExport() {
       await document.fonts.ready;
       await Promise.all([
         document.fonts.load('52px "BA NotoSansTC"'),
-        document.fonts.load('52px "BA MPlus1p"'),
+        document.fonts.load('52px "BA MalgunGothic"'),
         document.fonts.load('52px "BA NotoSans"'),
       ]);
       balloonReady = await loadBalloonImages();

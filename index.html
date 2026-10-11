@@ -6,10 +6,9 @@
     <link rel="icon" href="./favicon.ico" />
   <title>BA Memorial Lobby</title>
   <style>
-    /* Game talk-font assets moved out of static distribution: the 3 official
-       fonts (M PLUS 1p / Noto Sans TC / Noto Sans) are now registered at
-       runtime from assets/fonts/ via FontFace (served by SW cache from the
-       assets-player pack). Fallbacks (system fonts) apply until registered.
+    /* Game talk-font assets moved out of static distribution: the official
+       fonts (Malgun Gothic / Noto Sans TC / Noto Sans / Noto Sans KR) are now
+       registered at runtime from assets/fonts/ via FontFace (core pack).
        Only the boot font (loading/font.otf) stays @font-face for the loading
        screen, which renders before any pack install. */
     /* BA PC mouse cursor (PCIcon_MousePoint extracted from game bundles), hotspot at arrow tip */
@@ -493,7 +492,7 @@
       transition: opacity .4s ease;
     }
     #chatDialog.show { opacity: 1; }
-    #chatDialog[data-lang="ja"], #chatDialog[data-lang="jp"] { --chatFont: 'BA MalgunGothic', 'Malgun Gothic', 'BA MPlus1p', 'M PLUS 1p', 'Noto Sans JP', 'Noto Sans TC', sans-serif; }
+    #chatDialog[data-lang="ja"], #chatDialog[data-lang="jp"] { --chatFont: 'BA MalgunGothic', 'Malgun Gothic', 'Noto Sans JP', 'Noto Sans TC', sans-serif; }
     #chatDialog[data-lang="kr"] { --chatFont: 'BA MalgunGothic', 'Malgun Gothic', 'BA NotoSansKR', 'Noto Sans KR', 'Noto Sans TC', sans-serif; }
     #chatDialog[data-lang="en"] { --chatFont: 'BA MalgunGothic', 'Malgun Gothic', 'BA NotoSans', 'Noto Sans', 'Segoe UI', sans-serif; }
     /* Balloon sprite + label margins follow the line's DialogType (set on
