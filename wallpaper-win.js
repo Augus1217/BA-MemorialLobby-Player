@@ -61,10 +61,15 @@ const WS_VISIBLE = 0x10000000;
 const WS_POPUP = 0x80000000; // unsigned 域；運算用 >>>0
 const SWP_NOZORDER = 0x0004;
 const SWP_NOACTIVATE = 0x0010;
-const SMTO_NORMAL = 0x0002;
+// Microsoft Learn 官方值表（winuser.h / SendMessageTimeoutW）：
+//   SMTO_ABORTIFHUNG=0x0002（接收端 hang 立即返回）、SMTO_NORMAL=0x0000、SMTO_BLOCK=0x0001。
+// 壁紙場景選 ABORTIFHUNG：explorer 若 hang 不拖死自己。（原實作誤命名 SMTO_NORMAL=0x0002）
+const SMTO_ABORTIFHUNG = 0x0002;
 const SW_SHOWNOACTIVATE = 4;
 // SHQueryUserNotificationState：全螢幕前景/鎖屏 → 暫停桌布
-// 1=BUSY(全螢幕 app) 2=NOT_PRESENT(鎖屏/關屏) 3=D3D 獨占 4=簡報模式 7=全螢幕 UWP
+// 官方枚舉（shellapi.h / Microsoft Learn）：1=QUNS_BUSY(全螢幕 app) 2=QUNS_NOT_PRESENT(鎖屏/關屏)
+// 3=QUNS_RUNNING_D3D_FULL_SCREEN 4=QUNS_PRESENTATION_MODE 5=QUNS_ACCEPTS_NOTIFICATIONS(一般桌面)
+// 6=QUNS_QUIET_TIME(維護勿擾) 7=QUNS_APP(全螢幕 UWP) → 暫停集 {1,2,3,4,7}
 const QUNS_PAUSE = new Set([1, 2, 3, 4, 7]);
 
 function hwndOf(win) {
@@ -75,13 +80,18 @@ function hwndOf(win) {
   } catch { return null; }
 }
 
-// 找掛載目標：送 0x052C 後，含 SHELLDLL_DefView 的視窗（WorkerW）的下一個 WorkerW sibling
+// 找掛載目標：送 0x052C 後，找「不含 SHELLDLL_DefView 的那個 WorkerW」。
+// 結構有兩代（微軟未文檔化；Lively rocksdanister/lively PR #2050 + Spy++ 樹）：
+//   傳統（~Win10/11 23H2）：WorkerW 是 root-level sibling —— EnumWindows 找含
+//     SHELLDLL_DefView 的 top-level，再 FindWindowEx(0, top, 'WorkerW') 取其後的 sibling。
+//   Win11 24H2/26002+：spawn 出的 WorkerW 改為 Progman 的「直接子視窗」——
+//     sibling 搜尋會撲空，fallback 搜 Progman 子視窗。
 function findWallpaperHost() {
   const f = fns;
   const progman = Number(f.FindWindowW('Progman', null));
   if (!progman) return { ok: false, reason: 'no Progman' };
   const resultPtr = [0];
-  f.SendMessageTimeoutW(progman, 0x052C, 0, 0, SMTO_NORMAL, 1000, resultPtr);
+  f.SendMessageTimeoutW(progman, 0x052C, 0, 0, SMTO_ABORTIFHUNG, 1000, resultPtr);
   let host = null;
   const cb = (top, _lparam) => {
     const defview = Number(f.FindWindowExW(top, null, 'SHELLDLL_DefView', null));
@@ -93,11 +103,18 @@ function findWallpaperHost() {
   };
   const proc = koffi.register(cb, koffi.pointer(fns.WNDENUMPROC));
   try { f.EnumWindows(proc, 0); } finally { koffi.unregister(proc); }
-  if (!host) return { ok: false, reason: 'no WorkerW host (Win11 24H2 structure change?)' };
+  if (!host) {
+    // 24H2+ fallback：WorkerW 是 Progman 的直接子視窗（與 SHELLDLL_DefView 同層不同支）
+    host = Number(f.FindWindowExW(progman, null, 'WorkerW', null));
+    if (host) console.log('[wallpaper-win] host via Progman child (Win11 24H2+ structure)');
+  }
+  if (!host) return { ok: false, reason: 'no WorkerW host (sibling + Progman-child both missed)' };
   return { ok: true, host, progman };
 }
 
 // 視窗樣式 → WS_CHILD|WS_VISIBLE（Electron frameless 預設 WS_POPUP 族）
+// Microsoft Learn SetParent Remarks：「SetParent 不會修改 WS_CHILD/WS_POPUP 樣式……
+// 若新父非 NULL，應在呼叫 SetParent 之前清除 WS_POPUP 並設 WS_CHILD」——故先改樣式再 SetParent。
 function toChildStyle(hwnd) {
   const f = fns;
   const style = Number(f.GetWindowLongPtrW(hwnd, GWL_STYLE));
@@ -116,14 +133,18 @@ function attachWorker(win, display) {
   if (!found.ok) return found;
   try {
     toChildStyle(hwnd);
+    // GetWindowRect 回傳「實體螢幕座標」（Microsoft Learn）；SetParent 後子視窗座標
+    // 相對 host 的客戶區原點（官方 Remarks）。WorkerW 橫跨整個虛擬桌面（業界實測，
+    // Lively per-screen 同款）→ 換算：先 DIP×scale 轉實體，再減 host 原點。
+    // （原式 (x-hostLeft)*scale 在 hostLeft≠0 的多螢幕會偏移——順序錯誤）
     const box = [null];
     f.GetWindowRect(found.host, box);
     const hostLeft = box[0] ? box[0].left : 0;
     const hostTop = box[0] ? box[0].top : 0;
     // 實體像素：display.bounds 是 DIP
     const scale = display.scaleFactor || 1;
-    const px = Math.round((display.bounds.x - hostLeft) * scale);
-    const py = Math.round((display.bounds.y - hostTop) * scale);
+    const px = Math.round(display.bounds.x * scale) - hostLeft;
+    const py = Math.round(display.bounds.y * scale) - hostTop;
     const pw = Math.round(display.bounds.width * scale);
     const ph = Math.round(display.bounds.height * scale);
     f.SetParent(hwnd, found.host);
@@ -164,8 +185,9 @@ function healthCheck(win, display) {
     const box = [null];
     f.GetWindowRect(found.host, box);
     const scale = display.scaleFactor || 1;
-    const px = Math.round((display.bounds.x - (box[0] ? box[0].left : 0)) * scale);
-    const py = Math.round((display.bounds.y - (box[0] ? box[0].top : 0)) * scale);
+    // 同 attachWorker：先 DIP→實體，再減 host 原點（GetWindowRect=實體座標）
+    const px = Math.round(display.bounds.x * scale) - (box[0] ? box[0].left : 0);
+    const py = Math.round(display.bounds.y * scale) - (box[0] ? box[0].top : 0);
     f.SetParent(hwnd, found.host);
     f.SetWindowPos(hwnd, null, px, py,
       Math.round(display.bounds.width * scale), Math.round(display.bounds.height * scale),
