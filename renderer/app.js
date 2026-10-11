@@ -9130,9 +9130,10 @@ if (BA_DEBUG.probe && BA_DEBUG.probeBeam) {
 
 // ---- 大廳 Unity 粒子層重建（lobby_particles.json；Hanako 先行）----------------
 // 遊戲大廳 = spine（場景+角色+水效靜態層）+ Unity ParticleSystem 層（來源
-// ui-uilobbyelement-_mxload-prefabs bundle 的 lobby prefab；Hanako 有 15 個
+// ui-uilobbyelement-_mxload-prefabs bundle 的 lobby prefab；Hanako 原始 15 個
 // ParticleSystem：Star_01-04 四芒星閃爍 ×7、boke 前景散景 ×4、dust 灰塵 ×2、
-// FX/intro_fx_3 無材質引用不重建）。參數由 bundle typetree dump，資料驅動：
+// FX/intro_fx_3 無材質引用不重建。**Star 四芒星已依用戶裁定移除**（下方
+// PARTICLE_BLOCKED；assets/data 由 private pack 串流，不能只改資料檔）。參數由 bundle typetree dump，資料驅動：
 // assets/data/lobby_particles.json[lobbyKey].systems[]。座標為 prefab 骨架
 // local 累積（Unity 米制、與 spine ×0.01 後同空間），掛 spine child 繼承
 // 相機/縮放變換；y 以 spine child 實測方向（遊戲截圖對位校準）。
@@ -9266,8 +9267,13 @@ function initLobbyParticles(lobbyKey) {
   // psOnly=<regex>：單系統隔離（診斷用——一次只看一個 ParticleSystem 的視覺）
   const psOnlyRe = /(?:[&?#])psOnly=([^&\s]+)/.exec(location.hash + location.search)?.[1];
   const psOnly = psOnlyRe ? new RegExp(psOnlyRe, 'i') : null;
+  // 用戶裁定（2026-10-11）：Hanako_home 的四芒星閃爍（Star_01-04）移除。
+  // 做在程式層而非改 lobby_particles.json——assets/data 由 private Assets repo 的
+  // core pack 串流，改資料檔會在下次同步被覆寫。
+  const PARTICLE_BLOCKED = /^Star_/;
   for (const sys of def.systems) {
     if (!sys.material || sys.material.m_PathID === 0) continue;   // FX/intro_fx 無材質引用，遊戲端亦非本層視覺
+    if (PARTICLE_BLOCKED.test(sys.name)) continue;
     const texName = PARTICLE_TEX_BY_MAT[String(sys.material.m_PathID)];
     if (!texName) { log(`[particles] 無貼圖映射: ${sys.name} mat=${sys.material.m_PathID}`); continue; }
     if (psOnly && !psOnly.test(sys.name)) continue;
