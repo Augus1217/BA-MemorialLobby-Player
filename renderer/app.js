@@ -270,6 +270,11 @@ async function loadGameFonts() {
     { family: 'BA MPlus1p',    file: 'assets/fonts/BA-MPLUS1p-Medium.ttf',      fmt: 'truetype' },
     { family: 'BA NotoSansTC', file: 'assets/fonts/BA-NotoSansTC-Medium.otf',   fmt: 'opentype' },
     { family: 'BA NotoSans',   file: 'assets/fonts/BA-NotoSans-Regular.ttf',    fmt: 'truetype' },
+    // 對話框主字體（ja/jp/kr/en 設計意圖＝JP client UseLocalizeFont 解析到 Malgun
+    // Gothic；cmap 已驗 kana+kanji+Hangul+Latin 覆蓋——TW 簡碼位缺故 tw 走 NotoSansTC）
+    { family: 'BA MalgunGothic', file: 'assets/fonts/BA-MalgunGothic.ttf',       fmt: 'truetype' },
+    // kr 的 Malgun 之後備位（Hangul 完整）
+    { family: 'BA NotoSansKR', file: 'assets/fonts/BA-NotoSansKR-Regular.otf',  fmt: 'opentype' },
   ];
   for (const { family, file, fmt } of defs) {
     try {
