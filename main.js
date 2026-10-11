@@ -10,10 +10,40 @@ const tar = require('tar');
 
 const DEV_URL = 'http://127.0.0.1:5173';
 const isDev = !app.isPackaged;
+const { Menu } = require('electron');
 const wallpaper = require('./wallpaper');
 const { createTray } = require('./tray');
 let win = null;
 let vite = null;
+
+// app 名稱（dev 模式預設是 "Electron"——全域選單/通知/crash 對話框都會用它）
+app.name = 'BA Memorial Lobby';
+// ★ app.name 會連動 userData 預設路徑（appData/app.name）——dev 下釘回原目錄，
+//   否則 wallpaper.json/installed.json/localStorage 全部「搬家」，設定瞬間歸零。
+//   packaged 版本名稱本來就是 productName，路徑不動。
+if (!app.isPackaged) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'ba-memorial-lobby-electron'));
+}
+// 應用程式選單策略：
+// - Win/Linux：整份移除（KDE 全域選單 applet / 視窗內選單列不再顯示 File/Edit/...；
+//   F11 全螢幕由 renderer 綁定、F12 devtools 見 createWindow 的 before-input-event）
+// - macOS：選單列永遠顯示最前方 app 的選單（桌布 app 也一樣），給最小正規選單＝
+//   顯示正確名稱＋Cmd 快捷鍵；packaged 的 CFBundleName 本來就是 productName，
+//   dev 下仍顯示 Electron binary 名（無解，打包版不受影響）
+if (process.platform === 'darwin') {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { label: app.name, submenu: [
+      { role: 'about' }, { type: 'separator' },
+      { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' },
+      { role: 'quit' },
+    ] },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+  ]));
+} else {
+  Menu.setApplicationMenu(null);
+}
 
 // Linux Wayland session：Electron 預設仍走 X11(XWayland)，明確 pin 住——
 // type:'desktop' 桌布視窗（_NET_WM_WINDOW_TYPE_DESKTOP）只有在 X11 下有正規路線
@@ -157,6 +187,12 @@ function createWindow() {
     if (pendingOpenWall) {
       pendingOpenWall = false;
       setTimeout(() => { try { if (win && !win.isDestroyed()) win.webContents.send('open-wallpaper-settings'); } catch {} }, 800);
+    }
+  });
+  // 應用程式選單已移除（見檔頭）→ F12 補回 devtools 開關
+  win.webContents.on('before-input-event', (_e, input) => {
+    if (input.type === 'keyDown' && input.key === 'F12') {
+      try { win.webContents.toggleDevTools(); } catch {}
     }
   });
   if (process.env.CAPTURE) {

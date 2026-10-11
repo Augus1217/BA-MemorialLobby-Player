@@ -22,7 +22,7 @@
 ```json
 {
   "enabled": false,      // packaged 啟動時自動恢復；dev 需 --wallpaper
-  "fps": 30,
+  "fps": 30,            // 可選 15/24/30/60（設定分頁；電池再 −15）
   "lobby": "",           // 空＝跟隨播放器上次選擇（localStorage ba_lastLobby）
   "perScreen": {},       // { "1": "Hanako_home" } 顯示器 index → lobby（多螢幕個別指定）
   "sound": false,        // 桌布 BGM（預設關）
