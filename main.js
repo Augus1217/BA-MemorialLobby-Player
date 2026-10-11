@@ -15,6 +15,7 @@ const wallpaper = require('./wallpaper');
 const { createTray } = require('./tray');
 let win = null;
 let vite = null;
+let quitting = false;   // app 退出中——vite watchdog 停手
 
 // app 名稱（dev 模式預設是 "Electron"——全域選單/通知/crash 對話框都會用它）
 app.name = 'BA Memorial Lobby';
@@ -131,6 +132,12 @@ async function startVite() {
     cwd: __dirname,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  // vite 輸出轉發（原本吞掉只掃 "Local:"——崩潰訊息永遠看不到）
+  const fwd = (d) => {
+    for (const line of String(d).split('\n')) if (line.trim()) console.log('[vite]', line.trimEnd());
+  };
+  vite.stdout.on('data', fwd);
+  vite.stderr.on('data', fwd);
   let buf = '';
   await new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('Vite dev server 啟動逾時')), 20000);
@@ -143,9 +150,40 @@ async function startVite() {
     };
     vite.stdout.on('data', onData);
     vite.stderr.on('data', onData);
-    vite.on('exit', () => reject(new Error('Vite dev server 已退出')));
+    vite.on('exit', (code, sig) => {
+      clearTimeout(t);
+      reject(new Error(`Vite dev server 已退出 (code=${code} signal=${sig})`));
+    });
   });
   if (!(await probeDevUrl())) throw new Error('Vite dev server 連線失敗');
+  vite.on('exit', (code, sig) => {
+    vite = null;
+    if (!quitting) console.error(`[vite] dev server 無預警退出 (code=${code} signal=${sig})——watchdog 將重啟`);
+  });
+}
+
+// dev vite watchdog：child 掛掉（或 reuse 的外部 server 消失）且 port 無人服務 → 重新 spawn。
+// 限流 60s 內最多 5 次；app 退出中（quitting）不動。5s 輪詢＋vite client 自帶重連輪詢，
+// 兩端對上後 renderer 自動恢復（worker 端另有載入重試，見 app.js）。
+let viteStarting = false;
+const viteRespawns = [];
+function startViteWatchdog() {
+  setInterval(async () => {
+    try {
+      if (quitting || !isDev || viteStarting) return;
+      if (vite && vite.exitCode === null) return;               // 自己的 child 還活著
+      if (await probeDevUrl(800)) return;                       // 還有人在服務（reuse 情境）→ 不動
+      const now = Date.now();
+      while (viteRespawns.length && now - viteRespawns[0] > 60000) viteRespawns.shift();
+      if (viteRespawns.length >= 5) return;
+      viteRespawns.push(now);
+      viteStarting = true;
+      console.warn('[vite] dev server 掛了——watchdog 重啟中…');
+      try { await startVite(); console.log('[vite] dev server 已重啟'); }
+      catch (e) { console.error('[vite] 重啟失敗:', e.message); }
+      finally { viteStarting = false; }
+    } catch {}
+  }, 5000);
 }
 
 function getAssetsDir() {
@@ -903,6 +941,7 @@ app.whenReady().then(async () => {
     } catch (e) {
       console.error('無法啟動 Vite dev server:', e.message);
     }
+    startViteWatchdog();   // dev server 死掉自動重啟（見 startViteWatchdog）
   }
   createWindow();
   try { createTray({ showPlayer, onOpenWallpaperSettings: openWallpaperSettings }); } catch (e) { console.error('[tray] init failed:', e.message); }
@@ -918,6 +957,7 @@ app.whenReady().then(async () => {
   });
 });
 
+app.on('before-quit', () => { quitting = true; });
 app.on('window-all-closed', () => {
   // 桌布運行中時 worker 視窗還在，本事件不會觸發；真正全部關閉＝桌布已停 → 照舊退出
   if (wallpaper.isActive()) return;

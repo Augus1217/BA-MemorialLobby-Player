@@ -303,6 +303,10 @@ function showErr(msg) {
   errEl.textContent = String(msg);
   console.error('[renderer]', msg?.stack || msg);
 }
+function hideErr() {
+  errEl.style.display = 'none';
+  errEl.textContent = '';
+}
 const log = (s) => console.log('[lobby]', s);
 
 // ---- state ----
@@ -6677,6 +6681,7 @@ setTimeout(() => {
 let loadGen = 0;   // loadLobby 世代計數（見 loadLobby 內 alive 守衛）
 async function loadLobby(name) {
   if (exporting) return;
+  hideErr();   // 新載入嘗試清除舊錯誤列（桌布重試成功後不殘留）
   // 逐廳渲染模式（十/十一輪裁定，十二輪起為預設）：T3（無光層）或有 LGG 覆寫 →
   // plain（gamma 合成＝viewer 語義）；其餘（T1/T2 無 LGG）→ v2（線性合成）。
   // 用戶裁定錨點：T3→plain；Hanako/CH0070→v2；CH0230/CH0284→plain。
@@ -8607,7 +8612,22 @@ async function onSpaceVerify() {
       ? m[1]
       : (remembered && LOBBY_INDEX[remembered] ? remembered : ORDER[0]);
     log(`[lobby] boot選擇 hash="${location.hash}" m=${m ? m[1] : 'null'} inIndex=${m ? !!LOBBY_INDEX[m[1]] : '-'} first=${first}`);
-    await loadLobby(first);
+    if (WALLPAPER_MODE) {
+      // dev vite 可能短暫掛掉（main watchdog 會把 server 帶回來，約 1-2s）→ 載入失敗自動重試。
+      // loadLobby 內部吞錯（只 showErr＋return），以 currentLobby===first 判成敗（成功尾端才指派）。
+      let okBoot = false;
+      for (let i = 0; i < 4 && !okBoot; i++) {
+        await loadLobby(first);
+        okBoot = currentLobby === first;
+        if (!okBoot && i < 3) {
+          log(`[wallpaper] 大廳載入失敗（第 ${i + 1}/4 次），5s 後重試`);
+          await new Promise((r) => setTimeout(r, 5000));
+        }
+      }
+      if (!okBoot) log('[wallpaper] 大廳載入重試耗盡——維持錯誤列；vite 恢復後可從系統匣重啟桌布');
+    } else {
+      await loadLobby(first);
+    }
     // 桌布 worker：資產就緒才 show（免開機閃屏）；watchdog 由此進入心跳巡檢
     if (WALLPAPER_MODE) { try { window.ba?.wallpaperStage?.('ready'); } catch {} }
   } else {

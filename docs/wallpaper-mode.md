@@ -69,6 +69,12 @@
 
 日誌前綴：main `[wallpaper]`／`[wallpaper-win]`／`[tray]`；worker console 以 `[wallpaper]` 轉發（僅 dev）。
 
+**dev Vite 穩定性**：main 內建 watchdog（`startViteWatchdog`，5s 輪詢）——dev server 無預警退出
+自動重啟（60s 內限 5 次），vite stdout/stderr 以 `[vite]` 前綴轉發（崩潰原因可見，原本被吞）。
+`vite.config.js` 排除 `assets/**`（6.6 萬檔）的 watch——assets 由 serve-assets-dir middleware
+直讀、執行期 fetch、不需 HMR；程式碼照常熱更新。worker 端大廳載入失敗自動重試 4 次（5s 間隔，
+以 `currentLobby===first` 判成敗），vite 恢復後自癒；`hideErr()` 於每次載入開始清舊錯誤列。
+
 ## 已知陷阱：Linux `focusable:false` → override-redirect
 
 **Chromium 的 X11/ozone backend 對 `focusable:false` 的視窗一律建 override-redirect（OR）**，

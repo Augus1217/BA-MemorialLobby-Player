@@ -12,6 +12,10 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     host: '127.0.0.1',
+    // assets/ 有 6.6 萬個檔（spine/語音/圖片…），全部由下方 serve-assets-dir middleware
+    // 直讀、執行期 fetch——不需 HMR。排除後 chokidar 壓力驟減（dev server 偶發無預警
+    // 死亡的主嫌）；renderer/ 與 index.html 等程式碼照常熱更新。
+    watch: { ignored: ['**/assets/**', '**/dist/**', '**/build/**', '**/docs/**', '**/scripts/**'] },
   },
   plugins: [{
     name: 'serve-assets-dir',
