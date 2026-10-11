@@ -46,13 +46,15 @@ const SUBSTRUCTURE_REDIRECT = 1 << 20;
 const SUBSTRUCTURE_NOTIFY = 1 << 19;
 
 /**
- * 對 X11 視窗加/移除 _NET_WM_STATE_SKIP_TASKBAR + SKIP_PAGER（ClientMessage 正道）。
+ * 對 X11 視窗加/移除多個 _NET_WM_STATE 狀態（ClientMessage 正道）。
+ * EWMH：一則 ClientMessage 最多帶 2 個 atom（data.l[1]、l[2]）——超過就分則送出。
  * @param {number} xid X window id（getNativeWindowHandle() 前 4 bytes）
- * @param {boolean} add true=加入狀態（隱藏於任務列）
- * @returns {boolean} 是否成功送出
+ * @param {boolean} add true=加入狀態
+ * @param {string[]} atoms 例如 ['_NET_WM_STATE_SKIP_TASKBAR', '_NET_WM_STATE_STICKY']
+ * @returns {boolean} 是否全部成功送出
  */
-function setNetWmStateSkipTaskbar(xid, add = true) {
-  if (!process.env.DISPLAY) return false;
+function setNetWmStates(xid, add, atoms) {
+  if (!process.env.DISPLAY || !atoms?.length) return false;
   let dpy = null;
   try {
     const api = loadX11();
@@ -60,26 +62,36 @@ function setNetWmStateSkipTaskbar(xid, add = true) {
     if (!dpy) return false;
     const root = api.XDefaultRootWindow(dpy);
     const NET_WM_STATE = api.XInternAtom(dpy, '_NET_WM_STATE', 0);
-    const SKIP_TASKBAR = api.XInternAtom(dpy, '_NET_WM_STATE_SKIP_TASKBAR', 0);
-    const SKIP_PAGER = api.XInternAtom(dpy, '_NET_WM_STATE_SKIP_PAGER', 0);
-    if (!NET_WM_STATE || !SKIP_TASKBAR) return false;
-    const ev = buildClientMessage(
-      xid, NET_WM_STATE,
-      add ? 1 : 0,            // _NET_WM_STATE_ADD / _NET_WM_STATE_REMOVE
-      SKIP_TASKBAR,
-      SKIP_PAGER,             // l[2]：第二個 atom；XSendEvent 對 root 不驗 xid，無 BadWindow 風險
-    );
+    if (!NET_WM_STATE) return false;
+    const atomIds = atoms.map((n) => api.XInternAtom(dpy, n, 0)).filter(Boolean);
     // XSendEvent 對 root 送（SubstructureRedirect 讓 WM 代為處理）；事件內的 xid 若已
-    // 銷毀，KWin 查無此窗直接忽略——不會產生 BadWindow，安全。
-    api.XSendEvent(dpy, root, 0, SUBSTRUCTURE_REDIRECT | SUBSTRUCTURE_NOTIFY, ev);
+    // 銷毀，KWin/Mutter 查無此窗直接忽略——不會產生 BadWindow，安全。
+    for (let i = 0; i < atomIds.length; i += 2) {
+      const ev = buildClientMessage(
+        xid, NET_WM_STATE,
+        add ? 1 : 0,                       // _NET_WM_STATE_ADD / _NET_WM_STATE_REMOVE
+        atomIds[i],
+        atomIds[i + 1] || 0,               // 第二個 atom（可空）
+      );
+      api.XSendEvent(dpy, root, 0, SUBSTRUCTURE_REDIRECT | SUBSTRUCTURE_NOTIFY, ev);
+    }
     api.XFlush(dpy);
     return true;
   } catch (e) {
-    console.error('[wallpaper] x11 skipTaskbar failed:', e.message);
+    console.error('[wallpaper] x11 setNetWmStates failed:', e.message);
     return false;
   } finally {
     if (dpy) { try { api.XCloseDisplay(dpy); } catch {} }
   }
 }
 
-module.exports = { setNetWmStateSkipTaskbar };
+/** 任務列/dock 隱形＋跨虛擬桌面（GNOME 的 DESKTOP 視窗不會自動跨 workspace）。 */
+function setNetWmStateSkipTaskbar(xid, add = true) {
+  return setNetWmStates(xid, add, [
+    '_NET_WM_STATE_SKIP_TASKBAR',
+    '_NET_WM_STATE_SKIP_PAGER',
+    '_NET_WM_STATE_STICKY',
+  ]);
+}
+
+module.exports = { setNetWmStateSkipTaskbar, setNetWmStates };
