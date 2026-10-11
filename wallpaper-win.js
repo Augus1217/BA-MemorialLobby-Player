@@ -22,27 +22,30 @@ function ensure() {
     koffi = require('koffi');
     user32 = koffi.load('user32.dll');
     shell32 = koffi.load('shell32.dll');
-    // Windows 的 C long = 32-bit → RECT 用 long32 明示（Linux 上 'long' 是 64-bit）
-    const RECT = koffi.struct('BA_RECT', { left: 'long32', top: 'long32', right: 'long32', bottom: 'long32' });
+    // Windows 的 C long = 32-bit → RECT 用 int32（koffi 無 'long32'；koffi 3 驗證）
+    const RECT = koffi.struct('BA_RECT', { left: 'int32', top: 'int32', right: 'int32', bottom: 'int32' });
     const WNDENUMPROC = koffi.proto('BA_WNDENUMPROC', 'bool', ['intptr', 'intptr']);
+    // koffi 3.x 語法（linux 上以 libX11/libc/qsort 實證的方言）：
+    //   func(name, retType, [args])；callback 參數記 'Proto*'；register 要 koffi.pointer(proto)
     fns = {
-      FindWindowW: user32.func('__stdcall', 'intptr', 'FindWindowW', 'str16', 'str16'),
-      FindWindowExW: user32.func('__stdcall', 'intptr', 'FindWindowExW', 'intptr', 'intptr', 'str16', 'str16'),
-      EnumWindows: user32.func('__stdcall', 'bool', 'EnumWindows', WNDENUMPROC, 'intptr'),
-      SendMessageTimeoutW: user32.func('__stdcall', 'intptr', 'SendMessageTimeoutW',
-        'intptr', 'uint32', 'uintptr', 'intptr', 'uint32', 'uint32', koffi.out(koffi.pointer('uintptr'))),
-      SetParent: user32.func('__stdcall', 'intptr', 'SetParent', 'intptr', 'intptr'),
-      GetParent: user32.func('__stdcall', 'intptr', 'GetParent', 'intptr'),
-      SetWindowPos: user32.func('__stdcall', 'bool', 'SetWindowPos',
-        'intptr', 'intptr', 'int32', 'int32', 'int32', 'int32', 'uint32'),
-      GetWindowRect: user32.func('__stdcall', 'bool', 'GetWindowRect', 'intptr', koffi.out(koffi.pointer(RECT))),
-      IsWindow: user32.func('__stdcall', 'bool', 'IsWindow', 'intptr'),
-      IsIconic: user32.func('__stdcall', 'bool', 'IsIconic', 'intptr'),
-      ShowWindow: user32.func('__stdcall', 'bool', 'ShowWindow', 'intptr', 'int32'),
-      GetWindowLongPtrW: user32.func('__stdcall', 'intptr', 'GetWindowLongPtrW', 'intptr', 'int32'),
-      SetWindowLongPtrW: user32.func('__stdcall', 'intptr', 'SetWindowLongPtrW', 'intptr', 'int32', 'intptr'),
-      SHQueryUserNotificationState: shell32.func('__stdcall', 'int32', 'SHQueryUserNotificationState',
-        koffi.out(koffi.pointer('int32'))),
+      WNDENUMPROC,   // koffi.register(cb, koffi.pointer(WNDENUMPROC)) 需要（原實作漏存 → Windows 上必炸）
+      FindWindowW: user32.func('FindWindowW', 'intptr', ['str16', 'str16']),
+      FindWindowExW: user32.func('FindWindowExW', 'intptr', ['intptr', 'intptr', 'str16', 'str16']),
+      EnumWindows: user32.func('EnumWindows', 'bool', ['BA_WNDENUMPROC*', 'intptr']),
+      SendMessageTimeoutW: user32.func('SendMessageTimeoutW', 'intptr',
+        ['intptr', 'uint32', 'uintptr', 'intptr', 'uint32', 'uint32', koffi.out(koffi.pointer('uintptr'))]),
+      SetParent: user32.func('SetParent', 'intptr', ['intptr', 'intptr']),
+      GetParent: user32.func('GetParent', 'intptr', ['intptr']),
+      SetWindowPos: user32.func('SetWindowPos', 'bool',
+        ['intptr', 'intptr', 'int32', 'int32', 'int32', 'int32', 'uint32']),
+      GetWindowRect: user32.func('GetWindowRect', 'bool', ['intptr', koffi.out(koffi.pointer(RECT))]),
+      IsWindow: user32.func('IsWindow', 'bool', ['intptr']),
+      IsIconic: user32.func('IsIconic', 'bool', ['intptr']),
+      ShowWindow: user32.func('ShowWindow', 'bool', ['intptr', 'int32']),
+      GetWindowLongPtrW: user32.func('GetWindowLongPtrW', 'intptr', ['intptr', 'int32']),
+      SetWindowLongPtrW: user32.func('SetWindowLongPtrW', 'intptr', ['intptr', 'int32', 'intptr']),
+      SHQueryUserNotificationState: shell32.func('SHQueryUserNotificationState', 'int32',
+        [koffi.out(koffi.pointer('int32'))]),
     };
     return fns;
   } catch (e) {
@@ -88,7 +91,7 @@ function findWallpaperHost() {
     }
     return true; // 繼續列舉
   };
-  const proc = koffi.register(cb, fns.WNDENUMPROC);
+  const proc = koffi.register(cb, koffi.pointer(fns.WNDENUMPROC));
   try { f.EnumWindows(proc, 0); } finally { koffi.unregister(proc); }
   if (!host) return { ok: false, reason: 'no WorkerW host (Win11 24H2 structure change?)' };
   return { ok: true, host, progman };
@@ -113,9 +116,10 @@ function attachWorker(win, display) {
   if (!found.ok) return found;
   try {
     toChildStyle(hwnd);
-    const r = f.GetWindowRect(found.host);
-    const hostLeft = r ? r.left : 0;
-    const hostTop = r ? r.top : 0;
+    const box = [null];
+    f.GetWindowRect(found.host, box);
+    const hostLeft = box[0] ? box[0].left : 0;
+    const hostTop = box[0] ? box[0].top : 0;
     // 實體像素：display.bounds 是 DIP
     const scale = display.scaleFactor || 1;
     const px = Math.round((display.bounds.x - hostLeft) * scale);
@@ -157,10 +161,11 @@ function healthCheck(win, display) {
   if (!found.ok) return 'degraded';
   try {
     toChildStyle(hwnd);
-    const r = f.GetWindowRect(found.host);
+    const box = [null];
+    f.GetWindowRect(found.host, box);
     const scale = display.scaleFactor || 1;
-    const px = Math.round((display.bounds.x - (r ? r.left : 0)) * scale);
-    const py = Math.round((display.bounds.y - (r ? r.top : 0)) * scale);
+    const px = Math.round((display.bounds.x - (box[0] ? box[0].left : 0)) * scale);
+    const py = Math.round((display.bounds.y - (box[0] ? box[0].top : 0)) * scale);
     f.SetParent(hwnd, found.host);
     f.SetWindowPos(hwnd, null, px, py,
       Math.round(display.bounds.width * scale), Math.round(display.bounds.height * scale),

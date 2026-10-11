@@ -38,6 +38,15 @@
 - **互動與穿透**：預設 `setIgnoreMouseEvents(true)`。Win/mac 開 `forward:true`（原生游標事件）；
   **Linux 無 forward → main 端 80ms 輪詢 `screen.getCursorScreenPoint()` 下發游標**，
   眼球跟隨/相機照常運作（點擊類互動需開互動模式）。
+- **開機動畫**：桌布 worker **跳過開場演出**（`playStart()` 開頭分流）——不播 Start_Idle／開場
+  timeline／白閃／特寫／額外骨架進場，直接進 Idle loop；BG 常駐動畫（水族館鯨魚等）照常。
+  檢視器（manager）不受影響，仍播完整開場。
+- **工作列隱形（無痕引擎）**：worker 建構子 `skipTaskbar: true` 在 **Linux X11 是 no-op**
+  （`_NET_WM_STATE` 恆空 → 任務列/dock 照列 worker），`win.setSkipTaskbar()` 同樣無效；
+  map 前用 xprop 預寫屬性也會被 Chromium 在 map 時覆寫。正解＝mapped 後由
+  `wallpaper-x11.js`（koffi+Xlib）對 root 送 **`_NET_WM_STATE` ClientMessage**（wmctrl 同款、
+  EWMH 規定），KWin 更新內部 skipTaskbar → TasksModel/dock 排除。macOS 運行中
+  `app.dock.hide()`／停止時 `app.dock.show()`（真·隱形引擎，檢視器照常從系統列開啟）。
 - **暫停策略**：全螢幕前景偵測（見平台矩陣）→ `ticker.stop()`＋BGM 暫停；
   電池供電 → fps −15（下限 10，`powerMonitor`）。
 
@@ -45,9 +54,9 @@
 
 | 平台 | 掛載 | 全螢幕暫停 | 備註 |
 |---|---|---|---|
-| Windows | koffi FFI：`Progman → 0x052C → WorkerW(sibling of SHELLDLL_DefView) → SetParent`；WS_CHILD＋實體像素 SetWindowPos；5s 健康巡檢（IsIconic 還原/父親失效重掛，涵蓋 explorer 重啟） | `SHQueryUserNotificationState` 2s 輪詢（QUNS 1/2/3/4/7） | Win11 24H2/26xxx WorkerW 結構變動 → 找不到 host 降級為全螢幕窗＋通知；`node_modules/koffi` 已 asarUnpack |
+| Windows | koffi FFI：`Progman → 0x052C → WorkerW(sibling of SHELLDLL_DefView) → SetParent`；WS_CHILD＋實體像素 SetWindowPos；5s 健康巡檢（IsIconic 還原/父親失效重掛，涵蓋 explorer 重啟） | `SHQueryUserNotificationState` 2s 輪詢（QUNS 1/2/3/4/7） | Win11 24H2/26xxx WorkerW 結構變動 → 找不到 host 降級為全螢幕窗＋通知；`node_modules/koffi` 已 asarUnpack。**koffi 3.x 方言**（已在 Linux 以 libX11/libc 等價實證）：`func(name, ret, [args])`、callback 參數記 `'Proto*'`、`koffi.register(fn, koffi.pointer(proto))`、無 `'long32'`（用 `'int32'`） |
 | macOS | `type:'desktop'`（= kCGDesktopWindowLevel-1＋canJoinAllSpaces＋stationary），零 native code | v1 無（需 Swift helper，v2） | 全螢幕 Space/Mission Control 不可見（本質）；收不到鍵盤 |
-| Linux (X11/XWayland) | `type:'desktop'`（`_NET_WM_WINDOW_TYPE_DESKTOP`） | `xprop` 查 active window 的 `_NET_WM_STATE_FULLSCREEN`（2s 輪詢） | KDE/GNOME Wayland 走 XWayland（main 啟動時 pin `ozone-platform-hint=x11`）；GNOME Wayland 原生不支援 layer-shell（計畫標註）；KDE/wlroots 原生支援＝v2 |
+| Linux (X11/XWayland) | `type:'desktop'`（`_NET_WM_WINDOW_TYPE_DESKTOP`）；工作列隱形＝koffi 送 `_NET_WM_STATE` ClientMessage（見上） | `xprop` 查 active window 的 `_NET_WM_STATE_FULLSCREEN`（2s 輪詢） | KDE/GNOME Wayland 走 XWayland（main 啟動時 pin `ozone-platform-hint=x11`）；GNOME Wayland 原生不支援 layer-shell（計畫標註）；KDE/wlroots 原生支援＝v2 |
 
 ## 除錯旋鈕
 

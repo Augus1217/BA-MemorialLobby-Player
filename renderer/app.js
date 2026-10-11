@@ -2470,6 +2470,16 @@ function removeSceneCloseup() {
 
 function playStart() {
   if (!spine) return;
+  // 桌布模式：不播開場演出（Start_Idle／開場 timeline／白閃／特寫／額外骨架進場），
+  // 直接進 Idle loop——桌布要的是常駐正確狀態，開機/熱替換都重播開場沒有意義。
+  // BG 常駐動畫（水族館鯨魚等 idle 迴圈）照常驅動。
+  if (WALLPAPER_MODE) {
+    if (!idleClip) idleClip = resolveIdleClip();
+    setAnimationWithClipMix(0, idleClip, true);
+    startBgSequence();
+    log(`[wallpaper] 直接進 Idle（跳過開場）→ ${idleClip}`);
+    return;
+  }
   const introName = resolveStartClip();
   const hasStart = !!introName;
   if (!idleClip) idleClip = resolveIdleClip();
@@ -8559,6 +8569,7 @@ async function onSpaceVerify() {
     const first = (m && LOBBY_INDEX[m[1]])
       ? m[1]
       : (remembered && LOBBY_INDEX[remembered] ? remembered : ORDER[0]);
+    log(`[lobby] boot選擇 hash="${location.hash}" m=${m ? m[1] : 'null'} inIndex=${m ? !!LOBBY_INDEX[m[1]] : '-'} first=${first}`);
     await loadLobby(first);
     // 桌布 worker：資產就緒才 show（免開機閃屏）；watchdog 由此進入心跳巡檢
     if (WALLPAPER_MODE) { try { window.ba?.wallpaperStage?.('ready'); } catch {} }

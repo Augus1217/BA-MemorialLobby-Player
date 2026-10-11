@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { execFile } = require('child_process');
+const { setNetWmStateSkipTaskbar: x11SetSkipTaskbar } = require('./wallpaper-x11');
 
 const DEV_URL = 'http://127.0.0.1:5173';
 const isDev = !app.isPackaged;
@@ -126,8 +127,13 @@ function createWorker(display, index) {
       backgroundThrottling: false,  // 桌面層視窗常被視為 occluded，rAF 節流會凍結動畫
     },
   });
+  // Linux skipTaskbar：Electron 的建構子選項與 win.setSkipTaskbar() 在 X11 都是 no-op
+  // （實測 _NET_WM_STATE 恆空 → 任務列/dock 照列 worker）。xid 留在 rec，待視窗
+  // mapped（ready 顯示後）用 Xlib ClientMessage 設 _NET_WM_STATE——見 wallpaper-x11.js
+  const xid = process.platform === 'linux'
+    ? win.getNativeWindowHandle().readUInt32LE(0) : 0;
   const rec = {
-    win, display, index,
+    win, display, index, xid,
     ready: false, lastBeat: 0, created: Date.now(),
     reloads: 0, reloading: false, bootStage: 'new',
   };
@@ -174,6 +180,7 @@ function createWorker(display, index) {
   });
 
   if (isDev) {
+    console.log('[wallpaper] worker hash:', hash);
     win.loadURL(DEV_URL + '#' + hash).catch((e) => console.error('[wallpaper] loadURL failed:', e.message));
   } else {
     win.loadFile(prodHtmlPath(), { hash }).catch((e) => console.error('[wallpaper] loadFile failed:', e.message));
@@ -465,6 +472,9 @@ function start() {
   config.enabled = true;
   saveConfig();
   active = true;
+  // macOS：桌布運行中整個 app 轉 accessory（Dock 不顯示圖示、選單列不顯示名稱）
+  // ＝真·隱形引擎；檢視器仍可從系統列（tray）開啟。stop 時還原。
+  if (process.platform === 'darwin' && app.dock) { try { app.dock.hide(); } catch {} }
   lastFsState = false;
   createWorkers();
   bindScreenEvents();
@@ -483,6 +493,7 @@ function stop() {
   paused = false;
   lastFsState = false;
   active = false;
+  if (process.platform === 'darwin' && app.dock) { try { app.dock.show(); } catch {} }
   console.log('[wallpaper] stopped');
   broadcastState();
   return status();
@@ -579,6 +590,14 @@ ipcMain.on('wallpaper-stage', (e, stage) => {
     w.reloading = false;
     w.lastBeat = Date.now();
     try { if (!w.win.isVisible() && !TYPE_OVERRIDE) w.win.showInactive(); } catch {}
+    // Linux：mapped 後才能送 _NET_WM_STATE ClientMessage（unmapped 時 WM 查無此窗）。
+    // 立即送一次＋1.2s 補一次，蓋掉 KWin manage 競態；操作冪等。
+    if (process.platform === 'linux' && w.xid) {
+      x11SetSkipTaskbar(w.xid, true);
+      setTimeout(() => {
+        try { if (!w.win.isDestroyed()) x11SetSkipTaskbar(w.xid, true); } catch {}
+      }, 1200);
+    }
     retireFor(w.display.id);   // 無縫換角：新的就位才拆舊的
     console.log(`[wallpaper] worker ${w.index} ready`);
     // 驗收旋鈕：CAPTURE_WORKER=<file> 在就緒後截第一個 worker（自動化測試用）
