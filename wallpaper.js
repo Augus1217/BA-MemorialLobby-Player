@@ -191,7 +191,88 @@ function createWorker(display, index) {
 function applyIgnoreMouse(rec) {
   const ignore = !loadConfig().interact;
   try { rec.win.setIgnoreMouseEvents(ignore, { forward: ignore && FORWARD_OK }); } catch {}
+  // macOS：type:'desktop' 視窗在 Finder 桌面之下，點擊（互動模式的移動也是）會被
+  // Finder 桌面視窗攔走——forward:true 只在穿透模式轉送「移動」。互動模式改由
+  // 透明點擊代理（正常層，透視下層桌布/圖示）收事件再 sendInputEvent 注入 worker；
+  // Windows（WorkerW 子視窗）與 Linux（desktop 層即頂）原生收得到，不需代理。
+  if (process.platform === 'darwin') syncClickProxy(rec);
 }
+
+// ---- mac 互動模式：透明點擊代理（正常層）→ sendInputEvent 注入 worker ----
+const proxies = new Map();   // display.id → { win, wcId, displayId }
+const PROXY_PAGE = 'data:text/html;charset=utf-8,' + encodeURIComponent(
+  '<!doctype html><meta charset="utf-8">'
+  + '<body style="margin:0;background:transparent;user-select:none">'
+  + '<script>const S=(t,e)=>window.wpProxy&&wpProxy.event({type:t,x:e.clientX,y:e.clientY,'
+  + 'button:e.button==null?0:e.button,clicks:e.detail==null?1:e.detail,'
+  + 'dx:e.deltaX==null?0:e.deltaX,dy:e.deltaY==null?0:e.deltaY});'
+  + "['mousedown','mouseup','mousemove','contextmenu','wheel'].forEach(t=>"
+  + 'addEventListener(t,e=>{e.preventDefault();S(t,e);},{passive:false}));'
+  + '<\/script>');
+
+function syncClickProxy(rec) {
+  const want = loadConfig().interact;
+  const existing = proxies.get(rec.display.id);
+  if (want && !existing) {
+    const proxy = new BrowserWindow({
+      x: rec.display.bounds.x, y: rec.display.bounds.y,
+      width: rec.display.bounds.width, height: rec.display.bounds.height,
+      frame: false, transparent: true, hasShadow: false,
+      backgroundColor: '#00000000',
+      focusable: false,           // 不搶焦點；mac 上非 key 視窗仍收滑鼠事件
+      show: false,
+      skipTaskbar: true, resizable: false, movable: false, minimizable: false,
+      maximizable: false, fullscreenable: false, enableLargerThanScreen: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'wallpaper-proxy-preload.js'),
+        contextIsolation: true, backgroundThrottling: false,
+      },
+    });
+    const wcId = proxy.webContents.id;
+    proxies.set(rec.display.id, { win: proxy, wcId, displayId: rec.display.id });
+    proxy.on('closed', () => {
+      const cur = proxies.get(rec.display.id);
+      if (cur && cur.wcId === wcId) proxies.delete(rec.display.id);
+    });
+    // ready 才顯示，免透明窗閃黑；showInactive 不搶 app 焦點
+    proxy.once('ready-to-show', () => { try { proxy.showInactive(); } catch {} });
+    // worker 是 canJoinAllSpaces——代理也跨 Space，互動模式才不會切 Space 就失效
+    try { proxy.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch {}
+    proxy.loadURL(PROXY_PAGE).catch((e) => console.error('[wallpaper] proxy loadURL:', e.message));
+    console.log('[wallpaper] click proxy on (display', rec.index + ')');
+  } else if (!want && existing) {
+    destroyProxy(rec.display.id);
+  }
+}
+function destroyProxy(displayId) {
+  const p = proxies.get(displayId);
+  if (!p) return;
+  proxies.delete(displayId);
+  try { if (!p.win.isDestroyed()) p.win.destroy(); } catch {}
+}
+function destroyAllProxies() {
+  for (const id of [...proxies.keys()]) destroyProxy(id);
+}
+
+// 代理頁事件 → 該螢幕現役 worker（換角後 proxy 存活，動態解析目標）
+ipcMain.on('wallpaper-proxy-event', (e, p) => {
+  let entry = null;
+  for (const v of proxies.values()) { if (v.wcId === e.sender.id) { entry = v; break; } }
+  if (!entry) return;
+  const rec = workers.get(entry.displayId);
+  if (!rec || !rec.win || rec.win.isDestroyed()) return;
+  const type = { mousedown: 'mouseDown', mouseup: 'mouseUp', mousemove: 'mouseMove',
+                 wheel: 'mouseWheel', contextmenu: 'mouseDown' }[p && p.type];
+  if (!type) return;
+  const ev = { type, x: p.x, y: p.y };
+  if (type === 'mouseDown' || type === 'mouseUp') {
+    ev.button = p.button === 2 ? 'right' : p.button === 1 ? 'middle' : 'left';
+    ev.clickCount = p.clicks || 1;
+  } else if (type === 'mouseWheel') {
+    ev.deltaX = p.dx; ev.deltaY = p.dy;
+  }
+  try { rec.win.webContents.sendInputEvent(ev); } catch {}
+});
 
 function createWorkers() {
   const displays = screen.getAllDisplays();
@@ -209,6 +290,7 @@ function destroyWorkers() {
   workers.clear();
   wcIndex.clear();
   retiring.clear();
+  if (process.platform === 'darwin') destroyAllProxies();   // mac 互動模式點擊代理
 }
 
 // 無縫換角：為每個現役 worker 先建新 worker（隱藏），ready 顯示後才拆舊的——
