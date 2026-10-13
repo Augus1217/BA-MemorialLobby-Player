@@ -170,7 +170,10 @@
     "set.wall.noteWin": "Windows 桌面層掛載即將支援，目前以全螢幕視窗呈現。",
     "set.wall.noteNoFs": "此系統無法偵測全螢幕，暫停功能停用。",
     "set.wall.search": "搜尋角色…",
-    "set.wall.noMatch": "沒有符合的角色"
+    "set.wall.noMatch": "沒有符合的角色",
+    "set.clickfxStyle": "樣式",
+    "set.clickfxAuthentic": "原版重製",
+    "set.clickfxLegacy": "舊版仿製"
   },
   "zh-CN": {
     "boot.checking": "检查更新中……",
@@ -343,7 +346,10 @@
     "set.wall.noteWin": "Windows 桌面层挂载即将支持，目前以全屏窗口呈现。",
     "set.wall.noteNoFs": "此系统无法检测全屏，暂停功能停用。",
     "set.wall.search": "搜索角色…",
-    "set.wall.noMatch": "没有符合的角色"
+    "set.wall.noMatch": "没有符合的角色",
+    "set.clickfxStyle": "样式",
+    "set.clickfxAuthentic": "原版重制",
+    "set.clickfxLegacy": "旧版仿制"
   },
   "ja": {
     "boot.checking": "確認中です……",
@@ -516,7 +522,10 @@
     "set.wall.noteWin": "Windows のデスクトップ層への取り付けは近日対応。現在は全画面ウィンドウとして表示されます。",
     "set.wall.noteNoFs": "このシステムでは全画面を検出できないため、一時停止機能は無効です。",
     "set.wall.search": "キャラを検索…",
-    "set.wall.noMatch": "一致するキャラがいません"
+    "set.wall.noMatch": "一致するキャラがいません",
+    "set.clickfxStyle": "スタイル",
+    "set.clickfxAuthentic": "原作再現",
+    "set.clickfxLegacy": "旧版模倣"
   },
   "en": {
     "boot.checking": "Checking for updates...",
@@ -689,7 +698,10 @@
     "set.wall.noteWin": "Windows desktop-layer mounting is coming soon; shown as a fullscreen window for now.",
     "set.wall.noteNoFs": "Fullscreen detection unavailable on this system; pause disabled.",
     "set.wall.search": "Search characters…",
-    "set.wall.noMatch": "No matching character"
+    "set.wall.noMatch": "No matching character",
+    "set.clickfxStyle": "Style",
+    "set.clickfxAuthentic": "Authentic remake",
+    "set.clickfxLegacy": "Legacy imitation"
   },
   "ko": {
     "boot.checking": "업데이트 확인 중...",
@@ -862,6 +874,9 @@
     "set.wall.noteWin": "Windows 데스크톱 레이어 장착은 곧 지원 예정입니다. 현재는 전체 화면 창으로 표시됩니다.",
     "set.wall.noteNoFs": "이 시스템에서는 전체 화면을 감지할 수 없어 일시정지 기능이 비활성화됩니다.",
     "set.wall.search": "캐릭터 검색…",
-    "set.wall.noMatch": "일치하는 캐릭터가 없습니다"
+    "set.wall.noMatch": "일치하는 캐릭터가 없습니다",
+    "set.clickfxStyle": "스타일",
+    "set.clickfxAuthentic": "원작 재현",
+    "set.clickfxLegacy": "구버전 모방"
   }
 }

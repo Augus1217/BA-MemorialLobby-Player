@@ -3,6 +3,7 @@ import { Spine, ScaleTimeline, SpineTexture } from '@esotericsoftware/spine-pixi
 import { BatchableSpineSlot } from '@esotericsoftware/spine-pixi-v8/dist/BatchableSpineSlot.js';
 import { Vector2 } from '@esotericsoftware/spine-core';
 import { i as initClickFx } from '../assets/clickfx/clickFx.js';
+import { initClickFxAuthentic } from './clickfx-authentic.js';
 
 window.addEventListener('error', (e) => console.error('[renderer][uncaught]', e.message, e.filename, e.lineno));
 window.addEventListener('unhandledrejection', (e) => console.error('[renderer][unhandled]', e.reason));
@@ -3914,6 +3915,7 @@ const settingsBackdrop = document.getElementById('settingsBackdrop');
 const setLangSegs = document.getElementById('setLangSegs');
 const setCursorCk = document.getElementById('setCursorCk');
 const setClickFxCk = document.getElementById('setClickFxCk');
+const setClickFxStyle = document.getElementById('setClickFxStyle');
 const setJpOnlyCk = document.getElementById('setJpOnlyCk');
 const setAssetsStatus = document.getElementById('setAssetsStatus');
 const setDownloadBtn = document.getElementById('setDownloadBtn');
@@ -4162,6 +4164,7 @@ function settingsPref(key, dflt) {
 function syncSettingsEffectCks() {
   if (setCursorCk) setCursorCk.checked = settingsPref('ba_cursor', true);
   if (setClickFxCk) setClickFxCk.checked = settingsPref('ba_clickfx', true);
+  if (setClickFxStyle) setClickFxStyle.value = settingsPref('ba_clickfx_style', 'authentic');
   if (setJpOnlyCk) setJpOnlyCk.checked = settingsPref('ba_jpOnly', true);
   if (setStatsCk) setStatsCk.checked = statsEnabled();
 }
@@ -8203,7 +8206,10 @@ async function init() {
   // Stage 5：字型 + ClickFx（core 已就位，一次到位）
   await loadGameFonts();
   try {
-    if (settingsPref('ba_clickfx', true)) { initClickFx(); }
+    if (settingsPref('ba_clickfx', true)) {
+      if (settingsPref('ba_clickfx_style', 'authentic') === 'legacy') initClickFx();
+      else initClickFxAuthentic();
+    }
   } catch (e) {
     console.warn('[lobby] BAClickFX init failed:', e.message);
   }
@@ -8508,6 +8514,10 @@ async function onSpaceVerify() {
   });
   if (setClickFxCk) setClickFxCk.addEventListener('change', () => {
     try { localStorage.setItem('ba_clickfx', setClickFxCk.checked ? '1' : '0'); } catch {}
+    showToast(t('set.restartHint'));
+  });
+  if (setClickFxStyle) setClickFxStyle.addEventListener('change', () => {
+    try { localStorage.setItem('ba_clickfx_style', setClickFxStyle.value); } catch {}
     showToast(t('set.restartHint'));
   });
   if (setJpOnlyCk) setJpOnlyCk.addEventListener('change', () => {

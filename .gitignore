@@ -7,6 +7,9 @@ assets/*
 !assets/ui/ui_i18n.json
 !assets/loading/
 !assets/clickfx/
+# clickfx 目錄只收自製的仿製模組（clickFx.js/.css）；
+# FX_TEX_* 為遊戲原版貼圖，由 private Assets repo 管線供給，不進 public repo
+assets/clickfx/FX_TEX_*.png
 dist/
 release/
 index.prod.html
