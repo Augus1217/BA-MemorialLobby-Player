@@ -4164,7 +4164,7 @@ function settingsPref(key, dflt) {
 function syncSettingsEffectCks() {
   if (setCursorCk) setCursorCk.checked = settingsPref('ba_cursor', true);
   if (setClickFxCk) setClickFxCk.checked = settingsPref('ba_clickfx', true);
-  if (setClickFxStyle) setClickFxStyle.value = settingsPref('ba_clickfx_style', 'authentic');
+  if (setClickFxStyle) setClickFxStyle.value = settingsPref('ba_clickfx_style', 'legacy');
   if (setJpOnlyCk) setJpOnlyCk.checked = settingsPref('ba_jpOnly', true);
   if (setStatsCk) setStatsCk.checked = statsEnabled();
 }
@@ -8207,7 +8207,7 @@ async function init() {
   await loadGameFonts();
   try {
     if (settingsPref('ba_clickfx', true)) {
-      if (settingsPref('ba_clickfx_style', 'authentic') === 'legacy') initClickFx();
+      if (settingsPref('ba_clickfx_style', 'legacy') === 'legacy') initClickFx();
       else initClickFxAuthentic();
     }
   } catch (e) {
