@@ -7524,28 +7524,89 @@ async function ensureReady() {
 
   if (/(?:^|&)skipUpdate=1/.test(location.search + location.hash)) return;
 
-  // 新 API：ba-web.js ensureAssets（web 版；intro 4MB 順便裝，否則首訪無開場音樂）
+  // 開機 gate 只擋 core+meta；intro（5.5MB）改背景補齊——慢網進場少等一截，
+  // 開場音樂/影片沒到位前缺席，下次進場就有（開機影片由內建 title.webm 頂著）
   if (window.ba?.ensureAssets) {
-    try { await window.ba.ensureAssets(['core', 'meta', 'intro'], showP); } catch (e) {
+    try { await window.ba.ensureAssets(['core', 'meta'], showP); } catch (e) {
       console.warn('[lobby] ensureAssets failed:', e.message);
     }
+    window.ba.ensureAssets(['intro'], showP).catch((e) =>
+      console.warn('[lobby] intro 背景下載失敗:', e.message));
   }
   // 舊 API fallback（Electron preload）
   else if (window.ba?.checkAssets) {
-    try {
+    // 開機進度：main 端 download-progress → boot 文字（包名 %、速度、ETA）；
+    // main 端 downloadFile 已含 Range 續傳/自動重試/吞吐 watchdog
+    const showBootProgress = () => {
+      if (!window.ba?.onDownloadProgress || !bootText) return () => {};
+      let last = null, emaBps = 0;
+      const fmtEta = (s) => (!Number.isFinite(s) || s < 0)
+        ? '' : `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`;
+      const cb = (p) => {
+        if (!p) return;
+        if (p.status === 'extracting') { bootText.textContent = t('dl.extracting', { pkg: p.package }); return; }
+        if (p.status !== 'downloading') return;
+        const now = performance.now();
+        if (last && p.downloaded != null && p.downloaded > last.b) {
+          const inst = (p.downloaded - last.b) * 1000 / Math.max(1, now - last.t);
+          emaBps = emaBps ? emaBps * 0.7 + inst * 0.3 : inst;
+        }
+        if (p.downloaded != null) last = { t: now, b: p.downloaded };
+        let line = t('dl.downloading', { pkg: p.package, i: (p.index ?? 0) + 1, n: p.total ?? 1 });
+        if (p.percent != null) line += ` ${p.percent}%`;
+        if (emaBps > 4096) {
+          line += ` · ${(emaBps / 1048576).toFixed(1)} MB/s`;
+          if (p.downloaded != null && p.bytesTotal) line += ` · 剩 ${fmtEta((p.bytesTotal - p.downloaded) / emaBps)}`;
+        }
+        bootText.textContent = line;
+      };
+      window.ba.onDownloadProgress(cb);
+      return () => { try { window.ba.offDownloadProgress?.(cb); } catch {} };
+    };
+    const bootDownload = async () => {
       const info = await Promise.race([
         window.ba.checkAssets({ voice: voiceLang, audioFmt: audioExt }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('checkAssets timeout')), 10000)),
       ]);
       _assetInfo = info;
-      // 開機只等核心三件（其餘缺包不擋進入，隨點隨下）
-      if (info.needsBootDownload && info.bootPacks?.length) {
-        await window.ba.downloadAssets({ version: info.remoteVersion, packages: info.packages, onlyPacks: ['core', 'meta', 'intro'], voice: voiceLang, audioFmt: audioExt });
-        try { _assetInfo = await window.ba.checkAssets({ voice: voiceLang, audioFmt: audioExt }); } catch {}
+      // 開機只等 core/meta（其餘缺包不擋進入，隨點隨下）
+      if (!(info.needsBootDownload && info.bootPacks?.length)) return;
+      const dlOnce = () => window.ba.downloadAssets({
+        version: info.remoteVersion, packages: info.packages,
+        onlyPacks: info.bootPacks, voice: voiceLang, audioFmt: audioExt,
+      });
+      const stopBootProgress = showBootProgress();
+      try {
+        let results = await dlOnce().catch(() => []);
+        // 包級保險自動重試：downloadFile 內部已重試 5 次含續傳，這裡再兜兩輪
+        for (let round = 1;
+             (results || []).some((r) => !r.ok && r.error !== 'cancelled') && round <= 2;
+             round++) {
+          if (bootText) bootText.textContent = t('dl.retrying', { n: round });
+          await new Promise((r) => setTimeout(r, 3000));
+          results = await dlOnce().catch(() => []);
+        }
+      } finally {
+        stopBootProgress();
       }
+      try { _assetInfo = await window.ba.checkAssets({ voice: voiceLang, audioFmt: audioExt }); } catch {}
+    };
+    try {
+      await bootDownload();
     } catch (e) {
       console.warn('[lobby] checkAssets failed/skipped:', e.message);
     }
+    // intro 背景補齊（嚴格 sha：已安裝就不重抓；dev 模式跳過——assets/ 是管線管理區）
+    try {
+      const isLocalDev = /^(127\.0\.0\.1|localhost)$/.test(location.hostname);
+      if (!isLocalDev && _assetInfo?.remoteVersion && _assetInfo?.packages?.intro &&
+          _assetInfo.installed?.['intro'] !== _assetInfo.packages.intro.sha256) {
+        window.ba.downloadAssets({
+          version: _assetInfo.remoteVersion, packages: _assetInfo.packages,
+          onlyPacks: ['intro'], requireMissing: true, voice: voiceLang, audioFmt: audioExt,
+        }).catch((e) => console.warn('[lobby] intro 背景下載失敗:', e.message));
+      }
+    } catch {}
   }
   // 確保 _assetInfo 有值（ensureLobbyAssets 會用到）
   if (!_assetInfo && window.ba?.checkAssets) {

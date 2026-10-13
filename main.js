@@ -483,9 +483,30 @@ function fetchJSON(url) {
   });
 }
 
+// 版本/manifest 抓取重試：啟動路徑對瞬斷要有韌性（Fastly 抖動常見）
+async function fetchJSONRetry(url, attempts = 3) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try { return await fetchJSON(url); }
+    catch (e) { lastErr = e; if (i < attempts - 1) await new Promise(r => setTimeout(r, 600 * 2 ** i)); }
+  }
+  throw lastErr;
+}
+
+// 下載單檔（韌性版）：
+//  - Range 續傳：dest.part 存在則帶 Range 接著抓（206 續寫、200 重來、416 棄 part）；
+//    成功才 rename 成 dest，中斷/取消都保留 .part 供下次（含下次啟動）續傳
+//  - 自動重試：網路類失敗指數退避（最多 DL_RETRY_MAX 次）；4xx（除 429/416）不重試
+//  - 吞吐 watchdog：完全無進度 DL_STALL_MS、或 DL_SLOW_SPAN_MS 窗口均速
+//    < DL_SLOW_BPS → 砍線重試（取代舊 300s 硬 timeout——慢而活的連線不再誤殺，
+//    卡死/掉速則換一條線接著抓）
+const DL_RETRY_MAX = 5;
+const DL_STALL_MS = 20000;      // 完全無位元組
+const DL_SLOW_SPAN_MS = 30000;  // 速度採樣窗
+const DL_SLOW_BPS = 10 * 1024;  // 均速低於此值持續一個窗口 → 重試
 function downloadFile(url, dest, onProgress, ctl) {
   return new Promise((resolve, reject) => {
-    let settled = false;
+    let settled = false, cancelled = false, attempt = 0, active = null, retryScheduled = false;
     const finish = (fn) => (...a) => {
       if (settled) return;
       settled = true;
@@ -493,44 +514,111 @@ function downloadFile(url, dest, onProgress, ctl) {
       fn(...a);
     };
     const ok = finish(resolve), fail = finish(reject);
-    const doRequest = (u) => {
-      const mod = u.startsWith('https') ? https : require('http');
-      const req = mod.get(u, { headers: { 'User-Agent': 'BA-MemorialLobby/1.0' } }, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          res.resume();
-          return doRequest(res.headers.location);
-        }
-        if (res.statusCode !== 200) {
-          res.resume();
-          return fail(new Error(`HTTP ${res.statusCode} for ${u}`));
-        }
-        const total = parseInt(res.headers['content-length'] || '0', 10);
-        let downloaded = 0;
-        const ws = fs.createWriteStream(dest);
-        if (ctl) {
-          ctl.cancel = () => {
-            try { req.destroy(); } catch {}
-            try { ws.destroy(); } catch {}
-            try { res.destroy(); } catch {}
-            fail(new Error('cancelled'));
-          };
-        }
-        res.on('data', (chunk) => {
-          downloaded += chunk.length;
-          if (onProgress) onProgress(downloaded, total);
-        });
-        res.on('error', fail);
-        res.pipe(ws);
-        ws.on('finish', () => ok({ size: downloaded }));
-        ws.on('error', fail);
-      });
-      req.on('error', fail);
-      req.setTimeout(300000, () => { req.destroy(); fail(new Error('Download timeout')); });
-      if (ctl && !ctl.cancel) {
-        ctl.cancel = () => { try { req.destroy(); } catch {} fail(new Error('cancelled')); };
-      }
+    const partPath = dest + '.part';
+    const backoff = (n) => Math.min(15000, 800 * 2 ** (n - 1));
+
+    const retryableFail = (err, retriable) => {
+      if (cancelled) return fail(new Error('cancelled'));
+      if (!retriable || attempt >= DL_RETRY_MAX) return fail(err);
+      if (retryScheduled) return;
+      retryScheduled = true;
+      setTimeout(() => {
+        retryScheduled = false;
+        if (!settled && !cancelled) tryOnce();
+      }, backoff(attempt));
     };
-    doRequest(url);
+
+    const tryOnce = () => {
+      attempt++;
+      let startOffset = 0;
+      try { startOffset = fs.existsSync(partPath) ? fs.statSync(partPath).size : 0; } catch {}
+      const headers = { 'User-Agent': 'BA-MemorialLobby/1.0' };
+      if (startOffset > 0) headers.Range = `bytes=${startOffset}-`;
+      let ws = null, watchdog = null;
+      let received = 0;                 // 本次連線接收量
+      let lastCur = startOffset, lastCurT = Date.now();
+      let winT = Date.now(), winB = startOffset;
+
+      const clearWatch = () => { if (watchdog) { clearInterval(watchdog); watchdog = null; } };
+      const abort = (err, retriable) => {
+        clearWatch();
+        try { if (ws) ws.destroy(); } catch {}
+        try { if (active) active.destroy(); } catch {}
+        retryableFail(err, retriable);
+      };
+
+      const doRequest = (u) => {
+        const mod = u.startsWith('https') ? https : require('http');
+        const req = mod.get(u, { headers }, (r2) => {
+          if (r2.statusCode >= 300 && r2.statusCode < 400 && r2.headers.location) {
+            r2.resume();
+            return doRequest(r2.headers.location);
+          }
+          if (r2.statusCode === 416 && startOffset > 0) {
+            // .part 已達全長（上次中斷在收尾）→ 棄 part 從頭抓
+            try { fs.rmSync(partPath, { force: true }); } catch {}
+            delete headers.Range;
+            startOffset = 0;
+            r2.resume();
+            return doRequest(u);
+          }
+          const resumeOK = startOffset > 0 && r2.statusCode === 206;
+          if (!resumeOK && r2.statusCode !== 200) {
+            r2.resume();
+            return abort(new Error(`HTTP ${r2.statusCode} for ${u}`),
+              r2.statusCode >= 500 || r2.statusCode === 429);
+          }
+          if (startOffset > 0 && r2.statusCode === 200) startOffset = 0; // 不支援續傳 → 重來
+          let total = startOffset + parseInt(r2.headers['content-length'] || '0', 10);
+          const cr = /\/(\d+)$/.exec(r2.headers['content-range'] || '');
+          if (cr) total = parseInt(cr[1], 10);
+
+          ws = fs.createWriteStream(partPath, { flags: resumeOK ? 'a' : 'w' });
+          lastCur = startOffset; lastCurT = Date.now();
+          winT = Date.now(); winB = startOffset;
+          if (onProgress) onProgress(startOffset, total);
+          r2.on('data', (chunk) => {
+            received += chunk.length;
+            if (onProgress) onProgress(startOffset + received, total);
+          });
+          r2.on('error', (e) => abort(e, true));
+          r2.pipe(ws);
+          ws.on('finish', () => {
+            clearWatch();
+            try { fs.renameSync(partPath, dest); } catch (e) { return fail(e); }
+            if (onProgress && total) onProgress(total, total);
+            ok({ size: total });
+          });
+          ws.on('error', (e) => abort(e, true));
+
+          watchdog = setInterval(() => {
+            const cur = startOffset + received;
+            const now = Date.now();
+            if (cur !== lastCur) { lastCur = cur; lastCurT = now; }
+            else if (now - lastCurT > DL_STALL_MS) return abort(new Error(`stall ${DL_STALL_MS / 1000}s`), true);
+            if (now - winT >= DL_SLOW_SPAN_MS) {
+              const bps = (cur - winB) / ((now - winT) / 1000);
+              if (bps < DL_SLOW_BPS) return abort(new Error(`slow ${Math.round(bps / 1024)}KB/s`), true);
+              winT = now; winB = cur;
+            }
+          }, 1000);
+        });
+        active = req;
+        req.on('error', (e) => { if (!cancelled) abort(e, true); });
+        // socket 層後備：完全靜默也會觸發
+        req.setTimeout(DL_STALL_MS + 5000, () => abort(new Error('socket idle'), true));
+      };
+      doRequest(url);
+    };
+
+    if (ctl) {
+      ctl.cancel = () => {
+        cancelled = true;
+        try { if (active) active.destroy(); } catch {}
+        if (!settled) fail(new Error('cancelled'));
+      };
+    }
+    tryOnce();
   });
 }
 
@@ -556,7 +644,7 @@ ipcMain.handle('check-assets', async (event, { voice, audioFmt } = {}) => {
 
   let remoteVersion = null;
   try {
-    remoteVersion = await fetchJSON(ASSETS_VERSION_URL);
+    remoteVersion = await fetchJSONRetry(ASSETS_VERSION_URL);
   } catch (e) {
     console.warn('[assets] 無法取得遠端版本:', e.message);
   }
@@ -565,7 +653,7 @@ ipcMain.handle('check-assets', async (event, { voice, audioFmt } = {}) => {
   //（audioPackFor 只在 manifest 有對端時才改取 m4a；下次啟動重試）。
   if (remoteVersion?.version) {
     try {
-      const m4aMeta = await fetchJSON(
+      const m4aMeta = await fetchJSONRetry(
         `${ASSETS_WORKER_BASE}/v${remoteVersion.version}-m4a/assets_version_m4a.json`);
       if (m4aMeta?.packages) {
         remoteVersion.packages = { ...remoteVersion.packages, ...m4aMeta.packages };
@@ -589,7 +677,9 @@ ipcMain.handle('check-assets', async (event, { voice, audioFmt } = {}) => {
       .filter(k => installed[k] !== remoteVersion.packages[k].sha256);
     needsDownloadPacks = selectPacks(allMissing,
       { voice, audioFmt, packages: remoteVersion.packages });
-    bootPacks = needsDownloadPacks.filter(k => k === 'core' || k === 'meta' || k === 'intro');
+    // 開機只擋 core/meta；intro 改背景補齊（app.js ensureReady 對應），
+    // 慢網進場少等 5.5MB
+    bootPacks = needsDownloadPacks.filter(k => k === 'core' || k === 'meta');
   }
 
   return {
@@ -622,7 +712,7 @@ function assertIpc(cond, what) {
   if (!cond) throw new Error(`bad IPC payload: ${what}`);
 }
 
-ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, voice, audioFmt }) => {
+ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, voice, audioFmt, requireMissing }) => {
   assertIpc(typeof version === 'string' && version && packages && typeof packages === 'object',
     'download-assets needs {version, packages}');
   const assetsDir = getAssetsDir();
@@ -636,7 +726,9 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, 
   if (onlyPacks && Array.isArray(onlyPacks)) {
     const mapped = selectPacks(onlyPacks, { voice, audioFmt, packages: remotePackages });
     pkgNames = mapped.filter(k => installed[k] !== remotePackages[k].sha256);
-    if (pkgNames.length === 0) pkgNames = mapped; // 串流：即使 sha 相同但本地檔案遺失也補下
+    // 串流：即使 sha 相同但本地檔案遺失也補下。requireMissing=true 時嚴格照 sha
+    // （供「intro 背景補齊」用——否則每次啟動都會重抓一遍）
+    if (pkgNames.length === 0 && !requireMissing) pkgNames = mapped;
   } else {
     pkgNames = selectPacks(
       Object.keys(remotePackages).filter(k => installed[k] !== remotePackages[k].sha256),
@@ -646,8 +738,18 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, 
     try { fs.writeFileSync(getAssetsVersionPath(), version); } catch {}
     return [];
   }
-  const tmpDir = path.join(os.tmpdir(), 'ba_download_' + Date.now());
+  // .part 續傳檔需跨啟動存活 → 放 assets 目錄下固定位置（舊的 os.tmpdir 隨機
+  // 目錄在 handler 結束時整個刪除，續傳無從接起）
+  const tmpDir = path.join(assetsDir, '.dl');
   fs.mkdirSync(tmpDir, { recursive: true });
+  // 清掉舊版本的殘留 part（同版本不同流程並行時名稱不同，不會互刪）
+  try {
+    const curSuffix = `-v${version}.tar.gz.part`;
+    for (const f of fs.readdirSync(tmpDir)) {
+      if (!f.endsWith('.part') || f.endsWith(curSuffix)) continue;
+      fs.rmSync(path.join(tmpDir, f), { force: true });
+    }
+  } catch {}
   const results = [];
   for (let i = 0; i < pkgNames.length; i++) {
     const name = pkgNames[i];
@@ -687,7 +789,11 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, 
   if (results.some(r => r.ok)) {
     try { fs.mkdirSync(assetsDir, { recursive: true }); fs.writeFileSync(getAssetsVersionPath(), version); } catch {}
   }
-  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  // 還有 .part（未完成的下載）就留著目錄供下次續傳；清空了才整個移除
+  try {
+    const leftover = fs.existsSync(tmpDir) && fs.readdirSync(tmpDir).some(f => f.endsWith('.part'));
+    if (!leftover) fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch {}
   return results;
 });
 
@@ -722,8 +828,18 @@ ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies
   });
   if (actuallyMissing.length === 0) return { ok: true, cached: true };
   // 下載指定 packs
-  const tmpDir = path.join(os.tmpdir(), 'ba_download_' + Date.now());
+  // .part 續傳檔需跨啟動存活 → 放 assets 目錄下固定位置（舊的 os.tmpdir 隨機
+  // 目錄在 handler 結束時整個刪除，續傳無從接起）
+  const tmpDir = path.join(assetsDir, '.dl');
   fs.mkdirSync(tmpDir, { recursive: true });
+  // 清掉舊版本的殘留 part（同版本不同流程並行時名稱不同，不會互刪）
+  try {
+    const curSuffix = `-v${version}.tar.gz.part`;
+    for (const f of fs.readdirSync(tmpDir)) {
+      if (!f.endsWith('.part') || f.endsWith(curSuffix)) continue;
+      fs.rmSync(path.join(tmpDir, f), { force: true });
+    }
+  } catch {}
   const results = [];
   for (let i = 0; i < actuallyMissing.length; i++) {
     const name = actuallyMissing[i];
@@ -755,7 +871,11 @@ ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies
   if (results.some(r => r.ok)) {
     try { fs.writeFileSync(getAssetsVersionPath(), version); } catch {}
   }
-  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  // 還有 .part（未完成的下載）就留著目錄供下次續傳；清空了才整個移除
+  try {
+    const leftover = fs.existsSync(tmpDir) && fs.readdirSync(tmpDir).some(f => f.endsWith('.part'));
+    if (!leftover) fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch {}
   const failed = results.filter(r => !r.ok);
   return failed.length ? { ok: false, results } : { ok: true, results };
 });
