@@ -34,6 +34,7 @@ const DEFAULT_CFG = {
   perScreen: {},        // { "1": "LobbyName" } display index → lobby（v1 可手編 json）
   sound: false,         // 桌布 BGM 預設關（常駐桌面不該出聲；設定可開）
   interact: false,      // true = 桌布可點擊（摸頭/說話）；false = 滑鼠穿透
+  launchAtLogin: false, // mac：登入啟動時自動進桌布（macOS login item 不帶 args，意圖記在 config）
   pauseFullscreen: true,// 偵測到全螢幕前景 → 暫停渲染＋靜音
   pauseBattery: true,   // 電池供電 → fps −15
 };
@@ -238,6 +239,10 @@ function syncClickProxy(rec) {
     proxy.once('ready-to-show', () => { try { proxy.showInactive(); } catch {} });
     // worker 是 canJoinAllSpaces——代理也跨 Space，互動模式才不會切 Space 就失效
     try { proxy.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch {}
+    // 壓到 Finder 桌面之上、一般視窗之下（floating(3)−503 ≈ level −500）：
+    // 點空白桌面才輪得到代理（Finder 桌面在更低的 desktop 層收不到），
+    // 點其他 app 視窗（level 0）照常命中原視窗、照常聚焦——不搶點擊
+    try { proxy.setAlwaysOnTop(true, 'floating', -503); } catch {}
     proxy.loadURL(PROXY_PAGE).catch((e) => console.error('[wallpaper] proxy loadURL:', e.message));
     console.log('[wallpaper] click proxy on (display', rec.index + ')');
   } else if (!want && existing) {
@@ -508,16 +513,34 @@ function autostartFile() {
   return path.join(os.homedir(), '.config', 'autostart', 'ba-memorial-lobby-wallpaper.desktop');
 }
 function getAutostart() {
-  if (process.platform === 'win32' || process.platform === 'darwin') {
+  if (process.platform === 'win32') {
     try { return app.getLoginItemSettings({ args: ['--wallpaper'] }).openAtLogin; } catch { return false; }
+  }
+  if (process.platform === 'darwin') {
+    // macOS login item（LSSharedFileList）不帶 args——用 args 過濾查詢永遠 miss，
+    // checkbox 會立刻彈回（實測 VM）。dev（npx electron）無法註冊自己 → 以 config
+    // 意圖為準；packaged 以 login item 實際狀態 ∧ config 意圖為準。
+    if (isDev) { try { return !!loadConfig().launchAtLogin; } catch { return false; } }
+    try {
+      return !!app.getLoginItemSettings().openAtLogin && !!loadConfig().launchAtLogin;
+    } catch { return false; }
   }
   try { return fs.existsSync(autostartFile()); } catch { return false; }
 }
 function setAutostart(on) {
-  if (process.platform === 'win32' || process.platform === 'darwin') {
+  if (process.platform === 'win32') {
     try {
       app.setLoginItemSettings({ openAtLogin: !!on, openAsHidden: true, args: ['--wallpaper'] });
     } catch (e) { console.error('[wallpaper] setLoginItemSettings failed:', e.message); }
+    return getAutostart();
+  }
+  if (process.platform === 'darwin') {
+    // args 在 macOS 存不進 login item；「進桌布」意圖改記 config.launchAtLogin，
+    // 啟動時由 maybeLoginAutostart() 判定。dev 不註冊 login item（會把裸
+    // Electron.app 加進登入項），只記 config。
+    try { if (!isDev) app.setLoginItemSettings({ openAtLogin: !!on, openAsHidden: true }); }
+    catch (e) { console.error('[wallpaper] setLoginItemSettings failed:', e.message); }
+    try { const cfg = loadConfig(); cfg.launchAtLogin = !!on; saveConfig(); } catch {}
     return getAutostart();
   }
   const file = autostartFile();
@@ -698,7 +721,19 @@ ipcMain.on('wallpaper-stage', (e, stage) => {
   }
 });
 
+// mac 登入啟動：login item 無法帶 args → 以 wasOpenedAtLogin + config 意圖判定
+function maybeLoginAutostart() {
+  if (process.platform !== 'darwin') return false;
+  try {
+    if (!app.getLoginItemSettings().wasOpenedAtLogin) return false;
+    if (!loadConfig().launchAtLogin) return false;
+    if (active) return true;
+    start();
+    return true;
+  } catch { return false; }
+}
+
 module.exports = {
   start, stop, status, setConfig, restoreIfEnabled, isActive,
-  setAutostart, getAutostart, shutdown, onState,
+  setAutostart, getAutostart, shutdown, onState, maybeLoginAutostart,
 };

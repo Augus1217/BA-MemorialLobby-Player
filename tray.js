@@ -11,6 +11,17 @@ let tray = null;
 function zh() { return String(app.getLocale() || '').toLowerCase().startsWith('zh'); }
 
 function iconImage() {
+  // macOS：狀態列需 16/32pt template（黑+alpha；「Template」後綴自動標記＋@2x 自動配對）
+  // ——彩色大圖（深藍底 app icon）在深色選單列會整顆隱形
+  if (process.platform === 'darwin') {
+    try {
+      const p = path.join(__dirname, 'build', 'trayTemplate.png');
+      if (fs.existsSync(p)) {
+        const img = nativeImage.createFromPath(p);
+        if (!img.isEmpty()) { img.setTemplateImage(true); return img; }
+      }
+    } catch {}
+  }
   const candidates = [
     path.join(__dirname, 'build', 'icon.png'),
     path.join(__dirname, 'favicon.ico'),

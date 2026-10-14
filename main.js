@@ -1071,6 +1071,11 @@ app.whenReady().then(async () => {
   try {
     if (wantWallpaper) wallpaper.start();
     else if (!isDev) wallpaper.restoreIfEnabled();
+    // mac 登入啟動：login item 帶不了 args（LSSharedFileList）→ 以
+    // wasOpenedAtLogin + config.launchAtLogin 判定是否直接進桌布
+    if (process.platform === 'darwin') {
+      try { wallpaper.maybeLoginAutostart(); } catch {}
+    }
   } catch (e) { console.error('[wallpaper] start failed:', e.message); }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
