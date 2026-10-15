@@ -99,6 +99,14 @@ npm start
 - WebAudio `AnalyserNode` 即時嘴幅；ffmpeg（ffmpeg-static）影片編碼
 - i18n：`assets/ui/ui_i18n.json`（五語言）＋ app 內 `CTL_I18N`（HUD 文字）
 
+## 平台支援
+
+| 平台 | 狀態 | 備註 |
+|---|---|---|
+| Windows 10/11 | ✅ 完整支援 | WorkerW 掛載（koffi）＋全螢幕暫停 |
+| Linux（X11/XWayland） | ✅ 完整支援 | `type:'desktop'`；GNOME 需 AppIndicator 擴充 |
+| macOS 11+（Intel/Apple Silicon universal） | 🧪 **Beta** | 桌布層級／互動／狀態列已於 VM 實測（見 `docs/wallpaper-mode.md`）；Space 跟隨、登入自啟（需打包版）與實體 mac 效能未驗證 |
+
 ## 已知限制
 
 - 偶爾顯示日文＝該角色 Global 版尚未實裝，無官方翻譯時 fallback 日文；實裝後管線自動補上
@@ -205,6 +213,14 @@ Source paths overridable via env (`BA_SRC_SPINE`, `BA_SRC_MEDIA`, `BA_SRC_BGM`, 
 - pixi.js 8, @esotericsoftware/spine-pixi-v8 (spine-core 4.2)
 - WebAudio `AnalyserNode` live mouth amplitude; ffmpeg (ffmpeg-static) encoding
 - i18n: `assets/ui/ui_i18n.json` (5 languages) + in-app `CTL_I18N` (HUD strings)
+
+## Platform support
+
+| Platform | Status | Notes |
+|---|---|---|
+| Windows 10/11 | ✅ Fully supported | WorkerW mounting (koffi) + fullscreen pause |
+| Linux (X11/XWayland) | ✅ Fully supported | `type:'desktop'`; GNOME needs AppIndicator extension |
+| macOS 11+ (Intel/Apple Silicon universal) | 🧪 **Beta** | Wallpaper layering / interaction / menu-bar icon tested in a VM (see `docs/wallpaper-mode.md`); Space following, login autostart (packaged build only) and real-hardware performance unverified |
 
 ## Known limitations
 
