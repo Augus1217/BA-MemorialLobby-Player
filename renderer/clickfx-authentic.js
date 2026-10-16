@@ -28,6 +28,25 @@
 //  • UVModule 真行為 = WholeSheet 滑動視窗（startFrame/frameOverTime ∈ [0,0.5]），
 //    視窗由框 0 滑向框 1（非隨機固定框）
 //  • Cylinder002 UV0：u=環周角度、v=帶寬方向（130 頂點、雙圈 r=1.0/1.0637）
+//
+// ── v3.2 第三輪：APK 資料堆挖出「shader／NGUI 縮放／bloom」三件事（2026-10-16）──
+//  • Shader 本體（各 FX 材質 externals[0]）名字與 blend 全解出：
+//      Tri 2（碎片/puffs） DSFX/FX_SHADER_Additive_0    blend One/One（純加法）
+//      TouchFXTrail（Trail）同 shader                    blend One/One
+//      Tri3（環）          Shader Graphs/FX_SHADER_Dissolve_GachaGauge_P  SrcAlpha/One
+//      Cross2（盤）        DSFX/FX_SHADER_AlphaBlend_Add One/OneMinusSrcAlpha（alpha 疊合）
+//    → Canvas2D 'lighter' 對碎片/puffs/Trail/環成立；盤嚴格說是 One/OneMinusSrcAlpha（近似）
+//  • HDR 倍率（材質 _Color >1 即 HDR，光暈的真正來源）：
+//      Tri 2 ×5.992157（碎片/puffs，再乘 startColor 0.5377 → 3.222）
+//      Tri3 ×5.992157（環；屬性名 Color_D20A2F66）  Cross2 ×2.0（盤）  Trail ×23.968628
+//  • NGUI 縮放鏈：level1 UICamera 正交 orthographicSize=1.0 → 半高 1 世界單位 →
+//      1 單位 = 畫面高/2 px（1080p=540）＝FA 的直接來源（不再只是校準）
+//      FX 生成於 scale=1 的父節點（TouchEffectCreater／場景根），不吃 UI Root 的 0.00114
+//  • 泛光真的存在：URP + 自訂 renderer feature（UIRenderFeature 掛在 PotalRenderer）
+//      MXBloomSettings{Threshold 1.0, SoftKnee, Diffusion 1.7, AnamorphicRatio} +
+//      UIRenderPassSettings{GrabRTBeforeUI, UIRenderWidth/Height, scatter…} + compute blur
+//    → Canvas2D 無法複製 GPU bloom，改以 _Color 的 HDR 疊繪近似其「核心過曝」
+//  • FX 物件 layer：碎片/puffs=8(LetterBox)、盤/環/Trail=13(UIAlwaysVisible)
 
 const texURL = (n) => new URL(`assets/clickfx/${n}.png`, location.href).href;
 
@@ -39,7 +58,9 @@ const TEX_LIST = [
 ];
 
 const DESIGN_H = 1080;
-const FA = DESIGN_H / 2;                     // 540：盤/環/trail 的 px/單位
+// FA：盤/環/trail 的 px/單位。由 level1 UICamera.orthographicSize=1.0 推導：
+// 相機半高=1 世界單位 → 1 單位 = 畫面高/2 px（1080p=540），不再是校準值
+const FA = DESIGN_H / 2;
 const PASC = 0.3078824;                      // Ring(3)/Ring(4) localScale（CAB T7/T8）
 const PA = FA * PASC;                        // 166.26 px/單位（碎片/puffs）
 const RING_OUTER = 1.0637;                   // Cylinder002 外圈頂點半徑
@@ -114,6 +135,14 @@ const TRAIL = {  // Trail GO：TrailRenderer 真值
   // TrailRenderer colorGradient（頭亮→尾黑；此處以尾→頭表示，數值同真值）
   lenGradient: [[0, [0, 0, 0]], [0.5794156, [0, 24.19, 72]], [0.97941558, [0, 99.6, 255]], [1, [0, 99.6, 255]]],
 };
+
+// ---- HDR 倍率：材質 _Color（>1 即 HDR）----
+//   Tri 2（碎片/puffs）5.992157、Tri3（環）5.992157、Cross2（盤）2.0、Trail 23.968628
+// （碎片/puffs 的 startColor 0.5377 已含在 SHARDS.mul／PUFFS.mul，這裡只乘 _Color）
+// Canvas2D 無 HDR framebuffer → 以「重複加法疊繪 n 次」近似：核心自然疊到白＝遊戲過曝
+const HDR = { disk: 2.0, ring: 5.992157, shard: 5.992157, trail: 23.968628 };
+const HDR_REP_MAX = 4;
+const hdrReps = (g) => Math.max(1, Math.min(HDR_REP_MAX, Math.round(g)));
 
 // ---- 引擎 ----
 export function initClickFxAuthentic() {
@@ -309,20 +338,23 @@ export function initClickFxAuthentic() {
           if (!Number.isFinite(r) || r <= 0) continue;
           const t = tinted(p, k, alpha);
           if (!t) continue;
+          const n = hdrReps(HDR.disk);
           ctx.save();
           ctx.translate(p.x, p.y);
           ctx.rotate(p.rot || 0);
-          ctx.globalAlpha = t.a * 0.35;         // 光暈近似層
+          ctx.globalAlpha = t.a * 0.35;         // 光暈近似層（固定，不乘 gain）
           const gr = r * 1.35;
           ctx.drawImage(t.c, -gr, -gr, gr * 2, gr * 2);
-          ctx.globalAlpha = t.a;
-          ctx.drawImage(t.c, -r, -r, r * 2, r * 2);
+          // 核心 × HDR 2.0（材質 _Color）
+          ctx.globalAlpha = Math.min(1, t.a * HDR.disk / n);
+          for (let q = 0; q < n; q++) ctx.drawImage(t.c, -r, -r, r * 2, r * 2);
           ctx.restore();
         } else if (p.kind === 'ring') {
           // 擴張環：外徑 = size0×1.0637×curve，帶寬 5.99% 外徑
           const outer = p.rBase * evalKeys(p.sizeKeys, k) * scale;
           if (!Number.isFinite(outer) || outer <= 0) continue;
           const band = Math.max(1.5, outer * RING_BAND);
+          const rn = hdrReps(HDR.ring);
           const [r0, g0, b0] = rgb.map((v) => v | 0);
           ctx.save();
           // 光暈近似層（仿製版 bloom 的 Canvas2D 替代）
@@ -346,9 +378,7 @@ export function initClickFxAuthentic() {
             }
             ctx.strokeStyle = cg;
             ctx.lineWidth = band;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, outer, 0, TAU);
-            ctx.stroke();
+            for (let q = 0; q < rn; q++) { ctx.beginPath(); ctx.arc(p.x, p.y, outer, 0, TAU); ctx.stroke(); }
           } else {
             const g = ctx.createRadialGradient(p.x, p.y, Math.max(0, outer - band / 2), p.x, p.y, outer + band / 2);
             g.addColorStop(0, `rgba(${r0},${g0},${b0},0)`);
@@ -356,9 +386,7 @@ export function initClickFxAuthentic() {
             g.addColorStop(1, `rgba(${r0},${g0},${b0},0)`);
             ctx.strokeStyle = g;
             ctx.lineWidth = band;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, outer, 0, TAU);
-            ctx.stroke();
+            for (let q = 0; q < rn; q++) { ctx.beginPath(); ctx.arc(p.x, p.y, outer, 0, TAU); ctx.stroke(); }
           }
           ctx.restore();
         } else if (p.kind === 'tri') {
@@ -371,10 +399,12 @@ export function initClickFxAuthentic() {
           const img = texs[p.tex];
           const fp = Math.min(1, p.sf + p.fo * k);
           const x0 = fp * (img.width / 2);
+          const n = hdrReps(HDR.shard);
           ctx.save();
           ctx.translate(p.x, p.y);
-          ctx.globalAlpha = t.a;
-          ctx.drawImage(t.c, x0, 0, img.width / 2, img.height, -s / 2, -s / 2, s, s);
+          // 核心 × HDR 5.992（材質 _Color；startColor 0.5377 已含在 mul）
+          ctx.globalAlpha = Math.min(1, t.a * HDR.shard / n);
+          for (let q = 0; q < n; q++) ctx.drawImage(t.c, x0, 0, img.width / 2, img.height, -s / 2, -s / 2, s, s);
           ctx.restore();
         }
       }
@@ -412,7 +442,9 @@ export function initClickFxAuthentic() {
     ctx.lineJoin = 'round';
     ctx.strokeStyle = grad;
     ctx.lineWidth = Math.max(2, (TRAIL.coreWidth + TRAIL.glowWidth) * scale);
-    ctx.stroke();
+    // × HDR 23.97（材質 _Color）：重複疊繪使核心過曝發白（近似遊戲 HDR+bloom）
+    const tn = hdrReps(HDR.trail);
+    for (let q = 0; q < tn; q++) ctx.stroke();
   }
 
   window.addEventListener('pointerdown', onDown, { passive: true });
