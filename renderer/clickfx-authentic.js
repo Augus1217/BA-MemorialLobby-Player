@@ -17,6 +17,17 @@
 // 材質映射（CAB renderer m_Materials）：Ring(3)/Ring(4)→FX_MAT_Touch_Tri 2
 // （=Triangle_02_1）；MeshTri→FX_MAT_Touch_Tri3（=Grad_Ring3）；
 // ring→FX_MAT_Touch_Cross2（=Circle_01）；Trail→FX_MAT_TouchFXTrail（=Trail_03）。
+//
+// ── v3.1 第二輪 CAB 驗證補正（2026-10-16）──
+//  • Unity 2021.3.56f2；shapeType 10=CircleEdge（生成環=radius1.0×scale）、18=Donut；
+//    disk/MeshTri 的 shape 停用 → 中心生成
+//  • MinMaxGradient 語意（UnityCsReference）：Color 模式生效值 = m_ColorMax →
+//    碎片/puffs startColor = 灰 0.5377（壓暗），盤/環 = 白；「藍 minColor」為切模式殘值
+//  • bursts：disk 1、MeshTri 2、Ring3 4、Ring4 無爆發（rateOverDistance=5.0）
+//  • 盤 startSize = rand(0.12,0.14)（InitialModule state 3，非固定值）
+//  • UVModule 真行為 = WholeSheet 滑動視窗（startFrame/frameOverTime ∈ [0,0.5]），
+//    視窗由框 0 滑向框 1（非隨機固定框）
+//  • Cylinder002 UV0：u=環周角度、v=帶寬方向（130 頂點、雙圈 r=1.0/1.0637）
 
 const texURL = (n) => new URL(`assets/clickfx/${n}.png`, location.href).href;
 
@@ -64,7 +75,8 @@ const TAU = Math.PI * 2;
 // ---- 子系統真值（CAB）----
 const DISK = {   // ring PS_15：Circle_01 白閃盤
   lifeMs: 200,
-  rBase: 0.12 * 2.0 / 2 * FA,               // 半徑上限 64.8px（startSize0.12×SizeScalar2.0）
+  sizeMin: 0.12, sizeMax: 0.14,             // startSize state 3：rand(0.12,0.14)（真值）
+  sizeScalar: 2.0,                          // SizeModule scalar（直徑倍率）→ 半徑 64.8–75.6px
   sizeKeys: [[0, 0.3258358], [0.21392822, 0.7159773], [1, 1]],
   colorKeys: [[0, [255, 255, 255]], [0.1205921, [61.3, 99.6, 255]], [1, [0, 0, 0]]],
   alphaKeys: [[0, 1], [0.1088273, 1], [1, 0]],
@@ -79,6 +91,7 @@ const RINGS = {  // MeshTri PS_16：Cylinder002 環面網格 × Grad_Ring3
 };
 const SHARDS = { // Ring(3) PS_18：三角碎片 ×4（三連閃、無自旋、無阻尼）
   count: 4, lifeMinMs: 600, lifeMaxMs: 700,
+  mul: 0.5377358,                           // startColor 常數 = maxColor 灰 0.5377（真值壓暗）
   spawnR: 0.3 * PA, speedMin: 0.3 * PA, speedMax: 0.4 * PA,
   sizeMin: 0.1 * PA, sizeMax: 0.2 * PA,
   sizeKeys: [[0, 0], [0.15445095, 1], [1, 0]],
@@ -88,6 +101,7 @@ const SHARDS = { // Ring(3) PS_18：三角碎片 ×4（三連閃、無自旋、�
 };
 const PUFFS = {  // Ring(4) PS_17：拖曳小片（同 Ring(3) 材質與閃爍）
   spacingPx: FA / 5,                        // rateOverDistance 5/單位 → 每 108px
+  mul: 0.5377358,                           // startColor 常數 = maxColor 灰 0.5377（真值壓暗）
   spawnR: 0.15 * PA, speedMin: 0.2 * PA, speedMax: 0.3 * PA,
   lifeMinMs: 200, lifeMaxMs: 400,
   sizeMin: 0.1 * PA, sizeMax: 0.2 * PA,
@@ -150,15 +164,15 @@ export function initClickFxAuthentic() {
 
   // ---- 預染色 ramp：沿該部件自己的色曲線取 12 樣（白→藍→深藍→黑 都精確）----
   const RAMP_N = 12;
-  function tintRamp(texName, colorKeys) {
-    const key = `${texName}|${JSON.stringify(colorKeys)}`;
+  function tintRamp(texName, colorKeys, mul) {
+    const key = `${texName}|${mul}|${JSON.stringify(colorKeys)}`;
     let ramp = tints.get(key);
     if (ramp) return ramp;
     const img = texs[texName];
     if (!img) return null;
     ramp = [];
     for (let i = 0; i < RAMP_N; i++) {
-      const [r, g, b] = evalColor(colorKeys, i / (RAMP_N - 1)).map((v) => v | 0);
+      const [r, g, b] = evalColor(colorKeys, i / (RAMP_N - 1)).map((v) => Math.min(255, (v * mul) | 0));
       const c = document.createElement('canvas');
       c.width = img.width; c.height = img.height;
       const x = c.getContext('2d');
@@ -174,7 +188,7 @@ export function initClickFxAuthentic() {
     return ramp;
   }
   function tinted(p, k, alpha) {
-    const ramp = p._ramp || (p._ramp = tintRamp(p.tex, p.colorKeys));
+    const ramp = p._ramp || (p._ramp = tintRamp(p.tex, p.colorKeys, p.mul || 1));
     if (!ramp) return null;
     const f = Math.max(0, Math.min(1, k));
     return { c: ramp[Math.round(f * (RAMP_N - 1))], a: alpha };
@@ -187,7 +201,8 @@ export function initClickFxAuthentic() {
     // ring(PS_15)：白閃盤，1 顆，0.2s
     spawn({
       kind: 'sprite', tex: 'Circle_01', x, y, t: 0, life: DISK.lifeMs / 1000,
-      rBase: DISK.rBase, sizeKeys: DISK.sizeKeys, colorKeys: DISK.colorKeys,
+      rBase: rand(DISK.sizeMin, DISK.sizeMax) * DISK.sizeScalar / 2 * FA,
+      sizeKeys: DISK.sizeKeys, colorKeys: DISK.colorKeys,
       alphaKeys: DISK.alphaKeys, rot: rand(0, TAU),
     });
     // MeshTri(PS_16)：擴張環 ×2（burst 2），隨機尺寸、隨機初轉、0-1 rad/s 慢旋
@@ -202,8 +217,10 @@ export function initClickFxAuthentic() {
     // Ring(3)(PS_18)：三角碎片 ×4（burst 4），CircleEdge 隨機角、外飛、無自旋
     for (let i = 0; i < SHARDS.count; i++) {
       const ang = rand(0, TAU);
+      // UVModule 真值：startFrame/frameOverTime 各 U[0,0.5]（WholeSheet 滑動視窗）
+      const sf = rand(0, 0.5), fo = rand(0, 0.5);
       spawn({
-        kind: 'tri', tex: 'Triangle_02_1', frame: (Math.random() * 2) | 0,
+        kind: 'tri', tex: 'Triangle_02_1', sf, fo, mul: SHARDS.mul,
         x: x + Math.cos(ang) * SHARDS.spawnR * scale, y: y + Math.sin(ang) * SHARDS.spawnR * scale,
         t: 0, life: rand(SHARDS.lifeMinMs, SHARDS.lifeMaxMs) / 1000,
         vx: Math.cos(ang) * rand(SHARDS.speedMin, SHARDS.speedMax) * scale,
@@ -237,8 +254,9 @@ export function initClickFxAuthentic() {
     if (puffAcc >= PUFFS.spacingPx * scale) {
       puffAcc = 0;
       const ang = rand(0, TAU);
+      const sf = rand(0, 0.5), fo = rand(0, 0.5);
       spawn({
-        kind: 'tri', tex: 'Triangle_02_1', frame: (Math.random() * 2) | 0,
+        kind: 'tri', tex: 'Triangle_02_1', sf, fo, mul: PUFFS.mul,
         x: e.clientX + Math.cos(ang) * PUFFS.spawnR * scale,
         y: e.clientY + Math.sin(ang) * PUFFS.spawnR * scale,
         t: 0, life: rand(PUFFS.lifeMinMs, PUFFS.lifeMaxMs) / 1000,
@@ -344,17 +362,19 @@ export function initClickFxAuthentic() {
           }
           ctx.restore();
         } else if (p.kind === 'tri') {
-          // 三角碎片/puffs：atlas 兩框 billboard，quad 邊長 = size，無旋轉
+          // 三角碎片/puffs：atlas billboard，quad 邊長 = size，無旋轉；UVModule WholeSheet：
+          // 視窗位置 framepos = startFrame + frameOverTime×lifeK，由框 0 滑向框 1
           const s = p.sBase * evalKeys(p.sizeKeys, k) * scale;
           if (!Number.isFinite(s) || s <= 0) continue;
           const t = tinted(p, k, alpha);
           if (!t) continue;
           const img = texs[p.tex];
-          const fx = (p.frame || 0) * (img.width / 2);
+          const fp = Math.min(1, p.sf + p.fo * k);
+          const x0 = fp * (img.width / 2);
           ctx.save();
           ctx.translate(p.x, p.y);
           ctx.globalAlpha = t.a;
-          ctx.drawImage(t.c, fx, 0, img.width / 2, img.height, -s / 2, -s / 2, s, s);
+          ctx.drawImage(t.c, x0, 0, img.width / 2, img.height, -s / 2, -s / 2, s, s);
           ctx.restore();
         }
       }
