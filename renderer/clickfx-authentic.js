@@ -1,37 +1,47 @@
-// clickfx-authentic.js — BA UI 觸控特效「原版重製」
-// 參數逐項轉錄自 game bundle assets-_mx-etceffects-uifx-uiuserinteraction_fx
-// （完整規格見 BA-MemorialLobby-Assets/data/clickfx_choreography.json，commit b775c28）。
-// 22 系統中的 tap 家族（Touch_Start_01 ×8 + Touch_End_01 ×13）+ 拖曳筆線
-// （Progress_Trail_01/02 子系統；遊戲以 dragTouchEffects 沿路徑生成實例，本模組同構）。
-// 貼圖＝遊戲原版 FX_TEX_*（assets/clickfx/，由 Assets repo manual/clickfx 管線供給）。
-// 渲染：Canvas2D additive（lighter + CSS plus-lighter）模擬 Unity HDR bloom——
-// 小粒子多尺度疊 draw 出白心，大粒子（巨環／漣漪）單層保忠實 alpha；
-// Stretch 系統沿速度方向拉伸；3D 環 mesh 以 Circle_Ring_10 貼圖近似。
+// clickfx-authentic.js — BA UI 觸控特效「原版重製」v2
+// ═══ 依據真實全域點擊特效 FX_Touch prefab 重寫（2026-10-15 定位）═══
+// 源頭：base APK 內建資料 23c05e7f…（資源路徑 UI/FX_TouchUI，管理器
+// TouchEffectCreater 掛內建 level1 場景）——不是下載 bundle，全域恆在。
+// 完整規格：BA-MemorialLobby-Assets/data/fx_touch_spec.json。
+//
+// ⚠ 歷史：v1 轉錄的 FX_UIUserInteractionTouch_Start/End_01（22 系統，
+// choreography.json）屬 UIUserInteractionTouch/Progress QTE 框架
+// （slider/touchAccuracy/GetProgressRatio）＝特殊情境效果，非全域點擊——已棄用。
+//
+// 五個子系統（Unity 真值 × 舊版仿製模組的像素校準，兩源逐項吻合）：
+//   disk    1 顆閃盤  200ms  r64.8px   FX_TEX_Circle_01（白→#3D64FF，擴張後熄滅）
+//   rings   2 道細環  600ms  r69/80px  FX_TEX_Grad_Ring3（白→#4CA6FF）
+//           ——Grad_Ring3 實為「兩端透明中央不透明」的漸層帶（非環形圖），
+//             遊戲以 arc-mesh 繞圓；此處以徑向漸層細環帶重現（band≈6% 半徑），
+//             尺寸 0.42→1 擴張、後段旋轉收弧（dissolve wipe）＋淡出
+//   shards  4 片三角  600-700ms  spawn r49.9px、speed 50-66.5px/s
+//           FX_TEX_Triangle_02_1 兩幀 atlas（左右半幅各一三角；白→#5AA6FF）
+//   trail   拖曳    300ms  core 2.7px + glow   FX_TEX_Trail_03（左亮右暗，
+//           亮側朝移動方向）＋ 拖曳細環 puffs（Ring(4)：200-400ms）
+// 校準：設計高 1080（FA=540）；ring 系速度 ×PA=FA×0.3078824（原模組同源）。
+// 遊戲原值：MeshTri maxParticles=3、Ring(3) life 0.6-0.7s/speed 0.3-0.4、
+// Ring(4) loop 0.2s、TrailRenderer m_Time 0.3——仿製版 clickCount=4 為其微調，從之。
 
-// 貼圖路徑：以頁面 URL 相對解析（dev 根路徑與 prod 打包都成立；
-// 不要用 new URL(x, import.meta.url)——vite 會把動態模板字串轉成 import.meta.glob 導致路徑錯亂）
 const texURL = (n) => new URL(`assets/clickfx/${n}.png`, location.href).href;
-const PX = 50;            // Unity world unit → px（巨環自動 clamp 螢幕）
 
-// ---- 貼圖清單（遊戲原版，檔名＝bundle 內材質 _MainTex 名）----
+// ---- 貼圖（檔名＝bundle 內材質 _MainTex 名）----
 const TEX_LIST = [
-  'FX_TEX_Circle_Glow_01_Clamp_1', // Glow_A/B 軟光盤（Circle_Glow_01_UI）
-  'FX_TEX_Circle_01',              // Circle 白閃盤（Circle_Glow_02_UI）
-  'FX_TEX_Bulletline_08',          // P_Dot 圓點（Shot_01_UI）
-  'FX_TEX_Flare_26',               // P_Flare 金閃（Flare_01_UI）
-  'FX_TEX_Stretch_Line_01a_Clamp', // P_Spot 楔形三角（Spot_Light_01_UI）
-  'FX_TEX_Hit_07i',                // HIt_01 金星爆（Hit_02_UI）
-  'FX_TEX_Shock_Wave_14',          // HIt_02 碎片（Hit_01_UI mask）
-  'FX_TEX_Circle_Ring_10',         // Ring 環（Ring_Glow_01_UI／3D mesh 近似）
-  'FX_TEX_Flare_18',               // Trail Light 光斑（TopConfrontationGauge_1）
-  'FX_TEX_Circle_Glow_02',         // Trail aura_2（Trail_Wave_02_UI main）
-  'FX_TEX_Glow_13',                // Trail aura_6（Trail_Wave_03_UI main）
-  'FX_TEX_Glow_Trail_01',          // Trail aura_1/3/7/8（Trail_Wave_01_UI main）
-  'FX_TEX_Lightning_Line_19',      // Trail 閃電（Lightning_01_UI main）
+  'FX_TEX_Circle_01',     // disk：白閃盤（黑角透明）
+  'FX_TEX_Grad_Ring3',    // rings：漸層帶 256x128（alpha 中央峰）
+  'FX_TEX_Triangle_02_1', // shards：三角兩幀 atlas 256x128
+  'FX_TEX_Trail_03',      // trail：左亮右暗彗星 256x256
 ];
 
-// ---- 曲線工具 ----
-function evalKeys(keys, k) {          // keys: [[t,v],...] 升冪；回傳線性插值
+// ---- 校準常數（原仿製模組同源）----
+const DESIGN_H = 1080;
+const FA = DESIGN_H / 2;                    // 540
+const OT = 1.0636684;                       // rings 半徑係數
+const PA = FA * 0.3078824;                  // 166.26 px per particle-world-unit
+const RING_ROT_MULT = 11.170107;
+const RING_ROT_DIR = -1;
+
+// ---- 曲線工具（keys: [[t, v, ...], ...] 取值線性插值，相切數分量忽略）----
+function evalKeys(keys, k) {
   if (!keys || !keys.length) return 1;
   if (k <= keys[0][0]) return keys[0][1];
   for (let i = 1; i < keys.length; i++) {
@@ -42,89 +52,58 @@ function evalKeys(keys, k) {          // keys: [[t,v],...] 升冪；回傳線性
   }
   return keys[keys.length - 1][1];
 }
+function evalColor(keys, k) {   // keys: [[t, [r,g,b]], ...] → [r,g,b] 0-255
+  if (!keys || !keys.length) return [255, 255, 255];
+  if (k <= keys[0][0]) return keys[0][1];
+  for (let i = 1; i < keys.length; i++) {
+    if (k <= keys[i][0]) {
+      const [t0, c0] = keys[i - 1], [t1, c1] = keys[i];
+      const f = t1 === t0 ? 1 : (k - t0) / (t1 - t0);
+      return c1.map((c, j) => c0[j] + (c - c0[j]) * f);
+    }
+  }
+  return keys[keys.length - 1][1];
+}
 const rand = (a, b) => a + Math.random() * (b - a);
+const TAU = Math.PI * 2;
 
-// ---- 系統資料表（轉錄；colorEnv 為 alpha 包絡近似——加法混合下等效）----
-// tex: 貼圖鍵（TEX_LIST 去前綴）、c: startColor、life/speed/size: [min,max] 或常數、
-// sz: 尺寸曲線 keys（t 0-1, v 0-1）×mul、env: alpha 包絡、stretch: 沿速度拉伸倍率、
-// burst: [[t,count],...]、sort: 繪製序（大者後畫→在上層）
-const S = (o) => o;
-
-const TOUCH_START = [
-  S({ name: 'Glow_B(暗盤-吸入)', tex: 'Circle_Glow_01_Clamp_1', c: '#1b1c1f', life: 0.7, speed: 0, size: 2.82,
-      sz: { keys: [[0, 0.88], [0.57, 0]], mul: 1 }, env: [[0, 1], [0.3, 1], [1, 0]], sort: 0 }),
-  S({ name: 'Glow_A(閃盤)', tex: 'Circle_Glow_01_Clamp_1', c: '#5facff', life: 0.4, speed: 0, size: 1.52,
-      sz: { keys: [[0, 1], [1, 0]], mul: 1.5 }, env: [[0, 1], [0.15, 1], [0.3, 0.6], [1, 0]], sort: 2 }),
-  S({ name: 'Ring_Glow(慢漣漪)', tex: 'Circle_Ring_10', c: '#1b699c', life: 0.5, speed: 0, size: 2.25,
-      sz: { keys: [[0, 0], [0.15, 0.82], [1, 1]], mul: 1 }, env: [[0, 0], [0.03, 1], [1, 0]], sort: 2 }),
-  S({ name: 'Ring_Glow_2(快環)', tex: 'Circle_Ring_10', c: '#1b699c', life: 0.3, speed: 0, size: 5.59,
-      sz: { keys: [[0, 1], [0.5, 0.24], [1, 0.19]], mul: 1 }, env: [[0, 0], [0.15, 1], [0.676, 0.5], [1, 0]], sort: 2 }),
-  S({ name: 'Circle(軟盤)', tex: 'Circle_01', c: '#49a5ff', life: 0.8, speed: 0, size: 0.39,
-      sz: { keys: [[0, 0.36], [0.21, 1]], mul: 1 }, env: [[0, 0.36], [0.2, 1], [0.819, 0.4], [1, 0]], sort: 3 }),
-  S({ name: 'Ring(3D環)', tex: 'Circle_Ring_10', c: '#69b3ff', life: 0.6, speed: 0, size: 0.25,
-      sz: { keys: [[0, 1], [0.38, 0.33], [1, 0.29]], mul: 1 }, env: [[0, 0], [0.144, 1], [0.75, 0.7], [1, 0]], sort: 4 }),
-  S({ name: 'P_Dot(淚滴)', tex: 'Bulletline_08', c: '#66aeff', life: [0.3, 0.7], speed: [5, 12], size: [0.1, 0.2],
-      sz: { keys: [[0, 0], [0.08, 1], [1, 0]], mul: 0.365 }, env: [[0, 0], [0.08, 1], [1, 0]], stretch: 5, burst: 5,
-      shapeR: 0.11, sort: 5 }),
-  S({ name: 'P_Flare(金星)', tex: 'Flare_26', c: '#ffdc6d', life: [0.3, 0.65], speed: [3, 3.4], size: [0.2, 0.6],
-      sz: { keys: [[0, 0], [0.07, 1], [0.22, 0.34], [0.31, 0.9], [0.43, 0.31], [0.53, 0.84], [0.67, 0.35], [0.81, 0.7], [1, 0]], mul: 1 },
-      env: [[0, 0.9], [0.2, 1], [0.5, 0.8], [0.942, 0], [1, 0]], rot0: Math.PI / 4, burst: 7, shapeR: 0.4, sort: 6 }),
-];
-
-const TOUCH_END = [
-  S({ name: 'Glow_B(暗盤)', tex: 'Circle_Glow_01_Clamp_1', c: '#1b1c1f', life: 0.5, speed: 0, size: 3.78,
-      sz: { keys: [[0, 0.88], [0.57, 0]], mul: 1 }, env: [[0, 0.89], [0.3, 0.7], [1, 0]], sort: 0 }),
-  S({ name: 'Glow_A(成長盤)', tex: 'Circle_Glow_01_Clamp_1', c: '#4e86ff', life: 0.4, speed: 0, size: 1.64,
-      sz: { keys: [[0, 0], [0.1, 0.81], [1, 1]], mul: 1.5 }, env: [[0, 0], [0.1, 1], [1, 0]], sort: 2 }),
-  S({ name: 'Circle(白閃盤)', tex: 'Circle_01', c: '#ffffff', life: 0.6, speed: 0, size: 0.6,
-      sz: { keys: [[0, 0.34], [0.17, 1], [1, 0]], mul: 1 }, env: [[0, 1], [0.026, 1], [0.672, 0.3], [0.819, 0], [1, 0]], sort: 3 }),
-  S({ name: 'Ring_Glow(主漣漪)', tex: 'Circle_Ring_10', c: '#288bcc', life: 0.7, speed: 0, size: 2.85,
-      sz: { keys: [[0, 0], [0.3, 0.85], [1, 1]], mul: 1 }, env: [[0, 0], [0.03, 1], [1, 0]], sort: 2 }),
-  S({ name: 'Ring_Glow_1(巨環)', tex: 'Circle_Ring_10', c: '#3488d9', life: 0.4, speed: 0, size: 33,
-      sz: { keys: [[0, 0], [1, 1]], mul: 1 }, env: [[0, 0], [0.03, 1], [1, 0]], sort: 2, clampScreen: true }),
-  S({ name: 'Ring(3D環)', tex: 'Circle_Ring_10', c: '#9eceff', life: 0.4, speed: 0, size: 0.21,
-      sz: { keys: [[0, 0.02], [0.38, 0.84], [1, 1]], mul: 1 }, env: [[0, 0], [0.144, 1], [0.432, 0.8], [0.629, 0.6], [0.9, 0.3], [1, 0]], sort: 4 }),
-  S({ name: 'P_Dot_01(藍點爆)', tex: 'Bulletline_08', c: '#5491d6', life: [0.2, 0.6], speed: [6, 10], size: [0.07, 0.22],
-      sz: { keys: [[0, 0], [0.11, 1], [1, 0]], mul: 0.603 }, env: [[0, 0], [0.11, 1], [1, 0]], stretch: 3, burst: 12,
-      shapeR: 0.09, sort: 5 }),
-  S({ name: 'P_Dot_01(白塵)', tex: 'Bulletline_08', c: '#fefeff', life: [0.2, 0.5], speed: [0.5, 1.2], size: [0.04, 0.06],
-      sz: { keys: [[0, 1], [0.08, 0.57], [0.18, 0.91], [0.33, 0.44], [0.46, 0.92], [0.56, 0.38], [0.7, 0.8], [0.85, 0.3], [1, 0]], mul: 1 },
-      env: [[0, 1], [0.309, 0.8], [1, 0]], burst: 10, shapeR: 0.16, sort: 5 }),
-  S({ name: 'P_Flare(金星)', tex: 'Flare_26', c: '#ffdc6d', life: [0.15, 0.6], speed: [3, 4], size: [0.15, 0.85],
-      sz: { keys: [[0, 0], [0.07, 1], [0.22, 0.34], [0.31, 0.9], [0.43, 0.31], [0.53, 0.84], [0.67, 0.35], [0.81, 0.7], [1, 0]], mul: 1 },
-      env: [[0, 0.9], [0.2, 1], [0.5, 0.8], [0.942, 0], [1, 0]], rot0: Math.PI / 4, burst: 8, shapeR: 0.37, sort: 6 }),
-  S({ name: 'P_Spot(白三角)', tex: 'Stretch_Line_01a_Clamp', c: '#55a7ff', life: [0.4, 0.55], speed: 0.001, size: [0.1, 0.5],
-      sz: { keys: [[0, 1], [0.39, 0.9], [1, 0.33]], mul: 1 }, env: [[0, 0], [0.03, 1], [0.7, 0.6], [1, 0]],
-      stretch: 2.2, burst: [[0, 3], [0.04, 2]], shapeR: 0.0001, sort: 6 }),
-  S({ name: 'HIt_02(藍碎片)', tex: 'Shock_Wave_14', c: '#83c6ff', life: [0.25, 0.4], speed: 1.28, size: [0.35, 0.4],
-      sz: { keys: [[0, 1], [1, 1]], mul: 1 }, env: [[0, 1], [0.185, 0.8], [0.731, 0.4], [1, 0]], stretch: 3, burst: 3,
-      shapeR: 0.0001, sort: 6 }),
-  S({ name: 'HIt_01(金星爆)', tex: 'Hit_07i', c: '#ffc669', life: 0.1, speed: 0, size: 1.35,
-      sz: { keys: [[0, 0.45], [0.11, 1], [0.47, 0.45], [1, 0.02]], mul: 1 }, env: [[0, 1], [0.819, 0.8], [1, 0]],
-      rot0Rand: true, burst: 1, sort: 9 }),
-];
-
-// ---- 拖曳筆線（Progress_Trail_01/02 子系統；藍芯＋橘火）----
+// ---- 子系統參數（像素、原模組校準值）----
+const DISK = {
+  lifeMs: 200, radius: 0.12 * FA,             // 64.8px
+  colorKeys: [[0, [255, 255, 255]], [0.1205921, [0.24056602 * 255, 0.39061815 * 255, 255]], [1, [0.24056602 * 255, 0.39061815 * 255, 255]]],
+  alphaKeys: [[0, 1], [0.1088273, 1], [1, 0]],
+  sizeKeys: [[0, 0.32583582], [0.21392822, 0.7159773], [1, 1]],   // ×radius
+};
+const RINGS = {
+  count: 2, lifeMs: 600,
+  radiusMin: 0.12 * FA * OT, radiusMax: 0.14 * FA * OT,   // 68.9 / 80.4px（終值）
+  bandToOuterRadius: 0.0598573766034603,
+  colorKeys: [[0.1117723, [255, 255, 255]], [0.5000076, [0.2971698 * 255, 0.6532865 * 255, 255]], [1, [0.2971698 * 255, 0.6532865 * 255, 255]]],
+  sizeKeys: [[0.007209778, 0.42050898], [0.21392822, 0.7159773], [1, 1]],   // 0.42→1 擴張
+  alphaKeys: [[0, 1], [0.35, 0.92], [1, 0]],
+  wipeKeys: [[0, 0], [0.35, 0], [1, 1]],      // 後段旋轉收弧（dissolve wipe）
+};
+const SHARDS = {
+  clickCount: 4,                              // 遊戲 MeshTri maxParticles=3；仿製版 4，從之
+  lifeMinMs: 600, lifeMaxMs: 700,
+  spawnRadius: 0.3 * PA,                      // 49.9px
+  speedMin: 0.3 * PA, speedMax: 0.4 * PA,     // 49.9 / 66.5 px/s
+  sizeMin: 0.1 * PA, sizeMax: 0.2 * PA,       // 16.6 / 33.3px
+  sizeKeys: [[0, 0], [0.15445095, 1], [1, 0]],
+  colorKeys: [[0, [255, 255, 255]], [0.1823606, [255, 255, 255]], [0.282353, [0.3726415 * 255, 0.7731873 * 255, 255]], [0.6617685, [0.3529412 * 255, 0.6532865 * 255, 255]], [1, [0.3529412 * 255, 0.6532865 * 255, 255]]],
+  rotMult: RING_ROT_MULT,
+};
 const TRAIL = {
-  stamps: [
-    S({ name: 'Light(藍芯光斑)', tex: 'Flare_18', c: '#006cff', life: 0.35, speed: 0, size: 0.9,
-        sz: { keys: [[0, 0.6], [0.15, 1], [1, 0.2]], mul: 1 }, env: [[0, 0], [0.06, 1], [1, 0]], alignVel: true, sort: 5 }),
-    S({ name: 'Glow_A(柔光)', tex: 'Circle_Glow_01_Clamp_1', c: '#016dff', life: 0.4, speed: 0, size: 1.1,
-        sz: { keys: [[0, 0.7], [1, 1]], mul: 1 }, env: [[0, 0.8], [0.2, 1], [1, 0]], sort: 3 }),
-  ],
-  auras: [ // 每個 stamp 隨機一道（遊戲 aura_1-8：TW01 橘/深藍、TW02 深藍、TW03）
-    S({ name: 'aura(橘波)', tex: 'Glow_Trail_01', c: '#ffa434', life: 0.5, speed: 0, size: 1.3,
-        sz: { keys: [[0, 0.3], [0.4, 1], [1, 1.2]], mul: 1 }, env: [[0, 0], [0.12, 0.7], [1, 0]], alignVel: true, sort: 2 }),
-    S({ name: 'aura(深藍波)', tex: 'Circle_Glow_02', c: '#00519a', life: 0.5, speed: 0, size: 1.1,
-        sz: { keys: [[0, 0.4], [1, 1.15]], mul: 1 }, env: [[0, 0], [0.1, 0.8], [1, 0]], sort: 2 }),
-    S({ name: 'aura(藍波)', tex: 'Glow_Trail_01', c: '#258eff', life: 0.5, speed: 0, size: 1.2,
-        sz: { keys: [[0, 0.3], [0.4, 1], [1, 1.2]], mul: 1 }, env: [[0, 0], [0.12, 0.7], [1, 0]], alignVel: true, sort: 2 }),
-  ],
-  dot: S({ name: 'P_Dot(橘火)', tex: 'Bulletline_08', c: '#ffa312', life: [0.25, 0.45], speed: [1.5, 3], size: [0.05, 0.12],
-      sz: { keys: [[0, 0], [0.1, 1], [1, 0]], mul: 0.5 }, env: [[0, 0], [0.1, 1], [1, 0]], stretch: 4, shapeR: 0.02, sort: 6 }),
-  dotBlue: S({ name: 'P_Dot(藍)', tex: 'Bulletline_08', c: '#7ebfff', life: [0.3, 0.5], speed: [1, 2.5], size: [0.05, 0.1],
-      sz: { keys: [[0, 0], [0.1, 1], [1, 0]], mul: 0.5 }, env: [[0, 0], [0.1, 1], [1, 0]], stretch: 4, shapeR: 0.02, sort: 6 }),
-  lightningColor: '#ffa240',
+  lifetimeMs: 300,                            // TrailRenderer m_Time 0.3
+  coreWidth: 0.005 * FA,                      // 2.7px
+  glowWidth: 9,                               // outerGlowWidth
+  minVertexDist: 0.01 * FA,                   // 5.4px
+  puffLifeMinMs: 200, puffLifeMaxMs: 400,     // Ring(4)：拖曳細環 puffs
+  puffRadius: 0.15 * PA,                      // 24.9px
+  puffSpeedMin: 0.2 * PA, puffSpeedMax: 0.3 * PA,
+  puffSpacingPx: 26,                          // puffs 沿路徑間距
+  colorKeys: [[0, [255, 255, 255]], [0.3, [0.3529412 * 255, 0.6532865 * 255, 255]], [1, [0.2971698 * 255, 0.6532865 * 255, 255]]],
+  puffColorKeys: [[0, [255, 255, 255]], [0.5, [0.3529412 * 255, 0.6532865 * 255, 255]], [1, [0.2971698 * 255, 0.6532865 * 255, 255]]],
 };
 
 // ---- 引擎 ----
@@ -137,140 +116,148 @@ export function initClickFxAuthentic() {
   document.body.appendChild(canvas);
   const ctx = canvas.getContext('2d');
 
-  const texs = {};      // 短名 → 原版 Image（黑底、alpha=255——加法混合下黑＝透明，與遊戲一致）
-  const tintedCache = {}; // tex短名+startColor → {img} 染色版（texture.rgb × startColor.rgb）
+  const texs = {};        // 短名 → Image
+  const tints = new Map();// `${tex}|${endColor}` → [9 張預染色 offscreen canvas]
   let alive = false, raf = 0, last = 0;
-  const parts = [];
+  const parts = [];       // 所有活動粒子
+  let scale = 1;          // 設計高 → 螢幕縮放
 
   function resize() {
     canvas.width = Math.round(canvas.clientWidth * devicePixelRatio);
     canvas.height = Math.round(canvas.clientHeight * devicePixelRatio);
+    scale = (canvas.clientHeight / devicePixelRatio) / DESIGN_H;
   }
   window.addEventListener('resize', resize, { passive: true });
   resize();
 
-  // 貼圖載入
+  // 貼圖載入（additive：黑＝不加色、透明＝不加色，兩種底皆可）
   let loadFail = 0;
   Promise.all(TEX_LIST.map((n) => new Promise((res) => {
     const img = new Image();
-    img.onload = () => {
-      texs[n.replace(/^FX_TEX_/, '')] = img;
-      res();
-    };
+    img.onload = () => { texs[n.replace(/^FX_TEX_/, '')] = img; res(); };
     img.onerror = () => { loadFail++; console.warn('[clickfx-authentic] tex fail:', texURL(n)); res(); };
     img.src = texURL(n);
   }))).then(() => {
     if (loadFail) console.warn(`[clickfx-authentic] ${loadFail} 張貼圖載入失敗（需 assets/clickfx/FX_TEX_*.png）`);
   });
 
-  // 染色（texture.rgb × startColor.rgb，等價遊戲 DSFX/FX_SHADER_AlphaBlend_Add）：
-  // multiply 疊色後黑底維持黑、形狀亮度 × 色；plus-lighter 下黑不加色＝視覺透明。
-  // 最後 destination-in 邊緣羽化——clamp 類貼圖的漸變會頂到邊被硬切，
-  // 不羽化會出現方形邊界殘影。
-  const edgeMaskCache = {};
-  function edgeMask(w, h) {
-    const key = `${w}x${h}`;
-    let m = edgeMaskCache[key];
-    if (m) return m;
-    m = document.createElement('canvas');
-    m.width = w; m.height = h;
-    const mc = m.getContext('2d');
-    mc.fillStyle = '#fff';
-    mc.fillRect(0, 0, w, h);
-    const F = Math.max(2, Math.round(Math.min(w, h) * 0.07));  // 邊緣羽化寬（7%）
-    const fade = (x0, y0, x1, y1) => {
-      const g = mc.createLinearGradient(x0, y0, x1, y1);
-      g.addColorStop(0, 'rgba(255,255,255,0)');
-      g.addColorStop(1, 'rgba(255,255,255,1)');
-      mc.globalCompositeOperation = 'destination-out';
-      mc.fillStyle = g;
-      if (x0 === 0 && x1 === 0) mc.fillRect(0, Math.min(y0, y1), w, F);
-      else mc.fillRect(Math.min(x0, x1), 0, F, h);
-    };
-    fade(0, 0, 0, F); fade(0, h, 0, h - F);                    // 上、下
-    fade(0, 0, F, 0); fade(w, 0, w - F, 0);                    // 左、右
-    mc.globalCompositeOperation = 'source-over';
-    edgeMaskCache[key] = m;
-    return m;
-  }
-  function tinted(name, color) {
-    const key = `${name}|${color}`;
-    let t = tintedCache[key];
-    if (t) return t;
-    const src = texs[name];
-    if (!src) return null;
-    const c = document.createElement('canvas');
-    c.width = src.width; c.height = src.height;
-    const cc = c.getContext('2d');
-    cc.drawImage(src, 0, 0);
-    cc.globalCompositeOperation = 'multiply';
-    cc.fillStyle = color;
-    cc.fillRect(0, 0, c.width, c.height);
-    cc.globalCompositeOperation = 'destination-in';
-    cc.drawImage(edgeMask(c.width, c.height), 0, 0);
-    t = { img: c };
-    tintedCache[key] = t;
-    return t;
-  }
-
-  function spawn(sys, x, y, baseAng) {
-    let bursts;
-    if (sys.burst == null) bursts = [[0, 1]];
-    else if (typeof sys.burst === 'number') bursts = [[0, sys.burst]];
-    else if (typeof sys.burst[0] === 'number') bursts = [[0, sys.burst]];
-    else bursts = sys.burst;
-    for (const [bt, count] of bursts) {
-      for (let i = 0; i < count; i++) {
-        const ang = rand(0, Math.PI * 2);   // tap 家族全系統隨機方向（choreography 一致）
-        const spd = Array.isArray(sys.speed) ? rand(sys.speed[0], sys.speed[1]) : (sys.speed || 0);
-        const life = Array.isArray(sys.life) ? rand(sys.life[0], sys.life[1]) : sys.life;
-        const size0 = Array.isArray(sys.size) ? rand(sys.size[0], sys.size[1]) : sys.size;
-        const R = (sys.shapeR || 0) * PX;
-        parts.push({
-          sys, x: x + Math.cos(ang) * R, y: y + Math.sin(ang) * R,
-          vx: Math.cos(ang) * spd * PX, vy: Math.sin(ang) * spd * PX,
-          life, t: -bt, size0,
-          rot: sys.rot0Rand ? rand(0, Math.PI * 2) : (sys.alignVel || sys.stretch ? ang : (sys.rot0 || 0)),
-        });
-      }
+  // ---- 預染色 ramp：白→endColor 9 階（白貼圖 × 色乘法，一次烘焙終身使用）----
+  const RAMP_N = 9;
+  function tintRamp(texName, endColor) {
+    const key = `${texName}|${endColor.join()}`;
+    let ramp = tints.get(key);
+    if (ramp) return ramp;
+    const img = texs[texName];
+    if (!img) return null;
+    ramp = [];
+    for (let i = 0; i < RAMP_N; i++) {
+      const f = i / (RAMP_N - 1);
+      const r = Math.round(255 + (endColor[0] - 255) * f);
+      const g = Math.round(255 + (endColor[1] - 255) * f);
+      const b = Math.round(255 + (endColor[2] - 255) * f);
+      const c = document.createElement('canvas');
+      c.width = img.width; c.height = img.height;
+      const x = c.getContext('2d');
+      x.drawImage(img, 0, 0);
+      x.globalCompositeOperation = 'multiply';
+      x.fillStyle = `rgb(${r},${g},${b})`;
+      x.fillRect(0, 0, c.width, c.height);
+      x.globalCompositeOperation = 'destination-in';
+      x.drawImage(img, 0, 0);
+      ramp.push(c);
     }
+    tints.set(key, ramp);
+    return ramp;
+  }
+  // 依生命相位取染色圖（以色曲線終點決定 ramp）
+  function tinted(p, k, alpha) {
+    const end = p._end || (p._end = evalColor(p.colorKeys, 1));
+    const ramp = tintRamp(p.tex, end);
+    if (!ramp) return null;
+    const rgb = evalColor(p.colorKeys, k);
+    // 投影到 白→end 線上取最近階（f = 1 - r/255 對此二色線皆單調）
+    const f = Math.max(0, Math.min(1, 1 - rgb[0] / 255));
+    const c = ramp[Math.round(f * (RAMP_N - 1))];
+    return { c, a: alpha };
   }
 
-  function runDown(x, y) { for (const s of TOUCH_START) spawn(s, x, y); kick(); }
-  function runUp(x, y) { for (const s of TOUCH_END) spawn(s, x, y); kick(); }
+  function spawn(p) { parts.push(p); kick(); }
 
-  // 拖曳：距離累積 → stamp（Light+Glow_A+aura，30% 橘火點、8% 閃電）
-  let dragging = false, acc = 0, lx = 0, ly = 0, pang = 0;
-  function onDown(e) { dragging = true; acc = 0; lx = e.clientX; ly = e.clientY; runDown(lx, ly); }
+  // ---- tap：disk + rings ×2 + shards ×N ----
+  function runDown(x, y) {
+    const S = scale;
+    // disk（ring 子系統：Circle_01 閃盤，擴張後熄滅）
+    spawn({
+      kind: 'sprite', tex: 'Circle_01', x, y, t: 0, life: DISK.lifeMs / 1000,
+      sizeKeys: DISK.sizeKeys, colorKeys: DISK.colorKeys, alphaKeys: DISK.alphaKeys,
+      radius: DISK.radius * S, rot: rand(0, TAU),
+    });
+    // rings（Ring(3)：兩道細環，反向旋轉＋後段收弧）
+    for (let i = 0; i < RINGS.count; i++) {
+      spawn({
+        kind: 'ring', x, y, t: 0, life: RINGS.lifeMs / 1000,
+        radius: rand(RINGS.radiusMin, RINGS.radiusMax) * S,
+        rot: rand(0, TAU), rotV: rand(0, 1) * RING_ROT_MULT * RING_ROT_DIR,
+        colorKeys: RINGS.colorKeys, sizeKeys: RINGS.sizeKeys,
+        alphaKeys: RINGS.alphaKeys, wipeKeys: RINGS.wipeKeys,
+        bandK: RINGS.bandToOuterRadius,
+      });
+    }
+    // shards（MeshTri：三角碎片，atlas 兩幀隨機、隨機自旋、外飛）
+    for (let i = 0; i < SHARDS.clickCount; i++) {
+      const ang = rand(0, TAU);
+      const d = SHARDS.spawnRadius * S;
+      spawn({
+        kind: 'tri', tex: 'Triangle_02_1', frame: (Math.random() * 2) | 0,
+        x: x + Math.cos(ang) * d, y: y + Math.sin(ang) * d, t: 0,
+        life: rand(SHARDS.lifeMinMs, SHARDS.lifeMaxMs) / 1000,
+        vx: Math.cos(ang) * rand(SHARDS.speedMin, SHARDS.speedMax) * S,
+        vy: Math.sin(ang) * rand(SHARDS.speedMin, SHARDS.speedMax) * S,
+        size: rand(SHARDS.sizeMin, SHARDS.sizeMax) * S,
+        sizeKeys: SHARDS.sizeKeys, colorKeys: SHARDS.colorKeys,
+        rot: rand(0, TAU), rotV: rand(-1, 1) * SHARDS.rotMult * 0.3,
+      });
+    }
+    kick();
+  }
+
+  // ---- 拖曳：Trail（TrailRenderer）＋拖曳細環 puffs（Ring(4)）----
+  let dragging = false, lx = 0, ly = 0;
+  const trailPts = [];   // {x, y, t0} ribbon 控制點
+  let puffAcc = 0;
+  function onDown(e) {
+    dragging = true; lx = e.clientX; ly = e.clientY;
+    trailPts.length = 0;
+    trailPts.push({ x: lx, y: ly, t0: performance.now() });
+    runDown(lx, ly);
+  }
   function onMove(e) {
     if (!dragging) return;
+    const now = performance.now();
     const dx = e.clientX - lx, dy = e.clientY - ly;
-    const d = Math.hypot(dx, dy);
-    pang = Math.atan2(dy, dx);
-    acc += d;
-    if (acc >= 12) {
-      acc = 0;
-      const x = e.clientX, y = e.clientY;
-      spawn(TRAIL.stamps[0], x, y, pang);
-      spawn(TRAIL.stamps[1], x, y, pang);
-      spawn(TRAIL.auras[(Math.random() * TRAIL.auras.length) | 0], x, y, pang);
-      if (Math.random() < 0.3) spawn(Math.random() < 0.5 ? TRAIL.dot : TRAIL.dotBlue, x, y, pang);
-      if (Math.random() < 0.08) spawnLightning(x, y, pang);
-      kick();
+    if (Math.hypot(dx, dy) < TRAIL.minVertexDist * scale) return;
+    trailPts.push({ x: e.clientX, y: e.clientY, t0: now });
+    if (trailPts.length > 48) trailPts.shift();
+    // 拖曳細環 puffs（Ring(4)：0.2-0.4s 小環，沿路徑間距觸發）
+    puffAcc += Math.hypot(dx, dy);
+    if (puffAcc >= TRAIL.puffSpacingPx * scale) {
+      puffAcc = 0;
+      spawn({
+        kind: 'ring', x: e.clientX, y: e.clientY, t: 0,
+        life: rand(TRAIL.puffLifeMinMs, TRAIL.puffLifeMaxMs) / 1000,
+        radius: rand(TRAIL.puffSizeMin, TRAIL.puffSizeMax) * scale,
+        rot: rand(0, TAU), rotV: rand(-1, 1) * 2,
+        colorKeys: TRAIL.puffColorKeys,
+        sizeKeys: [[0, 0.55], [0.4, 1], [1, 1]],
+        alphaKeys: [[0, 0], [0.12, 0.75], [1, 0]],
+        wipeKeys: null, bandK: 0.09,
+        vx: 0, vy: 0,
+      });
     }
+    kick();
     lx = e.clientX; ly = e.clientY;
   }
-  function onUp(e) { if (dragging) { dragging = false; runUp(e.clientX, e.clientY); } }
-
-  function spawnLightning(x, y, ang) {
-    const segs = 4 + (Math.random() * 3 | 0), len = rand(30, 70) * (PX / 50);
-    const pts = [[0, 0]];
-    for (let i = 1; i <= segs; i++) {
-      const t = i / segs;
-      pts.push([t * len * Math.cos(ang) + rand(-9, 9), t * len * Math.sin(ang) + rand(-9, 9)]);
-    }
-    parts.push({ lightning: pts, life: 0.14, t: 0, c: TRAIL.lightningColor, x, y, sort: 7 });
-  }
+  function onUp() { dragging = false; }
 
   function kick() {
     if (alive) return;
@@ -279,82 +266,118 @@ export function initClickFxAuthentic() {
   }
 
   function tick(now) {
-    const dt = Math.min(0.1, (now - last) / 1000);  // 鉗制載入卡頓時的慢動作（Unity maximumDeltaTime 概念）
+    const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
     ctx.scale(devicePixelRatio, devicePixelRatio);
     ctx.globalCompositeOperation = 'lighter';
 
+    // trail ribbon 先畫（在最底層）
+    drawTrailRibbon(now);
+
     for (let i = parts.length - 1; i >= 0; i--) {
       const p = parts[i];
       p.t += dt;
-      if (p.t < 0) continue;                      // burst 延遲
       const k = p.t / p.life;
       if (k >= 1) { parts.splice(i, 1); continue; }
 
-      if (p.lightning) {                          // 程序閃電
-        const a = Math.max(0, 1 - k) * 0.9;
-        ctx.strokeStyle = p.c; ctx.globalAlpha = a;
-        ctx.lineWidth = 2; ctx.shadowColor = p.c; ctx.shadowBlur = 10;
-        ctx.beginPath();
-        ctx.moveTo(p.x + p.lightning[0][0], p.y + p.lightning[0][1]);
-        for (let j = 1; j < p.lightning.length; j++) ctx.lineTo(p.x + p.lightning[j][0], p.y + p.lightning[j][1]);
-        ctx.stroke();
-        ctx.shadowBlur = 0; ctx.globalAlpha = 1;
-        continue;
-      }
+      // 位置積分（輕微阻尼）
+      if (p.vx || p.vy) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 1 - 2.2 * dt; p.vy *= 1 - 2.2 * dt; }
+      if (p.rotV) p.rot += p.rotV * dt;
 
-      const sys = p.sys;
-      const tex = tinted(sys.tex, sys.c);
-      if (!tex) continue;
-      const sizePx = p.size0 * evalKeys(sys.sz?.keys, k) * (sys.sz?.mul || 1) * PX * 2;
-      const alpha = evalKeys(sys.env, k);
-      if (alpha <= 0.003) continue;
-      const spd = Math.hypot(p.vx, p.vy);
-      if (sys.stretch && spd > 1) {               // 拉伸：沿速度
-        p.x += p.vx * dt; p.y += p.vy * dt;
-        p.rot = Math.atan2(p.vy, p.vx);
-        p.vx *= 1 - 1.6 * dt; p.vy *= 1 - 1.6 * dt;
+      let alpha = evalKeys(p.alphaKeys, k);
+      if (p.base != null) alpha *= p.base;
+      if (alpha <= 0.004) continue;
+      const rgb = evalColor(p.colorKeys, k);
+
+      if (p.kind === 'sprite') {
+        // 閃盤：Circle_01 白盤擴張＋白→藍染色
+        const r = p.radius * evalKeys(p.sizeKeys, k);
+        const t = tinted(p, k, alpha);
+        if (!t) continue;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot || 0);
+        ctx.globalAlpha = t.a;
+        ctx.drawImage(t.c, -r, -r, r * 2, r * 2);
+        ctx.restore();
+      } else if (p.kind === 'ring') {
+        // 細環帶：Grad_Ring3 漸層帶繞圓＝徑向漸層描邊（band 中央亮、內外緣透明）
+        const outer = p.radius * evalKeys(p.sizeKeys, k);
+        const band = Math.max(2, outer * p.bandK * 2);
+        const wipe = p.wipeKeys ? evalKeys(p.wipeKeys, k) : 0;
+        ctx.save();
+        ctx.beginPath();
+        // 收弧：弧長 2π→0，起點隨 rot 旋轉（dissolve wipe）
+        ctx.arc(p.x, p.y, outer, p.rot, p.rot + TAU * (1 - wipe));
+        const g = ctx.createRadialGradient(p.x, p.y, Math.max(0, outer - band / 2), p.x, p.y, outer + band / 2);
+        const [r0, g0, b0] = rgb.map((v) => v | 0);
+        g.addColorStop(0, `rgba(${r0},${g0},${b0},0)`);
+        g.addColorStop(0.5, `rgba(${r0},${g0},${b0},${alpha})`);
+        g.addColorStop(1, `rgba(${r0},${g0},${b0},0)`);
+        ctx.strokeStyle = g;
+        ctx.lineWidth = band;
+        ctx.stroke();
+        ctx.restore();
+      } else if (p.kind === 'tri') {
+        // 三角碎片：atlas 左右半幅各一三角，縮放自旋＋染色
+        const s = p.size * evalKeys(p.sizeKeys, k);
+        const t = tinted(p, k, alpha);
+        if (!t) continue;
+        const img = texs[p.tex];
+        const fx = (p.frame || 0) * (img.width / 2);
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.globalAlpha = t.a;
+        ctx.drawImage(t.c, fx, 0, img.width / 2, img.height, -s, -s, s * 2, s * 2);
+        ctx.restore();
       }
-      const w = sys.stretch ? sizePx * sys.stretch : sizePx;
-      const h = sys.stretch ? sizePx : sizePx;
-      let W = w, H = h;
-      if (sys.clampScreen) {                      // 巨環 clamp 螢幕
-        const m = Math.max(canvas.width, canvas.height) / devicePixelRatio * 1.15;
-        W = H = Math.min(W, m);
-      }
-      // 多尺度 bloom（HDR 白心感）：同貼圖逐級放大低 alpha 疊 draw——
-      // 光暈隨粒子尺寸等比（螢幕空間），不因貼圖解析度失真。
-      // 大粒子（巨環／主漣漪）單層繪製：bloom 複本會把掃出的環過曝成白洗。
-      const bk = Math.min(1, Math.max(0, (520 - W) / 300));
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(p.rot);
-      if (bk > 0.01) {
-        ctx.globalAlpha = alpha * 0.12 * bk;
-        ctx.drawImage(tex.img, -W, -H, W * 2, H * 2);
-        ctx.globalAlpha = alpha * 0.3 * bk;
-        ctx.drawImage(tex.img, -W * 0.72, -H * 0.72, W * 1.45, H * 1.45);
-      }
-      ctx.globalAlpha = alpha * 0.85;
-      ctx.drawImage(tex.img, -W / 2, -H / 2, W, H);
-      ctx.restore();
     }
     ctx.restore();
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
 
-    if (parts.length) { raf = requestAnimationFrame(tick); }
+    if (parts.length || trailPts.length) { raf = requestAnimationFrame(tick); }
     else { alive = false; ctx.clearRect(0, 0, canvas.width, canvas.height); }
+  }
+
+  // TrailRenderer 重現：0.3s ribbon，Trail_03 亮側朝移動方向，逐段染色
+  function drawTrailRibbon(now) {
+    const lifeS = TRAIL.lifetimeMs / 1000;
+    while (trailPts.length && (now - trailPts[0].t0) / 1000 > lifeS) trailPts.shift();
+    if (trailPts.length < 2) return;
+    const img = texs['Trail_03'];
+    if (!img) return;
+    const H = Math.max(6, (TRAIL.coreWidth + TRAIL.glowWidth) * 2 * scale);
+    for (let i = 1; i < trailPts.length; i++) {
+      const a = trailPts[i - 1], b = trailPts[i];
+      const k = (now - b.t0) / 1000 / lifeS;
+      if (k >= 1) continue;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 0.5) continue;
+      const ang = Math.atan2(dy, dx);
+      const p = { tex: 'Trail_03', colorKeys: TRAIL.colorKeys };
+      const t = tinted(p, k, (1 - k) * 0.9);
+      if (!t) continue;
+      ctx.save();
+      ctx.translate(b.x, b.y);          // 段前端＝最新點
+      ctx.rotate(ang);
+      ctx.scale(-1, 1);                 // 亮側（貼圖左）朝移動方向
+      ctx.globalAlpha = t.a;
+      ctx.drawImage(t.c, -len * 1.3, -H / 2, len * 1.3, H);
+      ctx.restore();
+    }
   }
 
   window.addEventListener('pointerdown', onDown, { passive: true });
   window.addEventListener('pointermove', onMove, { passive: true });
   window.addEventListener('pointerup', onUp, { passive: true });
-  window.addEventListener('pointercancel', () => { dragging = false; }, { passive: true });
+  window.addEventListener('pointercancel', onUp, { passive: true });
 
-  const handle = { canvas, runDown, runUp, _parts: parts, _texs: texs };
+  const handle = { canvas, runDown, runUp: onUp, _parts: parts, _texs: texs };
   window.__baClickFxAuthentic = handle;
   return handle;
 }
