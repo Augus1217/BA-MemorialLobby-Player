@@ -245,7 +245,7 @@ export function initClickFxAuthentic() {
       spawn({
         kind: 'ring', x: e.clientX, y: e.clientY, t: 0,
         life: rand(TRAIL.puffLifeMinMs, TRAIL.puffLifeMaxMs) / 1000,
-        radius: rand(TRAIL.puffSizeMin, TRAIL.puffSizeMax) * scale,
+        radius: TRAIL.puffRadius * rand(0.8, 1.25) * scale,
         rot: rand(0, TAU), rotV: rand(-1, 1) * 2,
         colorKeys: TRAIL.puffColorKeys,
         sizeKeys: [[0, 0.55], [0.4, 1], [1, 1]],
@@ -268,79 +268,93 @@ export function initClickFxAuthentic() {
   function tick(now) {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.save();
-    ctx.scale(devicePixelRatio, devicePixelRatio);
-    ctx.globalCompositeOperation = 'lighter';
+    try {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.scale(devicePixelRatio, devicePixelRatio);
+      ctx.globalCompositeOperation = 'lighter';
 
-    // trail ribbon 先畫（在最底層）
-    drawTrailRibbon(now);
+      // trail ribbon 先畫（在最底層）
+      drawTrailRibbon(now);
 
-    for (let i = parts.length - 1; i >= 0; i--) {
-      const p = parts[i];
-      p.t += dt;
-      const k = p.t / p.life;
-      if (k >= 1) { parts.splice(i, 1); continue; }
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const p = parts[i];
+        p.t += dt;
+        const k = p.t / p.life;
+        if (k >= 1) { parts.splice(i, 1); continue; }
 
-      // 位置積分（輕微阻尼）
-      if (p.vx || p.vy) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 1 - 2.2 * dt; p.vy *= 1 - 2.2 * dt; }
-      if (p.rotV) p.rot += p.rotV * dt;
+        // 位置積分（輕微阻尼）
+        if (p.vx || p.vy) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 1 - 2.2 * dt; p.vy *= 1 - 2.2 * dt; }
+        if (p.rotV) p.rot += p.rotV * dt;
 
-      let alpha = evalKeys(p.alphaKeys, k);
-      if (p.base != null) alpha *= p.base;
-      if (alpha <= 0.004) continue;
-      const rgb = evalColor(p.colorKeys, k);
+        let alpha = evalKeys(p.alphaKeys, k);
+        if (p.base != null) alpha *= p.base;
+        if (alpha <= 0.004) continue;
+        // 有限性防護：單一壞粒子直接跳過，不許炸掉整個幀
+        if (!Number.isFinite(p.x + p.y + alpha)) continue;
+        const rgb = evalColor(p.colorKeys, k);
 
-      if (p.kind === 'sprite') {
-        // 閃盤：Circle_01 白盤擴張＋白→藍染色
-        const r = p.radius * evalKeys(p.sizeKeys, k);
-        const t = tinted(p, k, alpha);
-        if (!t) continue;
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(p.rot || 0);
-        ctx.globalAlpha = t.a;
-        ctx.drawImage(t.c, -r, -r, r * 2, r * 2);
-        ctx.restore();
-      } else if (p.kind === 'ring') {
-        // 細環帶：Grad_Ring3 漸層帶繞圓＝徑向漸層描邊（band 中央亮、內外緣透明）
-        const outer = p.radius * evalKeys(p.sizeKeys, k);
-        const band = Math.max(2, outer * p.bandK * 2);
-        const wipe = p.wipeKeys ? evalKeys(p.wipeKeys, k) : 0;
-        ctx.save();
-        ctx.beginPath();
-        // 收弧：弧長 2π→0，起點隨 rot 旋轉（dissolve wipe）
-        ctx.arc(p.x, p.y, outer, p.rot, p.rot + TAU * (1 - wipe));
-        const g = ctx.createRadialGradient(p.x, p.y, Math.max(0, outer - band / 2), p.x, p.y, outer + band / 2);
-        const [r0, g0, b0] = rgb.map((v) => v | 0);
-        g.addColorStop(0, `rgba(${r0},${g0},${b0},0)`);
-        g.addColorStop(0.5, `rgba(${r0},${g0},${b0},${alpha})`);
-        g.addColorStop(1, `rgba(${r0},${g0},${b0},0)`);
-        ctx.strokeStyle = g;
-        ctx.lineWidth = band;
-        ctx.stroke();
-        ctx.restore();
-      } else if (p.kind === 'tri') {
-        // 三角碎片：atlas 左右半幅各一三角，縮放自旋＋染色
-        const s = p.size * evalKeys(p.sizeKeys, k);
-        const t = tinted(p, k, alpha);
-        if (!t) continue;
-        const img = texs[p.tex];
-        const fx = (p.frame || 0) * (img.width / 2);
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(p.rot);
-        ctx.globalAlpha = t.a;
-        ctx.drawImage(t.c, fx, 0, img.width / 2, img.height, -s, -s, s * 2, s * 2);
-        ctx.restore();
+        if (p.kind === 'sprite') {
+          // 閃盤：Circle_01 白盤擴張＋白→藍染色
+          const r = p.radius * evalKeys(p.sizeKeys, k);
+          if (!Number.isFinite(r) || r <= 0) continue;
+          const t = tinted(p, k, alpha);
+          if (!t) continue;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rot || 0);
+          ctx.globalAlpha = t.a;
+          ctx.drawImage(t.c, -r, -r, r * 2, r * 2);
+          ctx.restore();
+        } else if (p.kind === 'ring') {
+          // 細環帶：Grad_Ring3 漸層帶繞圓＝徑向漸層描邊（band 中央亮、內外緣透明）
+          const outer = p.radius * evalKeys(p.sizeKeys, k);
+          if (!Number.isFinite(outer) || outer <= 0) continue;
+          const band = Math.max(2, outer * p.bandK * 2);
+          const wipe = p.wipeKeys ? evalKeys(p.wipeKeys, k) : 0;
+          ctx.save();
+          ctx.beginPath();
+          // 收弧：弧長 2π→0，起點隨 rot 旋轉（dissolve wipe）
+          ctx.arc(p.x, p.y, outer, p.rot, p.rot + TAU * (1 - wipe));
+          const g = ctx.createRadialGradient(p.x, p.y, Math.max(0, outer - band / 2), p.x, p.y, outer + band / 2);
+          const [r0, g0, b0] = rgb.map((v) => v | 0);
+          g.addColorStop(0, `rgba(${r0},${g0},${b0},0)`);
+          g.addColorStop(0.5, `rgba(${r0},${g0},${b0},${alpha})`);
+          g.addColorStop(1, `rgba(${r0},${g0},${b0},0)`);
+          ctx.strokeStyle = g;
+          ctx.lineWidth = band;
+          ctx.stroke();
+          ctx.restore();
+        } else if (p.kind === 'tri') {
+          // 三角碎片：atlas 左右半幅各一三角，縮放自旋＋染色
+          const s = p.size * evalKeys(p.sizeKeys, k);
+          if (!Number.isFinite(s) || s <= 0) continue;
+          const t = tinted(p, k, alpha);
+          if (!t) continue;
+          const img = texs[p.tex];
+          const fx = (p.frame || 0) * (img.width / 2);
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rot);
+          ctx.globalAlpha = t.a;
+          ctx.drawImage(t.c, fx, 0, img.width / 2, img.height, -s, -s, s * 2, s * 2);
+          ctx.restore();
+        }
       }
+      ctx.restore();
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    } catch (e) {
+      // 任何單幀錯誤：回正畫布狀態後照常排程——效果不允許凍死
+      console.warn('[clickfx-authentic] tick 錯誤（略過此幀）:', e);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    } finally {
+      // 排程/收尾無條件執行（v2.1 的凍死根因：拋出發生在排程前，alive 卡 true）
+      if (parts.length || trailPts.length) { raf = requestAnimationFrame(tick); }
+      else { alive = false; ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height); }
     }
-    ctx.restore();
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
-
-    if (parts.length || trailPts.length) { raf = requestAnimationFrame(tick); }
-    else { alive = false; ctx.clearRect(0, 0, canvas.width, canvas.height); }
   }
 
   // TrailRenderer 重現：0.3s ribbon，Trail_03 亮側朝移動方向，逐段染色
