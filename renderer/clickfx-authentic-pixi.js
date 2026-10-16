@@ -19,9 +19,9 @@ import {
   evalKeys, evalColor, rand, TAU, DISK, RINGS, SHARDS, PUFFS, TRAIL, HDR,
 } from './clickfx-data.js';
 
-// 疊繪上限：_Color 最大 23.97（Trail）；rep 越多越貴，8 次已足以讓核心過曝發白
-// （藍 0.39→×8=3.1、1.0→×8=8，經 tonemap 後與 ×24 幾乎同觀感）。
-const HDR_REP_MAX = 8;
+// 疊繪上限：_Color 最大 23.97（Trail）→ round = 24 次，全數照做（不再「8 次夠用」）。
+// 成本只落在拖曳中的 Trail（同一條路徑畫 24 遍），桌機 GPU 無感。
+const HDR_REP_MAX = 24;
 const reps = (g) => Math.max(1, Math.min(HDR_REP_MAX, Math.round(g)));
 
 const rgbNum = (c) => ((Math.max(0, Math.min(255, c[0] | 0)) << 16)
