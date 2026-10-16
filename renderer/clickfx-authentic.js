@@ -95,14 +95,15 @@ const SHARDS = {
 };
 const TRAIL = {
   lifetimeMs: 300,                            // TrailRenderer m_Time 0.3
-  coreWidth: 0.005 * FA,                      // 2.7px
+  coreWidth: 0.005 * FA,                      // geometryWidth 2.7px
   glowWidth: 9,                               // outerGlowWidth
   minVertexDist: 0.01 * FA,                   // 5.4px
+  // 沿全程長度的顏色漸層（仿製版 trail.gradient：尾端全黑 → 頭端亮藍，頭＝最新點）
+  lenGradient: [[0, [0, 0, 0]], [0.5794156, [0, 24.19, 72]], [0.97941558, [0, 99.6, 255]], [1, [0, 99.6, 255]]],
   puffLifeMinMs: 200, puffLifeMaxMs: 400,     // Ring(4)：拖曳細環 puffs
   puffRadius: 0.15 * PA,                      // 24.9px
-  puffSpeedMin: 0.2 * PA, puffSpeedMax: 0.3 * PA,
-  puffSpacingPx: 26,                          // puffs 沿路徑間距
-  colorKeys: [[0, [255, 255, 255]], [0.3, [0.3529412 * 255, 0.6532865 * 255, 255]], [1, [0.2971698 * 255, 0.6532865 * 255, 255]]],
+  puffSpeedMin: 0.2 * PA, puffSpeedMax: 0.3 * PA,   // puffs 外飄
+  puffSpacingPx: FA / 5,                      // 108px（仿製版 trailSpacing）
   puffColorKeys: [[0, [255, 255, 255]], [0.5, [0.3529412 * 255, 0.6532865 * 255, 255]], [1, [0.2971698 * 255, 0.6532865 * 255, 255]]],
 };
 
@@ -242,16 +243,18 @@ export function initClickFxAuthentic() {
     puffAcc += Math.hypot(dx, dy);
     if (puffAcc >= TRAIL.puffSpacingPx * scale) {
       puffAcc = 0;
+      const ang = rand(0, TAU);
+      const sp = rand(TRAIL.puffSpeedMin, TRAIL.puffSpeedMax) * scale;
       spawn({
         kind: 'ring', x: e.clientX, y: e.clientY, t: 0,
         life: rand(TRAIL.puffLifeMinMs, TRAIL.puffLifeMaxMs) / 1000,
         radius: TRAIL.puffRadius * rand(0.8, 1.25) * scale,
         rot: rand(0, TAU), rotV: rand(-1, 1) * 2,
+        vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
         colorKeys: TRAIL.puffColorKeys,
         sizeKeys: [[0, 0.55], [0.4, 1], [1, 1]],
-        alphaKeys: [[0, 0], [0.12, 0.75], [1, 0]],
-        wipeKeys: null, bandK: 0.09,
-        vx: 0, vy: 0,
+        alphaKeys: [[0, 0], [0.15, 0.5], [1, 0]],
+        wipeKeys: null, bandK: 0.07,
       });
     }
     kick();
@@ -303,6 +306,10 @@ export function initClickFxAuthentic() {
           ctx.save();
           ctx.translate(p.x, p.y);
           ctx.rotate(p.rot || 0);
+          // 光暈層（仿製版 diskBlur/diskAlpha 的近似）＋核心盤
+          ctx.globalAlpha = t.a * 0.35;
+          const gr = r * 1.35;
+          ctx.drawImage(t.c, -gr, -gr, gr * 2, gr * 2);
           ctx.globalAlpha = t.a;
           ctx.drawImage(t.c, -r, -r, r * 2, r * 2);
           ctx.restore();
@@ -316,12 +323,19 @@ export function initClickFxAuthentic() {
           ctx.beginPath();
           // 收弧：弧長 2π→0，起點隨 rot 旋轉（dissolve wipe）
           ctx.arc(p.x, p.y, outer, p.rot, p.rot + TAU * (1 - wipe));
-          const g = ctx.createRadialGradient(p.x, p.y, Math.max(0, outer - band / 2), p.x, p.y, outer + band / 2);
           const [r0, g0, b0] = rgb.map((v) => v | 0);
-          g.addColorStop(0, `rgba(${r0},${g0},${b0},0)`);
-          g.addColorStop(0.5, `rgba(${r0},${g0},${b0},${alpha})`);
-          g.addColorStop(1, `rgba(${r0},${g0},${b0},0)`);
-          ctx.strokeStyle = g;
+          const mkG = (a) => {
+            const gr = ctx.createRadialGradient(p.x, p.y, Math.max(0, outer - band / 2), p.x, p.y, outer + band / 2);
+            gr.addColorStop(0, `rgba(${r0},${g0},${b0},0)`);
+            gr.addColorStop(0.5, `rgba(${r0},${g0},${b0},${a})`);
+            gr.addColorStop(1, `rgba(${r0},${g0},${b0},0)`);
+            return gr;
+          };
+          // 光暈層（仿製版 ringBlur/ringAlpha 的 Canvas2D 近似）＋核心細帶
+          ctx.strokeStyle = mkG(alpha * 0.35);
+          ctx.lineWidth = band * 3.2;
+          ctx.stroke();
+          ctx.strokeStyle = mkG(alpha);
           ctx.lineWidth = band;
           ctx.stroke();
           ctx.restore();
@@ -357,33 +371,30 @@ export function initClickFxAuthentic() {
     }
   }
 
-  // TrailRenderer 重現：0.3s ribbon，Trail_03 亮側朝移動方向，逐段染色
+  // TrailRenderer 重現：0.3s 連續綬帶——單一路徑（圓頭圓接）＋沿尾→頭的
+  // 線性漸層（尾端全黑→頭端亮藍，仿製版 trail.gradient）。逐點年齡淡出
+  // 退化為整體 alpha（移動中尾端本來就是黑，長度漸層主導視覺）。
+  // 棄用貼圖逐段貼：段長遠小於貼圖寬 → 整張壓進短段＝亮矩形塊（v2.1 缺陷）。
   function drawTrailRibbon(now) {
     const lifeS = TRAIL.lifetimeMs / 1000;
     while (trailPts.length && (now - trailPts[0].t0) / 1000 > lifeS) trailPts.shift();
     if (trailPts.length < 2) return;
-    const img = texs['Trail_03'];
-    if (!img) return;
-    const H = Math.max(6, (TRAIL.coreWidth + TRAIL.glowWidth) * 2 * scale);
-    for (let i = 1; i < trailPts.length; i++) {
-      const a = trailPts[i - 1], b = trailPts[i];
-      const k = (now - b.t0) / 1000 / lifeS;
-      if (k >= 1) continue;
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const len = Math.hypot(dx, dy);
-      if (len < 0.5) continue;
-      const ang = Math.atan2(dy, dx);
-      const p = { tex: 'Trail_03', colorKeys: TRAIL.colorKeys };
-      const t = tinted(p, k, (1 - k) * 0.9);
-      if (!t) continue;
-      ctx.save();
-      ctx.translate(b.x, b.y);          // 段前端＝最新點
-      ctx.rotate(ang);
-      ctx.scale(-1, 1);                 // 亮側（貼圖左）朝移動方向
-      ctx.globalAlpha = t.a;
-      ctx.drawImage(t.c, -len * 1.3, -H / 2, len * 1.3, H);
-      ctx.restore();
+    const tail = trailPts[0], head = trailPts[trailPts.length - 1];
+    const headAge = (now - head.t0) / 1000 / lifeS;
+    if (headAge >= 1) return;
+    const grad = ctx.createLinearGradient(tail.x, tail.y, head.x, head.y);
+    const al = 0.85 * (1 - headAge);
+    for (const [t, c] of TRAIL.lenGradient) {
+      grad.addColorStop(t, `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${al})`);
     }
+    ctx.beginPath();
+    ctx.moveTo(tail.x, tail.y);
+    for (let i = 1; i < trailPts.length; i++) ctx.lineTo(trailPts[i].x, trailPts[i].y);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = Math.max(2, (TRAIL.coreWidth + TRAIL.glowWidth) * scale);
+    ctx.stroke();
   }
 
   window.addEventListener('pointerdown', onDown, { passive: true });
