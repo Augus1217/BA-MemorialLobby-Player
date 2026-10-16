@@ -4,6 +4,7 @@ import { BatchableSpineSlot } from '@esotericsoftware/spine-pixi-v8/dist/Batchab
 import { Vector2 } from '@esotericsoftware/spine-core';
 import { i as initClickFx } from '../assets/clickfx/clickFx.js';
 import { initClickFxAuthentic } from './clickfx-authentic.js';
+import { initClickFxAuthenticPixi } from './clickfx-authentic-pixi.js';
 
 window.addEventListener('error', (e) => console.error('[renderer][uncaught]', e.message, e.filename, e.lineno));
 window.addEventListener('unhandledrejection', (e) => console.error('[renderer][unhandled]', e.reason));
@@ -4161,10 +4162,18 @@ function settingsPref(key, dflt) {
   } catch { return dflt; }
 }
 
+// 字串型設定（settingsPref 只回 boolean，字串值不可用它讀）
+function settingsStr(key, dflt) {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null || v === '' ? dflt : v;
+  } catch { return dflt; }
+}
+
 function syncSettingsEffectCks() {
   if (setCursorCk) setCursorCk.checked = settingsPref('ba_cursor', true);
   if (setClickFxCk) setClickFxCk.checked = settingsPref('ba_clickfx', true);
-  if (setClickFxStyle) setClickFxStyle.value = settingsPref('ba_clickfx_style', 'legacy');
+  if (setClickFxStyle) setClickFxStyle.value = settingsStr('ba_clickfx_style', 'legacy');
   if (setJpOnlyCk) setJpOnlyCk.checked = settingsPref('ba_jpOnly', true);
   if (setStatsCk) setStatsCk.checked = statsEnabled();
 }
@@ -8227,16 +8236,29 @@ async function init() {
     for (let i = BLOOM.lv - 2; i >= 0; i--) draw(bloomChain.up[i], bloomChain.upS[i]);
   };
   const hdrTwoPass = () => {
+    // 原版重製(Pixi HDR) 後端；未啟用時為 null
+    const fx = window.__baClickFxPixi;
+    const fxStep = () => {
+      if (fx && typeof fx.step === 'function') { try { fx.step(performance.now()); } catch (e) { /* 單幀失敗不致命 */ } }
+    };
     if (RENDER_MODE === 'plain') {   // 逐廳 plain：跳過線性 RT/encode，直渲 gamma 畫布
+      fxStep();
       app.renderer.render({ container: app.stage, clear: true });
       return true;
     }
     if (!ensureHdrRT()) return false;
+    fxStep();   // 先把 FX 畫進自己的 rgba16float rt（bloom 的 prefilter 來源），再把 stage 渲進 hdrRT
     app.renderer.render({ container: app.stage, target: hdrRT, clear: true });
-    if (BLOOM.int > 0 && bloomChain && bloomAddMesh) {
+    // bloom：只在 FX 有內容時跑，且 prefilter 來源切成 FX 的 HDR rt →
+    // 只泛光觸控特效、不動大廳（大廳維持既有無泛光觀感）。
+    // 參數對齊 APK MXBloomSettings（Threshold 1.0 / Diffusion 1.7，見下方 __setBloom 呼叫）。
+    if (BLOOM.int > 0 && bloomChain && bloomAddMesh && fx && fx.hasContent && fx.hasContent()) {
+      const prevSrc = bloomChain.preS.resources.uTex;
+      bloomChain.preS.resources.uTex = fx.rt().source;
       runBloomChain();
       // 鏈末疊加：up[0]×tint×int 以 blend 'add' 疊進 hdrRT（clear:false 保留場景內容）
       app.renderer.render({ container: bloomAddStage, target: hdrRT, clear: false });
+      bloomChain.preS.resources.uTex = prevSrc;
     }
     app.renderer.render({ container: hdrEncodeStage, clear: true });
     return true;
@@ -8250,14 +8272,15 @@ async function init() {
     window.__setBloom = (k, v) => {
       const n = Number(v);
       if (k === 'int') { BLOOM.int = n; if (encodeBloomU) encodeBloomU.uniforms.uBloomInt = n; return { int: BLOOM.int, chain: !!bloomChain }; }
-      if (!bloomChain) return 'NO-CHAIN';
       if (k === 'thr') {
-        BLOOM.thr = n;
+        BLOOM.thr = n;   // 先記住：鏈還沒建時也要生效（ensureHdrRT 之後才會拿它建鏈）
+        if (!bloomChain) return BLOOM.thr;
         const thrLin = GAMMA_TO_LINEAR(n);
         bloomChain.preS.resources.preU.uniforms.uThr = thrLin;
         bloomChain.preS.resources.preU.uniforms.uKnee = thrLin * 0.5;
         return BLOOM.thr;
       }
+      if (!bloomChain) return 'NO-CHAIN';
       if (k === 'scatter') { BLOOM.scatter = n; bloomChain.upS.forEach((s) => { s.resources.upU.uniforms.uScatter = 0.05 + 0.9 * n; }); return BLOOM.scatter; }
       if (k === 'tint') { BLOOM.tint = n; if (encodeBloomU) encodeBloomU.uniforms.uBloomTint = n; return BLOOM.tint; }
       return `unknown key ${k}`;
@@ -8268,8 +8291,21 @@ async function init() {
   await loadGameFonts();
   try {
     if (settingsPref('ba_clickfx', true)) {
-      if (settingsPref('ba_clickfx_style', 'legacy') === 'legacy') initClickFx();
-      else initClickFxAuthentic();
+      const style = settingsStr('ba_clickfx_style', 'legacy');
+      if (style === 'legacy') initClickFx();
+      else {
+        // 原版重製：優先用 Pixi/WebGL HDR 後端（rgba16float ＋ app 現成 URP bloom），
+        // 貼圖缺失或環境不支援時退回 Canvas2D 後端（幾何相同、只是沒有真 bloom）。
+        const fx = await initClickFxAuthenticPixi({ app });
+        if (fx) {
+          // bloom 只對 FX 生效（hdrTwoPass 會把 prefilter 來源切成 FX 的 HDR rt）。
+          // 參數對齊 APK MXBloomSettings：Threshold 1.0、Diffusion 1.7。
+          try { window.__setBloom?.('thr', 1.0); } catch {}
+          try { window.__setBloom?.('int', 1.7); } catch {}
+        } else {
+          initClickFxAuthentic();
+        }
+      }
     }
   } catch (e) {
     console.warn('[lobby] BAClickFX init failed:', e.message);
