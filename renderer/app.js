@@ -8089,7 +8089,12 @@ async function init() {
     indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
   });
   const bloomQuadStage = new Container();
-  const bloomQuadMesh = new Mesh({ geometry: fsGeo, shader: null });
+  // 鏈 pass（RT→RT）必須「恆等映射」保持儲存慣例：fsGeoFlip + FS_VERT 內建 1−aUV.y
+  // 淨效果 = dst-v-p ← src-v-p（無翻轉）。若用 fsGeo，每個 pass 慣例翻一次 →
+  // down[] 成 raw、up[] 成 image，upS 同座標 mix 兩向 → 最終 bloom 摻入 34% 鏡像
+  // 鬼影（實測：down0 鏡像 peak 255、up0 鏡像 peak 86/255，跟點擊走的光暈就是它）。
+  // 顯示 pass（bloomAdd/encode → 螢幕）才用 fsGeo＋FS_VERT 內建翻轉。已實測驗證。
+  const bloomQuadMesh = new Mesh({ geometry: fsGeoFlip, shader: null });
   bloomQuadStage.addChild(bloomQuadMesh);
   const bloomAddStage = new Container();   // 裝 bloomAddMesh（blend 'add' 疊加 pass 用）
   const buildEncodeStage = (bloomSrc) => {
@@ -8260,7 +8265,7 @@ async function init() {
         bloomChain.preS.resources.uTex = fx.rt().source;
         runBloomChain();
         bloomChain.preS.resources.uTex = prevSrc;
-        bloomAddMesh.geometry = fsGeo;   // plain：取樣 v=1-aUV.y
+        bloomAddMesh.geometry = fsGeo;   // plain：取樣 v=1-aUV.y（FS_VERT 內建翻轉 ⇒ 螢幕直疊正確）
         app.renderer.render({ container: bloomAddStage, clear: false });
       }
       window.__hdrStats && (window.__hdrStats.frames++);
@@ -8278,7 +8283,7 @@ async function init() {
       bloomChain.preS.resources.uTex = fx.rt().source;
       runBloomChain();
       // 鏈末疊加：up[0]×tint×int 以 blend 'add' 疊進 hdrRT（clear:false 保留場景內容）
-      bloomAddMesh.geometry = fsGeoFlip;   // v2：取樣 v=aUV.y（encode 會再翻一次）
+      bloomAddMesh.geometry = fsGeoFlip;   // v2：add 進 hdrRT 儲存同向，encode 再翻出來顯示
       app.renderer.render({ container: bloomAddStage, target: hdrRT, clear: false });
       bloomChain.preS.resources.uTex = prevSrc;
     }
