@@ -88,7 +88,8 @@ export const PUFFS = {  // Ring(4) PS_17：拖曳小片（同 Ring(3) 材質與�
 };
 export const TRAIL = {  // Trail GO：TrailRenderer 真值
   lifetimeMs: 300,
-  coreWidth: 0.005 * FA, glowWidth: 9,      // 核心 2.7px；+仿製版 outerGlow 9
+  coreWidth: 0.005 * FA, glowWidth: 9,      // 核心 2.7px（全寬）；+9 為仿製版 outerGlow，
+                                            // 僅 Canvas2D 備援使用；Pixi 綬帶路徑只用 coreWidth。
   minVertexDist: 0.01 * FA,
   // TrailRenderer colorGradient（頭亮→尾黑；此處以尾→頭表示，數值同真值）
   lenGradient: [[0, [0, 0, 0]], [0.5794156, [0, 24.19, 72]], [0.97941558, [0, 99.6, 255]], [1, [0, 99.6, 255]]],

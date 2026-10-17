@@ -7802,11 +7802,11 @@ async function init() {
       return m ? parseFloat(m[1]) : dflt;
     };
     return {
-      thr: num('bloomThr', 0.9),      // URP 語義：gamma 空間值，bake 時轉線性；knee 硬編碼 thr×0.5
+      thr: num('bloomThr', 1.0),      // URP 語義：gamma 空間值，bake 時轉線性；knee 硬編碼 thr×0.5
       int: num('bloomInt', 0),
       scatter: num('bloomScatter', 0.7),   // URP UI 語義 0..1 → 實際 lerp(0.05,0.95,v)
       tint: [num('bloomTintR', 1), num('bloomTintG', 1), num('bloomTintB', 1)],
-      lv: Math.max(2, Math.min(10, Math.round(num('bloomLv', 8)))),
+      lv: Math.max(2, Math.min(10, Math.round(num('bloomLv', 7)))),
     };
   })();
   const mkLinearRT = (w, h) => RenderTexture.create({
@@ -8078,6 +8078,14 @@ async function init() {
   const fsGeo = new MeshGeometry({
     positions: new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]),
     uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
+    indices: new Uint32Array([0, 1, 2, 0, 2, 3]),  });
+  // v2 求加用：UV 的 y 反轉（FS_VERT 內建 1-aUV.y → 有效取樣 v=aUV.y）。
+  // 鏈輸出 up[0] 存向與視覺同向（straight）時：
+  //   plain add → screen：取樣 v=1-a 顯示正確
+  //   v2    add → hdrRT：需取樣 v=a 才能讓 encode(env 同 (x,1-y)) 顯示正確
+  const fsGeoFlip = new MeshGeometry({
+    positions: new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]),
+    uvs: new Float32Array([0, 1, 1, 1, 1, 0, 0, 0]),
     indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
   });
   const bloomQuadStage = new Container();
@@ -8244,6 +8252,18 @@ async function init() {
     if (RENDER_MODE === 'plain') {   // 逐廳 plain：跳過線性 RT/encode，直渲 gamma 畫布
       fxStep();
       app.renderer.render({ container: app.stage, clear: true });
+      // plain 模式的 bloom：fx.rt()（HDR 特效）→ 降採鏈 → 鏈末以 blend 'add' 疊回
+      // 螢幕 canvas（clear:false 保留已渲的 plain 幀）。大廳不泛光；只有 FX 光暈。
+      if (BLOOM.int > 0 && bloomChain && bloomAddMesh && fx && fx.hasContent && fx.hasContent()) {
+        window.__hdrStats && (window.__hdrStats.bloomRuns++);
+        const prevSrc = bloomChain.preS.resources.uTex;
+        bloomChain.preS.resources.uTex = fx.rt().source;
+        runBloomChain();
+        bloomChain.preS.resources.uTex = prevSrc;
+        bloomAddMesh.geometry = fsGeo;   // plain：取樣 v=1-aUV.y
+        app.renderer.render({ container: bloomAddStage, clear: false });
+      }
+      window.__hdrStats && (window.__hdrStats.frames++);
       return true;
     }
     if (!ensureHdrRT()) return false;
@@ -8253,14 +8273,17 @@ async function init() {
     // 只泛光觸控特效、不動大廳（大廳維持既有無泛光觀感）。
     // 參數對齊 APK MXBloomSettings（Threshold 1.0 / Diffusion 1.7，見下方 __setBloom 呼叫）。
     if (BLOOM.int > 0 && bloomChain && bloomAddMesh && fx && fx.hasContent && fx.hasContent()) {
+      window.__hdrStats && (window.__hdrStats.bloomRuns++);
       const prevSrc = bloomChain.preS.resources.uTex;
       bloomChain.preS.resources.uTex = fx.rt().source;
       runBloomChain();
       // 鏈末疊加：up[0]×tint×int 以 blend 'add' 疊進 hdrRT（clear:false 保留場景內容）
+      bloomAddMesh.geometry = fsGeoFlip;   // v2：取樣 v=aUV.y（encode 會再翻一次）
       app.renderer.render({ container: bloomAddStage, target: hdrRT, clear: false });
       bloomChain.preS.resources.uTex = prevSrc;
     }
     app.renderer.render({ container: hdrEncodeStage, clear: true });
+    window.__hdrStats && (window.__hdrStats.frames++);
     return true;
   };
   if (HDR_MODE) {
@@ -8285,6 +8308,13 @@ async function init() {
       if (k === 'tint') { BLOOM.tint = n; if (encodeBloomU) encodeBloomU.uniforms.uBloomTint = n; return BLOOM.tint; }
       return `unknown key ${k}`;
     };
+    // bloom 鏈探針（校準用）：中繼皆 8-bit RT，extract 可讀回（float hdrRT 不可）
+    window.__bloomDbg = () => bloomChain ? { dw: bloomChain.down[0].width, dh: bloomChain.down[0].height,
+      down0: bloomChain.down[0], up0: bloomChain.up[0], lv: BLOOM.lv, preS: bloomChain.preS, hdrRT: () => hdrRT } : null;
+    window.__bloomQuadStage = () => bloomQuadStage;
+    window.__bloomGate = () => ({ mode: RENDER_MODE, int: BLOOM.int, chain: !!bloomChain, add: !!bloomAddMesh,
+      hasContent: !!(window.__baClickFxPixi && window.__baClickFxPixi.hasContent && window.__baClickFxPixi.hasContent()) });
+    window.__hdrStats = { frames: 0, bloomRuns: 0 };
   }
 
   // Stage 5：字型 + ClickFx（core 已就位，一次到位）

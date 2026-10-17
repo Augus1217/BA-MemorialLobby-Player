@@ -7,21 +7,28 @@
 //   rgba16float RenderTexture：核心可以真的 >1，再餵給 app.js 現成的 URP bloom 鏈
 //   （threshold/knee/8 級降採樣/上採樣 scatter，參數對齊遊戲 MXBloomSettings）。
 //
-// 與 Canvas2D 版的差異（唯一）：HDR 以「同一部件加法疊繪 reps 次」達成；
-//   reps = round(_Color 倍率)（上限 HDR_REP_MAX）。float RT 內加法不裁切，
-//   所以疊繪後的值是真正的 HDR（>1），這正是 Canvas2D 做不到的部分。
+// 與 Canvas2D 版的差異（唯一）：HDR 以「同一部件加法疊繪 reps 次」達成（盤/環/碎片）；
+//   Trail 則是 Trail_03 貼圖綬帶 + 逐頂點 float32 HDR 漸層，單次繪製即為真 HDR。
 //
 // 資料層與 clickfx-authentic.js 共用 clickfx-data.js，零數值漂移。
 // ═══════════════════════════════════════════════════════════════════════════
-import { Container, Sprite, Graphics, Texture, RenderTexture, Rectangle } from 'pixi.js';
+import {
+  Container, Sprite, Graphics, Texture, RenderTexture, Rectangle,
+  Mesh, Shader, Geometry, Buffer, BufferUsage, Matrix,
+} from 'pixi.js';
+import { compileHighShaderGlProgram, compileHighShaderGpuProgram } from 'pixi.js';
+import {
+  localUniformBit, localUniformBitGl, colorBit, colorBitGl,
+  textureBit, textureBitGl, roundPixelsBit, roundPixelsBitGl,
+} from 'pixi.js';
 import {
   TEX_LIST, texURL, DESIGN_H, FA, PA, RING_OUTER, RING_BAND,
   evalKeys, evalColor, rand, TAU, DISK, RINGS, SHARDS, PUFFS, TRAIL, HDR,
 } from './clickfx-data.js';
 
-// 疊繪上限：_Color 最大 23.97（Trail）→ round = 24 次，全數照做（不再「8 次夠用」）。
-// 成本只落在拖曳中的 Trail（同一條路徑畫 24 遍），桌機 GPU 無感。
-const HDR_REP_MAX = 24;
+// 疊繪上限（僅盤/環/碎片）：_Color 最大 5.99 → reps ≤ 6，8 就夠。
+// Trail 不再走疊繪：改為「Trail_03 貼圖綬帶 × 逐頂點 float32 HDR 漸層」單次繪製。
+const HDR_REP_MAX = 8;
 const reps = (g) => Math.max(1, Math.min(HDR_REP_MAX, Math.round(g)));
 
 const rgbNum = (c) => ((Math.max(0, Math.min(255, c[0] | 0)) << 16)
@@ -117,6 +124,63 @@ export async function initClickFxAuthenticPixi({ app } = {}) {
     format: 'rgba16float', resolution: 1, antialias: false, dynamic: true,
   });
   let rt = mkRT(W, H);
+
+  // ---- Trail 貼圖綬帶：Trail_03 × 逐頂點 float32 HDR 漸層，單次繪製 ----
+  // 舊做法＝繪 hd 24 次 stroke（硬邊、無貼圖、寬度還混入仿製版的 +9px 發明值）。
+  // 真值（CAB TrailRenderer + 材質）：
+  //   顏色 = Trail_03(u=沿長度、v=帶寬) × colorGradient(頂點隨年齡取樣) × _Color 23.968628
+  //   幾何 = widthCurve 恆定 × widthMultiplier 0.005（全寬 0.005×FA=2.7px@1080）
+  //   貼圖 Trail_03：alpha 全不透明；亮度＝U 方向頭 235→0.62 處歸零 × V 方向鐘形軟邊
+  // blend One/One（additive）且 alpha 全不透明 → 輸出 alpha 對外觀無作用，
+  // aColor 直接編「漸層色 × _Color」（可 >1），一次繪製、float RT 內不裁切 = 真 HDR。
+  let trailMesh = null, trailOK = false;
+  let trailBufPos = null, trailBufUV = null, trailBufCol = null;
+  let trailPos, trailUV, trailCol;
+  const TRAIL_MAXPTS = 48;
+  try {
+    const glProgram = compileHighShaderGlProgram({ name: 'clickfx-trail-gl',
+      bits: [localUniformBitGl, colorBitGl, textureBitGl, roundPixelsBitGl] });
+    const gpuProgram = compileHighShaderGpuProgram({ name: 'clickfx-trail-gpu',
+      bits: [localUniformBit, colorBit, textureBit, roundPixelsBit] });
+    const tsrc = texs.Trail_03.source;
+    const trailShader = new Shader({
+      glProgram, gpuProgram,
+      resources: {
+        uTexture: tsrc,
+        uSampler: tsrc.style,
+        textureUniforms: { uTextureMatrix: { type: 'mat3x3<f32>', value: new Matrix() } },
+      },
+    });
+    trailPos = new Float32Array(TRAIL_MAXPTS * 4);
+    trailUV = new Float32Array(TRAIL_MAXPTS * 4);
+    trailCol = new Float32Array(TRAIL_MAXPTS * 8);
+    const idx = new Uint16Array((TRAIL_MAXPTS - 1) * 6);
+    for (let i = 0; i < TRAIL_MAXPTS - 1; i++) {
+      const v = i * 2, o = i * 6;
+      idx[o] = v; idx[o + 1] = v + 1; idx[o + 2] = v + 2;
+      idx[o + 3] = v + 1; idx[o + 4] = v + 3; idx[o + 5] = v + 2;
+    }
+    const geo = new Geometry({
+      attributes: {
+        aPosition: { buffer: new Buffer({ data: trailPos, label: 'cfx-trail-pos',
+          usage: BufferUsage.VERTEX | BufferUsage.COPY_DST }), format: 'float32x2', stride: 8, offset: 0 },
+        aUV: { buffer: new Buffer({ data: trailUV, label: 'cfx-trail-uv',
+          usage: BufferUsage.VERTEX | BufferUsage.COPY_DST }), format: 'float32x2', stride: 8, offset: 0 },
+        aColor: { buffer: new Buffer({ data: trailCol, label: 'cfx-trail-col',
+          usage: BufferUsage.VERTEX | BufferUsage.COPY_DST }), format: 'float32x4', stride: 16, offset: 0 },
+      },
+      indexBuffer: new Buffer({ data: idx, label: 'cfx-trail-idx',
+        usage: BufferUsage.INDEX | BufferUsage.COPY_DST }),
+    });
+    trailBufPos = geo.getBuffer('aPosition');
+    trailBufUV = geo.getBuffer('aUV');
+    trailBufCol = geo.getBuffer('aColor');
+    trailMesh = new Mesh({ geometry: geo, shader: trailShader, texture: texs.Trail_03, blendMode: 'add' });
+    trailMesh.visible = false;
+    trailOK = true;
+  } catch (e) {
+    console.warn('[clickfx-pixi] trail mesh 初始化失敗，Trail 退回 stroke 路徑:', e);
+  }
 
   // fxRoot：直接掛進 app.stage（ensurePostWrap 會收進 postWrap）→ 在 app 現成的 HDR 管線裡
   // 與大廳一起渲進 rgba16float hdrRT，吃 encode/tonemap；各部件以 blend 'add' 疊繪。
@@ -283,25 +347,59 @@ export async function initClickFxAuthenticPixi({ app } = {}) {
     if (par && par.children[par.children.length - 1] !== fxRoot) par.addChild(fxRoot);
   }
 
-  function drawTrail(now, sx, sy, sc) {
-    const lifeS = TRAIL.lifetimeMs / 1000;
-    while (trailPts.length && (now - trailPts[0].t0) / 1000 > lifeS) trailPts.shift();
-    if (trailPts.length < 2) return;
-    const headT = (now - trailPts[trailPts.length - 1].t0) / 1000 / lifeS;
-    if (headT >= 1) return;
-    const base = 0.85 * (1 - headT);
-    const width = Math.max(2, (TRAIL.coreWidth + TRAIL.glowWidth) * sc);
+  // Trail 顏色真值取樣：lenGradient 的 key 是「尾→頭」位置比例（0=尾黑、1=頭亮）。
+  const lifeS = TRAIL.lifetimeMs / 1000;
+  const colAt = (t) => {
     const grad = TRAIL.lenGradient;
-    const colAt = (t) => {
-      for (let i = 1; i < grad.length; i++) {
-        if (t <= grad[i][0]) {
-          const [t0, c0] = grad[i - 1], [t1, c1] = grad[i];
-          const f = t1 === t0 ? 1 : (t - t0) / (t1 - t0);
-          return [c0[0] + (c1[0] - c0[0]) * f, c0[1] + (c1[1] - c0[1]) * f, c0[2] + (c1[2] - c0[2]) * f];
-        }
+    for (let i = 1; i < grad.length; i++) {
+      if (t <= grad[i][0]) {
+        const [t0, c0] = grad[i - 1], [t1, c1] = grad[i];
+        const f = t1 === t0 ? 1 : (t - t0) / (t1 - t0);
+        return [c0[0] + (c1[0] - c0[0]) * f, c0[1] + (c1[1] - c0[1]) * f, c0[2] + (c1[2] - c0[2]) * f];
       }
-      return grad[grad.length - 1][1];
-    };
+    }
+    return grad[grad.length - 1][1];
+  };
+
+  function drawTrail(now, sx, sy, sc) {
+    while (trailPts.length && (now - trailPts[0].t0) / 1000 > lifeS) trailPts.shift();
+    const N = trailPts.length;
+    if (N < 2) { if (trailOK) trailMesh.visible = false; return; }
+    if (!trailOK) return drawTrailGfx(now, sx, sy, sc);   // shader 建不出來 → 舊 strokes
+    const halfW = TRAIL.coreWidth * sc * 0.5;             // 0.005 × FA = 2.7px@1080 全寬
+    const kg = HDR.trail / 255;                           // 頂點色 = 漸層 × _Color（可 >1）
+    for (let i = 0; i < N; i++) {
+      const p = trailPts[i];
+      const cx = p.x * sx, cy = p.y * sy;
+      const prev = trailPts[i > 0 ? i - 1 : 0], next = trailPts[i < N - 1 ? i + 1 : N - 1];
+      let dx = (next.x - prev.x) * sx, dy = (next.y - prev.y) * sy;
+      const dl = Math.hypot(dx, dy) || 1;
+      const nx = -dy / dl * halfW, ny = dx / dl * halfW;   // 橫向 ±halfW（綬帶半寬）
+      const t = Math.min(1, (now - p.t0) / 1000 / lifeS); // 真值：顏色隨「點的年齡」漸黑
+      const c = colAt(1 - t);                             // lenGradient 以尾→頭為 key
+      const o4 = i * 4, o8 = i * 8, u = 1 - i / (N - 1);
+      trailPos[o4] = cx + nx; trailPos[o4 + 1] = cy + ny;
+      trailPos[o4 + 2] = cx - nx; trailPos[o4 + 3] = cy - ny;
+      trailUV[o4] = u; trailUV[o4 + 1] = 0;
+      trailUV[o4 + 2] = u; trailUV[o4 + 3] = 1;
+      const rr = c[0] * kg, gg = c[1] * kg, bb = c[2] * kg;
+      trailCol[o8] = rr; trailCol[o8 + 1] = gg; trailCol[o8 + 2] = bb; trailCol[o8 + 3] = 1;
+      trailCol[o8 + 4] = rr; trailCol[o8 + 5] = gg; trailCol[o8 + 6] = bb; trailCol[o8 + 7] = 1;
+    }
+    for (let i = N; i < TRAIL_MAXPTS; i++) {              // 未用點塌縮到最後一點 → 退化三角形不成像
+      for (let k = 0; k < 4; k++) trailPos[i * 4 + k] = trailPos[(N - 1) * 4 + k];
+      for (let k = 0; k < 4; k++) trailUV[i * 4 + k] = trailUV[(N - 1) * 4 + k];
+      for (let k = 0; k < 8; k++) trailCol[i * 8 + k] = trailCol[(N - 1) * 8 + k];
+    }
+    trailBufPos.update(); trailBufUV.update(); trailBufCol.update();
+    trailMesh.visible = true;
+    fxRoot.addChild(trailMesh);
+  }
+
+  // 舊 stroke 路徑，只在 trail mesh 建構失敗時作為備援。
+  function drawTrailGfx(now, sx, sy, sc) {
+    const base = 0.85 * (1 - (now - trailPts[trailPts.length - 1].t0) / 1000 / lifeS);
+    const width = Math.max(2, (TRAIL.coreWidth + TRAIL.glowWidth) * sc);
     const n = reps(HDR.trail);
     const a = Math.min(1, base * HDR.trail / n);
     const N = trailPts.length;
@@ -342,6 +440,7 @@ export async function initClickFxAuthenticPixi({ app } = {}) {
     runUp: onUp,
     destroy() {
       try { rt.destroy(true); } catch {}
+      if (trailMesh) { try { trailMesh.destroy(); } catch {} trailMesh = null; }
       window.removeEventListener('resize', resize);
       window.removeEventListener('pointerdown', onDown);
       window.removeEventListener('pointermove', onMove);
@@ -353,7 +452,7 @@ export async function initClickFxAuthenticPixi({ app } = {}) {
     _texs: texs,
     _app: app,
     _root: fxRoot,
-    _debug: { reps, HDR, HDR_REP_MAX, designScale },
+    _debug: { reps, HDR, HDR_REP_MAX, designScale, trailOK },
   };
   window.__baClickFxPixi = handle;
   return handle;
