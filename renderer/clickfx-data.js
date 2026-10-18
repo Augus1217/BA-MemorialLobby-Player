@@ -54,8 +54,10 @@ export const TAU = Math.PI * 2;
 // ---- 子系統真值（CAB）----
 export const DISK = {   // ring PS_15：Circle_01 白閃盤
   lifeMs: 200,
-  sizeMin: 0.12, sizeMax: 0.14,             // startSize state 3：rand(0.12,0.14)（真值）
-  sizeScalar: 2.0,                          // SizeModule scalar（直徑倍率）→ 半徑 64.8–75.6px
+  sizeMin: 0.12, sizeMax: 0.12,             // startSize state 0＝常數 0.12（fx_cab_full PS15
+                                             // 機器解析重驗；spec 的「state3 rand(0.12,0.14)」
+                                             // 是 PS16 環的值誤植到 PS15 行上）
+  sizeScalar: 2.0,                          // SizeModule scalar（直徑倍率）→ 半徑 64.8px
   sizeKeys: [[0, 0.3258358], [0.21392822, 0.7159773], [1, 1]],
   colorKeys: [[0, [255, 255, 255]], [0.1205921, [61.3, 99.6, 255]], [1, [0, 0, 0]]],
   alphaKeys: [[0, 1], [0.1088273, 1], [1, 0]],

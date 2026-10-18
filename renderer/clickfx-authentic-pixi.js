@@ -7,7 +7,8 @@
 //   rgba16float RenderTexture：核心可以真的 >1，再餵給 app.js 現成的 URP bloom 鏈
 //   （threshold/knee/8 級降採樣/上採樣 scatter，參數對齊遊戲 MXBloomSettings）。
 //
-// 與 Canvas2D 版的差異（唯一）：HDR 以「同一部件加法疊繪 reps 次」達成（盤/環/碎片）；
+// 與 Canvas2D 版的差異（唯一）：HDR 以「疊繪 reps 次」逼近（環/碎片），盤改為
+//   「遮罩(normal) + add×2」精確重現 One/OneMinusSrcAlpha ＋ _Color 2.0；
 //   Trail 則是 Trail_03 貼圖綬帶 + 逐頂點 float32 HDR 漸層，單次繪製即為真 HDR。
 //
 // 資料層與 clickfx-authentic.js 共用 clickfx-data.js，零數值漂移。
@@ -88,16 +89,40 @@ function buildRingTexture(img) {
   return tex;
 }
 
-// 切割三角形圖集（256x128 = 2 框）成 12 個滑動視窗子貼圖（MeshTri UVModule WholeSheet）。
+// 切割三角形圖集（256x128 = 2 框）。真值 UVModule：mode=0 WholeSheet、tilesX=2、
+// tilesY=1 → frame = clamp(floor(v×2), 0, 1)，v = startFrame + frameOverTime×k。
+// 這是「離散取框」：v<0.5 一律取左框（倒三角）、v≥0.5 取右框（正三角），兩框永不混合。
+// （舊版做成 12 個連續滑動視窗＝把兩框切碎拼接，碎片生命期大部分時間顯示半截碎塊，
+//   遊戲裡看到的卻是乾淨三角形——即「我們的不是三角形」投訴根因。frame 運算在 Unity
+//   native 端、不在 UnityCsReference，spec 的「滑動視窗」說法無出處，屬誤讀。）
 function buildTriFrames(img) {
-  const out = [];
-  const N = 12, halfW = img.width / 2;
+  const halfW = Math.floor(img.width / 2);
   const base = Texture.from(img);
-  for (let i = 0; i < N; i++) {
-    const off = (i / (N - 1)) * halfW;
-    out.push(new Texture({ source: base.source, frame: new Rectangle(off, 0, halfW, img.height) }));
+  return [
+    new Texture({ source: base.source, frame: new Rectangle(0, 0, halfW, img.height) }),
+    new Texture({ source: base.source, frame: new Rectangle(halfW, 0, halfW, img.height) }),
+  ];
+}
+
+// Circle_01 → 形狀 alpha 貼圖。真值 shader FX_SHADER_AlphaBlend_Add：
+//   a_out = tex.x（紅通道）× vcolor.a；rgb_out = tex.rgb × vcolor.rgb × tex.x × 2.0
+// 而 Circle_01 的 alpha 通道「全 255」（圓形只存在於 RGB/紅通道）——直接用原圖當遮罩會
+// 變成整張方塊不透明。把 alpha 烘成紅通道後，pixi 的 normal（遮罩）/add（HDR）兩道
+// 取到的形狀與 shader 完全一致。失敗傳 null，繪製端退回舊加法路徑。
+function buildDiskTexture(img) {
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  try {
+    ctx.drawImage(img, 0, 0);
+    const id = ctx.getImageData(0, 0, c.width, c.height);
+    const d = id.data;
+    for (let i = 0; i < d.length; i += 4) d[i + 3] = d[i];
+    ctx.putImageData(id, 0, 0);
+    return Texture.from(c);
+  } catch (e) {
+    return null;
   }
-  return out;
 }
 
 export async function initClickFxAuthenticPixi({ app } = {}) {
@@ -113,6 +138,7 @@ export async function initClickFxAuthenticPixi({ app } = {}) {
   for (const k of Object.keys(imgs)) texs[k] = Texture.from(imgs[k]);
   if (imgs.Grad_Ring3) texs.__ring = buildRingTexture(imgs.Grad_Ring3);
   if (imgs.Triangle_02_1) texs.__tri = buildTriFrames(imgs.Triangle_02_1);
+  if (imgs.Circle_01) texs.__disk = buildDiskTexture(imgs.Circle_01);
   if (!texs.Circle_01 || !texs.__ring || !texs.__tri) {
     console.warn('[clickfx-pixi] 必要貼圖缺失，放棄 Pixi 後端');
     return null;
@@ -274,6 +300,79 @@ export async function initClickFxAuthenticPixi({ app } = {}) {
   function onUp() { dragging = false; }
 
   // ---- 每幀（由 app.js 的 hdrTwoPass 呼叫）：更新模擬 → 組成 fxRoot → 畫進 rt ----
+  // 繪製序＝fx_touch_spec 真值 layers + GameObject 序：
+  //   碎片/puffs＝layer8（最底）→ Trail(layer13) → ring 盤(GO4) → MeshTri 環(GO6)
+  // （盤是唯一非加法部件，序會影響它遮住誰——遊戲裡碎片在盤下方被閃盤蓋過。）
+  function drawPart(p, sc) {
+    const k = p.t / p.life;
+    const alpha = evalKeys(p.alphaKeys, k);
+    if (alpha <= 0.004) return;
+    if (!Number.isFinite(p.x + p.y + alpha)) return;
+    const tint = rgbNum(evalColor(p.colorKeys, k));
+
+    if (p.kind === 'disk') {
+      const r = p.rBase * evalKeys(p.sizeKeys, k) * sc;
+      if (!Number.isFinite(r) || r <= 0) return;
+      if (texs.__disk) {
+        // 真值 FX_SHADER_AlphaBlend_Add（blend One/OneMinusSrcAlpha）：
+        //   rgb_out = tex.rgb × vcolor.rgb × tex.x × 2.0   ← 不乘 alpha（ premult 會蓋場景）
+        //   a_out   = tex.x × vcolor.a                     ← 遮罩走紅通道
+        // 拆兩道精確重現：①黑 tint normal ＝ dst×(1−a) 遮罩（tint=0 對 premult/straight
+        // 都相同）②add ×reps(HDR.disk) 次＝+rgb×2.0（遊戲 _Color 2.0 直出 HDR，會 bloom）。
+        const occ = pick();
+        occ.texture = texs.__disk; occ.tint = 0x000000; occ.blendMode = 'normal';
+        occ.alpha = alpha; occ.position.set(p.x, p.y); occ.width = occ.height = r * 2;
+        occ.rotation = p.rot || 0;
+        fxRoot.addChild(occ);
+        const n = reps(HDR.disk);
+        for (let q = 0; q < n; q++) {
+          const s = pick();
+          s.texture = texs.__disk; s.tint = tint; s.blendMode = 'add';
+          s.alpha = 1; s.position.set(p.x, p.y); s.width = s.height = r * 2;
+          s.rotation = p.rot || 0;
+          fxRoot.addChild(s);
+        }
+      } else {
+        // 形狀貼圖烘壞時的備援：舊加法疊繪（無遮罩，僅相位近似）
+        const n = reps(HDR.disk);
+        const repsA = Math.min(1, alpha * HDR.disk / n);
+        for (let q = 0; q < n; q++) {
+          const s = pick();
+          s.texture = texs.Circle_01; s.tint = tint; s.blendMode = 'add';
+          s.alpha = repsA; s.position.set(p.x, p.y); s.width = s.height = r * 2;
+          s.rotation = p.rot || 0;
+          fxRoot.addChild(s);
+        }
+      }
+    } else if (p.kind === 'ring') {
+      const outer = p.rBase * evalKeys(p.sizeKeys, k) * sc;
+      if (!Number.isFinite(outer) || outer <= 0) return;
+      const n = reps(HDR.ring);
+      const a = Math.min(1, alpha * HDR.ring / n);
+      for (let q = 0; q < n; q++) {
+        const s = pick();
+        s.texture = texs.__ring; s.tint = tint; s.blendMode = 'add';
+        s.alpha = a; s.position.set(p.x, p.y); s.width = s.height = outer * 2;
+        s.rotation = p.rot || 0;
+        fxRoot.addChild(s);
+      }
+    } else if (p.kind === 'tri') {
+      const s = p.sBase * evalKeys(p.sizeKeys, k) * sc;
+      if (!Number.isFinite(s) || s <= 0) return;
+      // WholeSheet 離散取框：v = sf + fo×k，frame = clamp(floor(v×2),0,1)
+      const v = Math.min(1, p.sf + p.fo * k);
+      const tex = texs.__tri[v < 0.5 ? 0 : 1];
+      const n = reps(HDR.shard);
+      const a = Math.min(1, alpha * HDR.shard / n) * (p.mul || 1);
+      for (let q = 0; q < n; q++) {
+        const sp = pick();
+        sp.texture = tex; sp.tint = tint; sp.blendMode = 'add';
+        sp.alpha = a; sp.position.set(p.x, p.y); sp.width = sp.height = s;
+        fxRoot.addChild(sp);
+      }
+    }
+  }
+
   function step(now) {
     if (!last) last = now;
     const dt = Math.min(0.1, (now - last) / 1000);
@@ -284,59 +383,20 @@ export async function initClickFxAuthenticPixi({ app } = {}) {
     fxRoot.removeChildren();
     const sx = px(), sy = py(), sc = designScale();
 
-    drawTrail(now, sx, sy, sc);
-
+    // pass 0：推進年齡、剔除死亡（與繪製分離，繪製序由圖層決定）
     for (let i = parts.length - 1; i >= 0; i--) {
       const p = parts[i];
       p.t += dt;
-      const k = p.t / p.life;
-      if (k >= 1) { parts.splice(i, 1); continue; }
+      if (p.t / p.life >= 1) { parts.splice(i, 1); continue; }
       if (p.vx || p.vy) { p.x += p.vx * dt; p.y += p.vy * dt; }
       if (p.rotV) p.rot += p.rotV * dt;
-      const alpha = evalKeys(p.alphaKeys, k);
-      if (alpha <= 0.004) continue;
-      if (!Number.isFinite(p.x + p.y + alpha)) continue;
-      const rgb = evalColor(p.colorKeys, k);
-      const tint = rgbNum(rgb);
-
-      if (p.kind === 'disk') {
-        const r = p.rBase * evalKeys(p.sizeKeys, k) * sc;
-        if (!Number.isFinite(r) || r <= 0) continue;
-        const n = reps(HDR.disk);
-        const repsA = Math.min(1, alpha * HDR.disk / n);
-        // 不另加「光暈近似層」：APK 只有 Circle_01 一顆（_Color 2.0），光暈由真 bloom 產生。
-        for (let q = 0; q < n; q++) {
-          const s = pick();
-          s.texture = texs.Circle_01; s.tint = tint; s.rotation = p.rot || 0;
-          s.alpha = repsA; s.position.set(p.x, p.y); s.width = s.height = r * 2;
-          fxRoot.addChild(s);
-        }
-      } else if (p.kind === 'ring') {
-        const outer = p.rBase * evalKeys(p.sizeKeys, k) * sc;
-        if (!Number.isFinite(outer) || outer <= 0) continue;
-        const n = reps(HDR.ring);
-        const a = Math.min(1, alpha * HDR.ring / n);
-        for (let q = 0; q < n; q++) {
-          const s = pick();
-          s.texture = texs.__ring; s.tint = tint; s.rotation = p.rot || 0;
-          s.alpha = a; s.position.set(p.x, p.y); s.width = s.height = outer * 2;
-          fxRoot.addChild(s);
-        }
-      } else if (p.kind === 'tri') {
-        const s = p.sBase * evalKeys(p.sizeKeys, k) * sc;
-        if (!Number.isFinite(s) || s <= 0) continue;
-        const fp = Math.min(1, p.sf + p.fo * k);
-        const tex = texs.__tri[Math.min(texs.__tri.length - 1, Math.round(fp * (texs.__tri.length - 1)))];
-        const n = reps(HDR.shard);
-        const a = Math.min(1, alpha * HDR.shard / n) * (p.mul || 1);
-        for (let q = 0; q < n; q++) {
-          const sp = pick();
-          sp.texture = tex; sp.tint = tint;
-          sp.alpha = a; sp.position.set(p.x, p.y); sp.width = sp.height = s;
-          fxRoot.addChild(sp);
-        }
-      }
     }
+    // pass 1：碎片/puffs（layer8 最底）
+    for (const p of parts) if (p.kind === 'tri') drawPart(p, sc);
+    // pass 2：Trail（layer13，遊戲 GO 序在盤之前）
+    drawTrail(now, sx, sy, sc);
+    // pass 3：盤、環（spawn 序：盤先環後 ＝ GO4 → GO6）
+    for (const p of parts) if (p.kind !== 'tri') drawPart(p, sc);
 
     // 真正把 FX 畫進 HDR rt（float，加法疊繪不裁切 → 真 HDR）
     app.renderer.render({ container: fxRoot, target: rt, clear: true });

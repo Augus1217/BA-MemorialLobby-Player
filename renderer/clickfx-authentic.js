@@ -24,9 +24,11 @@
 //  • MinMaxGradient 語意（UnityCsReference）：Color 模式生效值 = m_ColorMax →
 //    碎片/puffs startColor = 灰 0.5377（壓暗），盤/環 = 白；「藍 minColor」為切模式殘值
 //  • bursts：disk 1、MeshTri 2、Ring3 4、Ring4 無爆發（rateOverDistance=5.0）
-//  • 盤 startSize = rand(0.12,0.14)（InitialModule state 3，非固定值）
-//  • UVModule 真行為 = WholeSheet 滑動視窗（startFrame/frameOverTime ∈ [0,0.5]），
-//    視窗由框 0 滑向框 1（非隨機固定框）
+//  • 盤 startSize = 常數 0.12（InitialModule state 0；fx_cab_full PS15 機器解析重驗
+//    2026-10-18——舊註記「state 3 rand(0.12,0.14)」為 PS16 環的值誤植）
+//  • UVModule 真行為 = WholeSheet「離散取框」（mode 0、tilesX 2、startFrame/
+//    frameOverTime ∈ [0,0.5]）：frame = clamp(floor(v×2),0,1)——全程只會取兩框之一，
+//    永不混合（frame 運算在 Unity native 端；舊「滑動視窗」說法無出處，屬誤讀）
 //  • Cylinder002 UV0：u=環周角度、v=帶寬方向（130 頂點、雙圈 r=1.0/1.0637）
 //
 // ── v3.2 第三輪：APK 資料堆挖出「shader／NGUI 縮放／bloom」三件事（2026-10-16）──
@@ -160,7 +162,7 @@ export function initClickFxAuthentic() {
     // Ring(3)(PS_18)：三角碎片 ×4（burst 4），CircleEdge 隨機角、外飛、無自旋
     for (let i = 0; i < SHARDS.count; i++) {
       const ang = rand(0, TAU);
-      // UVModule 真值：startFrame/frameOverTime 各 U[0,0.5]（WholeSheet 滑動視窗）
+      // UVModule 真值：startFrame/frameOverTime 各 U[0,0.5]，WholeSheet 離散取框
       const sf = rand(0, 0.5), fo = rand(0, 0.5);
       spawn({
         kind: 'tri', tex: 'Triangle_02_1', sf, fo, mul: SHARDS.mul,
@@ -304,15 +306,15 @@ export function initClickFxAuthentic() {
           }
           ctx.restore();
         } else if (p.kind === 'tri') {
-          // 三角碎片/puffs：atlas billboard，quad 邊長 = size，無旋轉；UVModule WholeSheet：
-          // 視窗位置 framepos = startFrame + frameOverTime×lifeK，由框 0 滑向框 1
+          // 三角碎片/puffs：atlas billboard，quad 邊長 = size，無旋轉；UVModule WholeSheet
+          // mode=0 tilesX=2 → frame = clamp(floor(v×2),0,1)（離散取框，兩框永不混合）
           const s = p.sBase * evalKeys(p.sizeKeys, k) * scale;
           if (!Number.isFinite(s) || s <= 0) continue;
           const t = tinted(p, k, alpha);
           if (!t) continue;
           const img = texs[p.tex];
           const fp = Math.min(1, p.sf + p.fo * k);
-          const x0 = fp * (img.width / 2);
+          const x0 = fp < 0.5 ? 0 : img.width / 2;
           const n = hdrReps(HDR.shard);
           ctx.save();
           ctx.translate(p.x, p.y);
