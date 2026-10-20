@@ -1,6 +1,6 @@
 {
   "name": "ba-memorial-lobby-electron",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "description": "Blue Archive Memorial Lobby viewer (Electron + Pixi v8 + spine 4.2)",
   "main": "main.js",
   "scripts": {
@@ -28,14 +28,19 @@
       "main.js",
       "wallpaper.js",
       "wallpaper-win.js",
+      "wallpaper-x11.js",
+      "wallpaper-proxy-preload.js",
       "tray.js",
       "preload.js",
       "package.json",
       "index.prod.html",
-      "assets/ui/ui_i18n.json",
+      "assets/ui/**",
+      "assets/loading/**",
+      "assets/clickfx/FX_TEX_*.png",
       "assets/bgm/Theme_152_Title.ogg",
       "favicon.ico",
-      "build/icon.png"
+      "build/icon.png",
+      "build/trayTemplate*.png"
     ],
     "asarUnpack": [
       "node_modules/koffi/**"

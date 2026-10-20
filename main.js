@@ -1050,8 +1050,13 @@ app.whenReady().then(async () => {
   if (!isDev) {
     protocol.handle('app', (request) => {
       const url = new URL(request.url);
-      const filePath = path.join(getAssetsDir(), decodeURIComponent(url.pathname));
-      return net.fetch('file://' + filePath);
+      const rel = decodeURIComponent(url.pathname);   // app://assets/X → '/X'（'assets' 是 host）
+      // ①userData/assets（執行期 Worker 下載的遊戲資產）優先
+      const userP = path.join(getAssetsDir(), rel);
+      if (fs.existsSync(userP)) return net.fetch('file://' + userP);
+      // ②退回安裝內建（package.json files 打包的啟動資源：loading/ui/clickfx/bgm）
+      //   ——pack 尚未下載完或離線時，開場畫面與原版 ClickFX 貼圖也要能用
+      return net.fetch('file://' + path.join(__dirname, 'assets', rel));
     });
   }
 
