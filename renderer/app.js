@@ -208,6 +208,17 @@ function t(key, params) {
   return s;
 }
 
+// 桌布模式：下載期間定期回報 stage（main 的 watchdog 以「最後生命跡象」判定
+// boot 逾時，慢網首訪下載數百 MB 才不會被判死），同時讓 main 能提早通知使用者。
+let _lastWpStage = 0;
+function wpStageThrottled(stage) {
+  if (typeof WALLPAPER_MODE === 'undefined' || !WALLPAPER_MODE) return;
+  const now = performance.now();
+  if (now - _lastWpStage < 5000) return;
+  _lastWpStage = now;
+  try { window.ba?.wallpaperStage?.(stage); } catch {}
+}
+
 // 速度字串（慢網提示/進度顯示共用）
 function fmtSpeed(bps) {
   if (!Number.isFinite(bps) || bps <= 0) return '';
@@ -7664,6 +7675,7 @@ async function ensureReady() {
       if (p.status === 'done') { bootText.textContent = t('dl.packDone', { pkg: p.package }); return; }
       if (p.status === 'error') { bootText.textContent = friendlyErr(p.error) || t('dl.giveUp', { n: 3 }); return; }
       if (p.status !== 'downloading') return;
+      wpStageThrottled('downloading');
       let line = t('dl.downloading', { pkg: p.package, i: p.index ?? 1, n: p.total ?? 1 });
       if (p.percent != null) line += ` ${p.percent}%`;
       else if (p.received) line += ` ${fmtBytes(p.received)}`;
@@ -7706,6 +7718,7 @@ async function ensureReady() {
         if (!p) return;
         if (p.status === 'extracting') { bootText.textContent = t('dl.extracting', { pkg: p.package }); return; }
         if (p.status !== 'downloading') return;
+        wpStageThrottled('downloading');
         const now = performance.now();
         if (last && p.downloaded != null && p.downloaded > last.b) {
           const inst = (p.downloaded - last.b) * 1000 / Math.max(1, now - last.t);

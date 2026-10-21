@@ -364,10 +364,17 @@ function watchdogTick() {
     if (!w.win || w.win.isDestroyed()) continue;
     if (w.reloading) continue;
     if (!w.ready) {
-      // boot 長（首訪串流下載 lobby pack 可達分鐘級）→ 10 分鐘才判死。
-      // reload 後 created 會重置，才有第二次完整的 10 分鐘可用；先前沒重置，
-      // 重新載入後 watchdog 立刻用「最初建立時間」判定逾時 → 直接放棄。
-      if (now - w.created > 10 * 60000) {
+      // boot 逾時以「最後一次有生命跡象」起算：created（建立）＋lastBeat
+      // （renderer 每 2s 心跳，資產下載期間也照送）＋progressAt（stage 更新）。
+      // 慢網首訪要下載整個大廳（數百 MB）時可能超過 10 分鐘——只看 created
+      // 會把「下載中、有進度」的 worker 判死，桌布就永遠起不來。
+      const idleSince = Math.max(w.created || 0, w.lastBeat || 0, w.progressAt || 0);
+      // 下載中且已超過 30 秒 → 通知一次（否則使用者只看到桌面空著，以為壞了）
+      if (!w.slowNotified && w.bootStage === 'downloading' && now - (w.created || 0) > 30000) {
+        w.slowNotified = true;
+        notify('BA Memorial Lobby', mainT('wp.firstDownload'));
+      }
+      if (now - idleSince > 10 * 60000) {
         if (w.reloads < 1) reloadWorker(w);
         else failWorker(w, 'boot timeout');
       }
@@ -718,6 +725,7 @@ ipcMain.on('wallpaper-stage', (e, stage) => {
   const w = wcIndex.get(e.sender.id);
   if (!w) return;
   w.bootStage = String(stage || '');
+  w.progressAt = Date.now();   // 任何 stage 更新都算生命跡象（見 watchdogTick）
   if (stage === 'ready') {
     w.ready = true;
     w.reloading = false;

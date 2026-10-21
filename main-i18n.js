@@ -74,6 +74,14 @@ const STRINGS = {
     ja: 'モニター {n} の壁紙を停止しました: {why}', ko: '모니터 {n}의 배경화면을 중지했습니다: {why}',
     en: 'Wallpaper stopped on display {n}: {why}',
   },
+  // 慢網首訪：桌布 worker 在下載整個大廳（數百 MB）時，桌面會空著幾分鐘
+  'wp.firstDownload': {
+    'zh-TW': '桌布：首次需要下載這個大廳的資源，慢網可能要數分鐘（進度可在播放器設定查看）',
+    'zh-CN': '壁纸：首次需要下载该大厅的资源，慢速网络可能需要数分钟',
+    ja: '壁紙: このロビーのリソースを初回ダウンロード中です（回線が遅いと数分かかります）',
+    ko: '배경화면: 이 로비 리소스를 처음 내려받는 중입니다(느린 회선에서는 몇 분 걸립니다)',
+    en: 'Wallpaper: downloading this lobby\'s assets for the first time (can take minutes on slow links)',
+  },
   'wp.workerFailed': {
     'zh-TW': '桌布已停止（worker 無法啟動）', 'zh-CN': '壁纸已停止（worker 无法启动）',
     ja: '壁紙を停止しました（ワーカーを起動できません）', ko: '배경화면을 중지했습니다(워커를 시작할 수 없음)',
