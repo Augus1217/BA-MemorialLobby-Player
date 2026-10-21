@@ -207,6 +207,29 @@ function t(key, params) {
   return s;
 }
 
+// 技術性錯誤 → 可翻譯的說明（原始訊息保留給 console）。下載失敗最常見的是
+// HTTP 4xx/5xx、sha 不符、磁碟滿；直接把 "HTTP 404 for https://…" 丟給使用者
+// 沒有意義。
+function friendlyErr(err) {
+  const s = String((err && err.message) || err || '');
+  const code = (err && typeof err === 'object' && typeof err.code === 'string') ? err.code : '';
+  if (code && /^[a-z0-9_]+$/.test(code)) {
+    const v = t('err.' + code);
+    if (v !== 'err.' + code) return v;
+  }
+  const m = /\bHTTP\s+(\d{3})\b/.exec(s);
+  if (m) {
+    const st = Number(m[1]);
+    if (st === 404) return t('err.packMissing');
+    if (st === 403 || st === 401) return t('err.forbidden');
+    return t('err.serverError', { status: st });
+  }
+  if (/sha256/i.test(s)) return t('err.checksum');
+  if (/ENOSPC|no space left|quota exceeded|disk (?:is )?full/i.test(s)) return t('err.diskFull');
+  if (/\babort(ed)?\b/i.test(s)) return t('set.paused');
+  return s;
+}
+
 // 主進程回傳的錯誤碼 → i18n（未知碼原樣顯示，兼容技術性錯誤與舊版）
 function tMainErr(code) {
   const s = String(code ?? '');
@@ -289,9 +312,13 @@ async function loadGameFonts() {
 // Walk static DOM: data-i18n -> textContent, data-i18n-title -> title,
 // data-i18n-ph -> placeholder.
 function applyI18n(root = document) {
+  // 字典載入失敗時不動 DOM：index.html 內的靜態文字是可讀的繁中，硬套 t()
+  // 會把它換成 hud.students 這種 raw key，比原文更糟。
+  if (!i18nDict) return;
   for (const el of root.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
   for (const el of root.querySelectorAll('[data-i18n-title]')) el.title = t(el.dataset.i18nTitle);
   for (const el of root.querySelectorAll('[data-i18n-ph]')) el.placeholder = t(el.dataset.i18nPh);
+  for (const el of root.querySelectorAll('[data-i18n-aria-label]')) el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel));
 }
 
 let toastTimer = null;
@@ -3885,9 +3912,41 @@ function segVal(id) {
 
 function exportClipType() { return segVal('expClip') || 'idle'; }
 
+// ---- 應用內確認框（取代 window.confirm）----
+// 原生 confirm 的按鈕文字由 OS/瀏覽器語言決定（app 語言常不同），且會凍結
+// 動畫執行緒。這裡走 app 自己的對話框，文字全部可翻譯。
+let _confirmResolve = null;
+function showConfirm({ title = '', msg = '', ok = null, cancel = null, danger = false } = {}) {
+  const box = document.getElementById('appConfirm');
+  if (!box) return Promise.resolve(false);
+  document.getElementById('appConfirmTitle').textContent = title;
+  document.getElementById('appConfirmMsg').textContent = msg;
+  const yes = document.getElementById('appConfirmYes');
+  yes.textContent = ok || t('dlg.ok');
+  yes.classList.toggle('danger', !!danger);
+  document.getElementById('appConfirmNo').textContent = cancel || t('dlg.cancel');
+  box.classList.add('show');
+  box.setAttribute('aria-hidden', 'false');
+  try { yes.focus(); } catch {}
+  return new Promise((resolve) => { _confirmResolve = resolve; });
+}
+function closeConfirm(value) {
+  const box = document.getElementById('appConfirm');
+  if (box) { box.classList.remove('show'); box.setAttribute('aria-hidden', 'true'); }
+  const r = _confirmResolve;
+  _confirmResolve = null;
+  if (r) r(!!value);
+}
+function confirmOpen() {
+  const box = document.getElementById('appConfirm');
+  return !!box && box.classList.contains('show');
+}
+
 function openExportPanel() {
   if (!spine) { showToast(t('msg.noChar')); return; }
-  expChar.textContent = prettyName(currentLobby);
+  // 用在地化角色名（同 HUD）：日文模式顯示 "Aru" 這種 ASCII 名很突兀
+  const expRec = (typeof studentForLobby === 'function') ? studentForLobby(currentLobby) : null;
+  expChar.textContent = (typeof studentDisplay === 'function' ? studentDisplay(expRec) : null) || prettyName(currentLobby);
   const talks = animNames().filter(n => n.startsWith('Talk_') && n.endsWith('_M')).sort();
   expTalkSel.innerHTML = '';
   for (const t of talks) {
@@ -3925,12 +3984,21 @@ function setUiLanguage(mode) {
   try { localStorage.setItem('ba_lang', mode); } catch {}
   uiLang = mode;                     // UI language follows the name-language cycle
   applyI18n();
+  applyDocLang();
   if (currentLobby) renderStudentName(currentLobby);
   if (sidePanel.classList.contains('open')) renderSidebar();
   if (infoPanel?.classList.contains('open')) renderInfoPanel();
   syncSettingsLangSegs();
   applyCtlI18n();
-  log(t('log.lang', { label: langLabel(langMode), ui: i18nTag(langMode) }));
+  // 主程序端（系統匣/桌布通知）需要知道使用者選的語言（OS locale 常不同）
+  try { window.ba?.setUiLang?.(i18nTag(mode)); } catch {}
+  log(t('log.lang', { label: langLabel(langMode), ui: i18nTag(mode) }));
+}
+
+// <html lang> 沒跟著換的話：螢幕閱讀器會用錯的發音唸內容、瀏覽器斷字/拼字
+// 與 CJK 字型選擇也會用錯（index.html 寫死 zh-Hant）。
+function applyDocLang() {
+  try { document.documentElement.lang = i18nTag(uiLang); } catch {}
 }
 
 function buildLangSegs() {
@@ -3939,6 +4007,8 @@ function buildLangSegs() {
     const b = document.createElement('button');
     b.textContent = label;
     b.dataset.lang = mode;
+    b.title = LANG_SELF_NAME[mode] || label;
+    b.setAttribute('aria-label', LANG_SELF_NAME[mode] || label);
     b.addEventListener('click', () => setUiLanguage(mode));
     setLangSegs.appendChild(b);
   }
@@ -4125,6 +4195,7 @@ async function startSettingsDownload() {
   } catch {}
   updateTotalProgress('', 0);
   setProgressFill.style.width = '0%';
+  setProgressAria(0);
   const tfill = document.getElementById('setProgressFillTotal');
   if (tfill) tfill.style.width = '0%';
   const ttxt = document.getElementById('setProgressTextTotal');
@@ -4147,8 +4218,16 @@ async function startSettingsDownload() {
   }).catch((e) => {
     _dlRunning = false;
     _dlPromise = null;
-    setProgressText.innerHTML = `${ICO.warn} ${escapeHtml(e?.message || e)}`;
+    setProgressText.innerHTML = `${ICO.warn} ${escapeHtml(friendlyErr(e) || '')}`;
   });
+}
+
+// 螢幕閱讀器讀得到下載進度（aria-valuenow 要跟著實際百分比更新）
+function setProgressAria(pct) {
+  try {
+    const bar = document.getElementById('setProgressBar');
+    if (bar) bar.setAttribute('aria-valuenow', String(Math.max(0, Math.min(100, Math.round(pct) || 0))));
+  } catch {}
 }
 
 function settingsPref(key, dflt) {
@@ -4435,10 +4514,17 @@ function renderSpaceList() {
   let html = sys.map(p => spaceInstalledRow(p, usedBy)).join('')
     + lob.map(r => r.t === 'in' ? spaceInstalledRow(r.p, usedBy) : spaceMissingRow(r.m)).join('');
   setSpaceList.innerHTML = html || `<div style="font-size: 14px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('set.space.empty')}</div>`;
+  // 動態注入的列帶 data-i18n-title（刪除/必要資源 tooltip）——applyI18n 只在
+  // 初始化與切語言時跑，不補這行就會永遠停在模板裡的繁中原文。
+  applyI18n(setSpaceList);
   for (const btn of setSpaceList.querySelectorAll('.spaceDel')) {
     btn.addEventListener('click', async () => {
       const key = btn.dataset.key;
-      if (!confirm(t('set.space.confirm', { key }))) return;
+      if (!await showConfirm({
+        title: t('set.space.confirmTitle'),
+        msg: t('set.space.confirm', { key }),
+        ok: t('set.space.delete'), danger: true,
+      })) return;
       btn.disabled = true;
       try {
         await window.ba.assetsManageDelete([key]);
@@ -4473,7 +4559,11 @@ async function spaceDeleteKeys(keys) {
   if (!keys.length) return;
   let bytes = 0;
   for (const k of keys) bytes += (_spaceInfo.packs.find((p) => p.key === k)?.size || 0);
-  if (!confirm(t('set.space.confirmAll', { n: keys.length, size: fmtBytes(bytes) }))) return;
+  if (!await showConfirm({
+    title: t('set.space.confirmTitle'),
+    msg: t('set.space.confirmAll', { n: keys.length, size: fmtBytes(bytes) }),
+    ok: t('set.space.delete'), danger: true,
+  })) return;
   await window.ba.assetsManageDelete(keys);
   _spaceBroken = {};
   setSpaceMessage('');
@@ -4801,6 +4891,9 @@ function balloonFont(lang) {
   // ja/kr/en 以 BA MalgunGothic 領頭（見 index.html 對話框字體統一輪）
   if (lang === 'ja' || lang === 'jp') return `'BA MalgunGothic','Malgun Gothic','Noto Sans JP','Noto Sans TC',sans-serif`;
   if (lang === 'en') return `'BA MalgunGothic','Malgun Gothic','BA NotoSans','Noto Sans','Segoe UI',sans-serif`;
+  // kr 以前落到 TC 堆疊（Hangul 只能靠系統 fallback，導出畫面的字距/換行與
+  // 螢幕上的 #chatDialog（BA MalgunGothic → BA NotoSansKR）不一致
+  if (lang === 'kr') return `'BA MalgunGothic','Malgun Gothic','BA NotoSansKR','Noto Sans KR','Malgun Gothic',sans-serif`;
   return `'BA NotoSansTC','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif`;
 }
 function wrapCanvasText(ctx, text, maxW) {
@@ -4931,6 +5024,11 @@ async function startAnimExport() {
   if (!spine || animActive || exporting) return;
   // 網頁版無 ffmpeg 後端：shim 回 false，之前會靜悄悄什麼都不發生
   if (!IS_ELECTRON) { closeExportPanel(); showErr(t('exp.webOnly')); return; }
+  // 先確認 ffmpeg 存在：否則要等到整段動畫錄完才失敗（幾分鐘白等）
+  try {
+    const ff = await window.ba?.ffmpegAvailable?.();
+    if (ff && ff.ok === false) { closeExportPanel(); showErr(t('exp.ffmpegMissing')); return; }
+  } catch {}
   const clipType = exportClipType();
   const fps = expFpsSet(expFpsN ? expFpsN.value : 30);
   const fmt = segVal('expFmt') || 'mp4';
@@ -5125,7 +5223,13 @@ async function startAnimExport() {
   await cleanupAnimExport();
   if (res?.path) { log(`動畫匯出完成: ${res.path}`); showToast(t('msg.animSaved')); }
   else if (animAbort) log('動畫匯出已取消');
-  else showErr(t('msg.animFail', { err: tMainErr(res?.error) || t('msg.unknown') }));
+  else {
+    // ffmpeg 相關失敗帶參數（結束碼/找不到執行檔），其餘走錯誤碼表
+    const msg = (res?.error === 'ffmpeg_exit')
+      ? t('err.ffmpeg_exit', { code: res.code ?? '?' })
+      : (res?.error === 'ffmpeg_missing' ? t('err.ffmpeg_missing') : (tMainErr(res?.error) || t('msg.unknown')));
+    showErr(t('msg.animFail', { err: msg }));
+  }
 }
 
 function stopAnimExport(abort = false) {
@@ -5176,7 +5280,7 @@ async function exportBgm() {
     else if (res?.path) { log(`BGM 匯出完成: ${res.path}`); showToast(t('msg.bgmSaved')); }
     else showErr(t('msg.bgmFail', { err: tMainErr(res?.error) || t('msg.noResult') }));
   } catch (e) {
-    showErr(t('msg.bgmFail', { err: e.message }));
+    showErr(t('msg.bgmFail', { err: friendlyErr(e) }));
   }
 }
 
@@ -5287,6 +5391,8 @@ function costumeIconKey(key) {
 
 // ---- student display names (students_data.csv, keyed by file_id) ----
 // The same mode also selects the UI language via I18N_UI (see t()/applyI18n).
+// 語言選擇器：按鈕維持短標（繁/日/簡/EN/한——各自語言的寫法），另附完整
+// 自稱 tooltip＋aria-label（繁/簡 對韓文使用者不直覺，且螢幕閱讀器需要文字）
 const LANG_MODES = [
   ['tw', '繁', 'name_tw'],
   ['jp', '日', 'name_jp'],
@@ -5294,6 +5400,7 @@ const LANG_MODES = [
   ['en', 'EN', 'name_en'],
   ['kr', '한', 'name_kr'],
 ];
+const LANG_SELF_NAME = { tw: '繁體中文', jp: '日本語', cn: '简体中文', en: 'English', kr: '한국어' };
 let STUDENTS = null;
 let langMode = null;
 try { langMode = localStorage.getItem('ba_lang') || 'tw'; } catch { langMode = 'tw'; }
@@ -5862,7 +5969,8 @@ function buildSidebarGroups() {
     g.rec = rec;
     g.display = studentDisplay(rec) || prettyName(mainChild.key);
   }
-  return [...groups.values()].sort((a, b) => a.display.localeCompare(b.display, 'zh-Hant'));
+  // 排序語系跟著 UI 語言：日文模式用漢字中文讀音排會像亂排
+  return [...groups.values()].sort((a, b) => a.display.localeCompare(b.display, i18nTag(uiLang)));
 }
 
 function variantText(g, c) {
@@ -5995,7 +6103,7 @@ function renderSidebar() {
   if (_sbSort === 'top') {
     // 人氣排序：組內最佳名次小的在前；無排行壓底（維持名稱序）
     const cmp = (a, b) => (groupBestRank(a) - groupBestRank(b))
-      || a.display.localeCompare(b.display, 'zh-Hant');
+      || a.display.localeCompare(b.display, i18nTag(uiLang));
     pinnedGroups.sort(cmp);
     restGroups.sort(cmp);
   }
@@ -6681,11 +6789,12 @@ async function statsFetchTop(days = 30, force = false) {
 function statsRankOf(lobbyKey) {
   return (_statsTop && _statsTop.byLobby && _statsTop.byLobby[lobbyKey]) || null;
 }
+// 時長單位要在地化（'12m 5s' 對日/韓使用者很突兀）
 function fmtDur(s) {
   s = Math.max(0, Math.floor(s || 0));
-  if (s < 60) return s + 's';
-  if (s < 3600) return Math.floor(s / 60) + 'm';
-  return (s / 3600).toFixed(1) + 'h';
+  if (s < 60) return s + t('unit.s');
+  if (s < 3600) return Math.floor(s / 60) + t('unit.m');
+  return (s / 3600).toFixed(1) + t('unit.h');
 }
 // 開機 60s 後抓一次 30 天榜（避開開機下載尖峰）；失敗靜默，下次開設定/側欄再說
 setTimeout(() => {
@@ -6809,7 +6918,10 @@ async function loadLobby(name) {
   }
   loadIdleClip(entry);
   loadingEl.classList.add('show');
-  loadingText.textContent = t('loading.load', { name: prettyName(name) });
+  const ldRec = (typeof studentForLobby === 'function') ? studentForLobby(name) : null;
+  loadingText.textContent = t('loading.load', {
+    name: (typeof studentDisplay === 'function' ? studentDisplay(ldRec) : null) || prettyName(name),
+  });
   try {
     const charAssets = entry.skel && entry.atlas
       ? [assetUrl(`assets/spine/${name}/${entry.skel}`), assetUrl(`assets/spine/${name}/${entry.atlas}`)]
@@ -6840,12 +6952,12 @@ async function loadLobby(name) {
     try {
       if (!BA_DEBUG.auto && !statsAsked()) {
         markStatsAsked();
-        if (window.confirm(t('set.statsInvite'))) statsSetOptIn(true);
+        if (await showConfirm({ title: t('set.statsTitle'), msg: t('set.statsInvite'), ok: t('dlg.ok') })) statsSetOptIn(true);
         if (setStatsCk) setStatsCk.checked = statsEnabled();
       }
     } catch {}
   } catch (e) {
-    showErr(t('msg.loadFail', { name, err: e.message }));
+    showErr(t('msg.loadFail', { name, err: friendlyErr(e) }));
     loadingEl.classList.remove('show');
     return;
   }
@@ -7561,7 +7673,10 @@ async function ensureReady() {
         if (p.percent != null) line += ` ${p.percent}%`;
         if (emaBps > 4096) {
           line += ` · ${(emaBps / 1048576).toFixed(1)} MB/s`;
-          if (p.downloaded != null && p.bytesTotal) line += ` · 剩 ${fmtEta((p.bytesTotal - p.downloaded) / emaBps)}`;
+          if (p.downloaded != null && p.bytesTotal) {
+            const eta = fmtEta((p.bytesTotal - p.downloaded) / emaBps);
+            if (eta) line += ` · ${t('dl.eta', { t: eta })}`;
+          }
         }
         bootText.textContent = line;
       };
@@ -7736,6 +7851,9 @@ async function init() {
   await loadI18n();
   buildLangSegs();
   applyI18n();
+  applyDocLang();
+  // 主程序（系統匣/桌面通知）也需要 app 語言：OS 語言常與 app 語言不同
+  try { window.ba?.setUiLang?.(i18nTag(uiLang)); } catch {}
 
   // 音訊格式探測（iOS WebKit 不吃 .ogg）：ogg 優先，不行就用包內同名 .m4a；
   // 兩者皆無才提示一次。audioExt 必須在任何語音/BGM 建出來之前決定。
@@ -7769,9 +7887,32 @@ async function init() {
   const canvas = app.canvas;
   document.getElementById('app').appendChild(canvas);
 
-  // 桌布：fps 上限（預設 30；電池/設定變更由 main 下發 onWallpaperFps）
-  if (WALLPAPER_MODE) {
-    app.ticker.maxFPS = Math.max(10, Number(WCFG.fps) || 30);
+  // GPU context 遺失（手機切到背景、驅動 TDR、省電重置）→ 畫面會永久凍結、
+  // 使用者只能自己重開。這裡在恢復後重載目前大廳（貼圖/RT 全部重建）。
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    try { log('[gl] context lost — 等待恢復'); } catch {}
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    try { log('[gl] context restored — 重新載入大廳'); } catch {}
+    setTimeout(() => {
+      try { if (currentLobby && typeof loadLobby === 'function') loadLobby(currentLobby); }
+      catch (e) { log('[gl] reload 失敗: ' + e.message); }
+    }, 0);
+  });
+
+  // fps 上限：桌布預設 30（電池/設定變更由 main 下發 onWallpaperFps）；玩家模式
+  // 預設 60——超過 60 只是把同一段 60fps 動畫重複算，高刷螢幕上等於白白多燒
+  // 2.4 倍 GPU/電量。#fps=0 可解除（診斷用），#fps=120 可指定。
+  {
+    const fpsOverride = /(?:[&?#])fps=(\d+)/.exec(location.search + location.hash);
+    if (WALLPAPER_MODE) {
+      app.ticker.maxFPS = Math.max(10, Number(WCFG.fps) || 30);
+    } else if (fpsOverride) {
+      app.ticker.maxFPS = Math.max(0, Number(fpsOverride[1]) || 0);
+    } else {
+      app.ticker.maxFPS = 60;
+    }
   }
 
   // ---- 自研線性合成管線（hdr；hdr=0 退回直渲）--------------------------------
@@ -8410,6 +8551,15 @@ async function init() {
   infoClose?.addEventListener('click', () => toggleInfoPanel(false));
   document.getElementById('skipYes')?.addEventListener('click', () => { closeSkipConfirm(); memoryLobbySkip(); });
   document.getElementById('skipNo')?.addEventListener('click', closeSkipConfirm);
+  // 應用內確認框按鈕＋Esc（原生 confirm 沒得選，這兩條是等價鍵盤操作）
+  document.getElementById('appConfirmYes')?.addEventListener('click', () => closeConfirm(true));
+  document.getElementById('appConfirmNo')?.addEventListener('click', () => closeConfirm(false));
+  document.getElementById('appConfirm')?.addEventListener('click', (e) => {
+    if (e.target && e.target.id === 'appConfirm') closeConfirm(false);
+  });
+  document.getElementById('skipConfirm')?.addEventListener('click', (e) => {
+    if (e.target && e.target.id === 'skipConfirm') closeSkipConfirm();   // 點背景也可關
+  });
   skipConfirmEl?.addEventListener('click', (e) => { if (e.target === skipConfirmEl) closeSkipConfirm(); });
   // ---- focus mode (cinema) ---- 側欄「專注模式」開關
   const toggleFocusMode = (on) => {
@@ -8425,6 +8575,10 @@ async function init() {
       toggleFocusMode(false);
       e.preventDefault();
     }
+  });
+  // 應用內確認框：Esc ＝ 取消（原生 confirm 的鍵盤行為）
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && confirmOpen()) { closeConfirm(false); e.preventDefault(); }
   });
 
   // ---- 後製濾鏡（Volume 色散/LGG/Panini）開關，持久化（預設開） ----
@@ -8664,17 +8818,18 @@ async function onSpaceVerify() {
         const pct = p.percent != null ? `${p.percent}%`
           : p.received != null ? `${(p.received / 1048576).toFixed(0)}MB` : '…';
         setProgressText.textContent = `${p.package} (${(p.index ?? 0) + 1}/${p.total ?? '?'}) — ${pct}`;
-        if (p.percent != null) setProgressFill.style.width = p.percent + '%';
+        if (p.percent != null) { setProgressFill.style.width = p.percent + '%'; setProgressAria(p.percent); }
         updateTotalProgress(p.package, p.percent ?? 0);
       } else if (p.status === 'done') {
         setProgressFill.style.width = '100%';
+        setProgressAria(100);
         if (p.package) {
           _dlTotal.done += packSizeOf(p.package);
           updateTotalProgress(p.package, 0);
         }
       } else if (p.status === 'error') {
         setAssetsProgress.style.display = 'block';
-        setProgressText.innerHTML = `${ICO.warn} ${escapeHtml(p.error)}`;
+        setProgressText.innerHTML = `${ICO.warn} ${escapeHtml(friendlyErr(p.error))}`;
       }
     });
   } catch {}
@@ -9320,7 +9475,9 @@ function particleTex(lobbyKey, matId, name) {
   const key = `${lobbyKey}/${name}`;
   if (!particleTexCache[key]) {
     // 真貼圖優先（extractor 抽出的 PNG）；缺檔才用佔位（開發期）
-    particleTexCache[key] = Assets.load(assetUrl(`assets/particles/${lobbyKey}/${name}.png`))
+    const url = assetUrl(`assets/particles/${lobbyKey}/${name}.png`);
+    particleTexUrl[key] = url;
+    particleTexCache[key] = Assets.load(url)
       .then((t) => (particleTexCache[key] = t))
       .catch(() => (particleTexCache[key] = makePlaceholderTex(name)));
     return null;   // 首幀未就緒，下一幀起用
@@ -9329,6 +9486,7 @@ function particleTex(lobbyKey, matId, name) {
   return (v && v.source) ? v : null;
 }
 const particleTexCache = {};
+const particleTexUrl = {};   // key → URL（Assets.unload 用；釋放時需要原 URL）
 
 // Unity MinMaxCurve 常數取樣（支援 scalar / two-constants / curve with keys）
 function mmcAt(mm, t, rng) {
@@ -9389,6 +9547,21 @@ function teardownLobbyParticles() {
   if (particleLayer) { particleLayer.destroy({ children: true }); particleLayer = null; }
   particleSystems = [];
   destroyLobbyWater();
+  // 粒子貼圖是 per-lobby 快取的，換大廳不清就會一直累積（Assets 快取 + GPU
+  // 貼圖兩份）；只清「不是目前大廳」的鍵。必須走 Assets.unload（只 destroy
+  // texture 的話 Assets 的 URL 快取還留著已銷毀的貼圖，下次進同一大廳會壞）。
+  try {
+    for (const key of Object.keys(particleTexCache)) {
+      if (key.startsWith(currentLobby + '/')) continue;
+      if (particleTexCache[key] && typeof particleTexCache[key].then === 'function') continue;
+      const url = particleTexUrl[key];
+      delete particleTexCache[key];
+      delete particleTexUrl[key];
+      if (url && typeof Assets.unload === 'function') {
+        Promise.resolve(Assets.unload(url)).catch(() => {});
+      }
+    }
+  } catch {}
 }
 
 function initLobbyParticles(lobbyKey) {

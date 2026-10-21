@@ -14,7 +14,8 @@ const DEV_URL = 'http://127.0.0.1:5173';
 const isDev = !app.isPackaged;
 const { Menu } = require('electron');
 const wallpaper = require('./wallpaper');
-const { createTray } = require('./tray');
+const { createTray, refreshTray } = require('./tray');
+const { setUiLang } = require('./main-i18n');
 let win = null;
 let vite = null;
 let quitting = false;   // app 退出中——vite watchdog 停手
@@ -121,6 +122,21 @@ function findFfmpeg() {
   } catch {}
   // Fallback to system PATH
   return 'ffmpeg';
+}
+
+// ffmpeg 可用性（影片匯出前置檢查；結果快取，避免每次匯出都 spawn）
+let ffmpegProbe = null;
+function ffmpegAvailable() {
+  if (ffmpegProbe) return ffmpegProbe;
+  try {
+    const { spawnSync } = require('child_process');
+    const exe = findFfmpeg();
+    const r = spawnSync(exe, ['-version'], { timeout: 8000 });
+    ffmpegProbe = { ok: r.status === 0, path: exe, error: r.error ? String(r.error.message || r.error) : null };
+  } catch (e) {
+    ffmpegProbe = { ok: false, path: null, error: e.message };
+  }
+  return ffmpegProbe;
 }
 
 function probeDevUrl(timeout = 1000) {
@@ -332,6 +348,7 @@ ipcMain.handle('intro-media', async () => {
 let animProc = null;
 let animQueued = Promise.resolve();
 let animExit = null;
+let animSpawnFailed = false;   // spawn 失敗（找不到 ffmpeg）→ 回可翻譯的錯誤碼
 let animOutPath = null;
 let animAudioTmp = null;
 
@@ -386,6 +403,7 @@ ipcMain.handle('anim-start', async (event, payload) => {
     animOutPath = outPath;
     animQueued = Promise.resolve();
     console.log('[anim] spawn ffmpeg', vargs.join(' '));
+    animSpawnFailed = false;
     animProc = spawn(findFfmpeg(), vargs, { stdio: ['pipe', 'ignore', 'pipe'] });
     // ffmpeg 提前結束（參數錯、磁碟滿）時，後續 write/end 會 EPIPE；
     // 沒有 listener 會變成 uncaught error 直接把主程序帶走。
@@ -398,7 +416,7 @@ ipcMain.handle('anim-start', async (event, payload) => {
       // spawn 失敗（找不到 ffmpeg）不會有 exit 事件，靠 error 收尾避免卡死
       animProc.once('error', () => res(-1));
     });
-    animProc.on('error', (e) => { console.error('[anim] ffmpeg spawn 失敗', e); });
+    animProc.on('error', (e) => { animSpawnFailed = true; console.error('[anim] ffmpeg spawn 失敗', e); });
     animProc.on('exit', (c) => { if (c !== 0 && c !== null) console.error('[anim] ffmpeg exit', c); });
     return { ok: true };
   } catch (e) {
@@ -420,7 +438,9 @@ ipcMain.handle('anim-finish', async () => {
   const code = await exitP;
   if (proc === animProc) { animProc = null; animExit = null; }
   if (tmp) { try { fs.unlinkSync(tmp); } catch {} animAudioTmp = null; }
-  if (code !== 0) return { error: `ffmpeg 結束碼 ${code}` };
+  // 回可翻譯的錯誤碼（renderer 以 err.ffmpeg_* 呈現）；技術細節留 console
+  if (animSpawnFailed) return { error: 'ffmpeg_missing' };
+  if (code !== 0) return { error: 'ffmpeg_exit', code };
   const p = animOutPath;
   animOutPath = null;
   return { path: p };
@@ -461,6 +481,9 @@ ipcMain.handle('bgm-export', async (event, payload) => {
   fs.copyFileSync(src, filePath);
   return { path: filePath };
 });
+
+// renderer 匯出前先問：找不到 ffmpeg 就不要走完整錄製流程才失敗
+ipcMain.handle('ffmpeg-available', async () => ffmpegAvailable());
 
 ipcMain.handle('screen-size', async () => {
   const d = screen.getPrimaryDisplay();
@@ -1279,6 +1302,13 @@ app.whenReady().then(async () => {
   }
   createWindow();
   try { createTray({ showPlayer, onOpenWallpaperSettings: openWallpaperSettings }); } catch (e) { console.error('[tray] init failed:', e.message); }
+  // renderer 選的 UI 語言（localStorage，主程序讀不到）→ 系統匣/桌面通知用；
+  // OS 語言常與 app 語言不同（ja/ko 使用者以前只見英文、zh-CN 見繁中）。
+  ipcMain.handle('set-ui-lang', (event, tag) => {
+    const lang = setUiLang(tag);
+    try { refreshTray({ showPlayer, onOpenWallpaperSettings: openWallpaperSettings }); } catch {}
+    return lang;
+  });
   // 桌布只在明確要求時啟動：--wallpaper CLI（登入自啟的 .desktop 會帶）或
   // BA_WALLPAPER=1。一般啟動不再自動恢復上次的桌布設定——使用者沒按就別蓋桌面。
   const wantWallpaper = process.argv.includes('--wallpaper') || process.env.BA_WALLPAPER === '1';

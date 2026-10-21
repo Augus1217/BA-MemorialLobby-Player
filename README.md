@@ -106,11 +106,45 @@ npm start
 | Windows 10/11 | ✅ 完整支援 | WorkerW 掛載（koffi）＋全螢幕暫停 |
 | Linux（X11/XWayland） | ✅ 完整支援 | `type:'desktop'`；GNOME 需 AppIndicator 擴充 |
 | macOS 11+（Intel/Apple Silicon universal） | 🧪 **Beta** | 桌布層級／互動／狀態列已於 VM 實測（見 `docs/wallpaper-mode.md`）；Space 跟隨、登入自啟（需打包版）與實體 mac 效能未驗證 |
+| 手機／平板瀏覽器（線上版） | ✅ 可用 | iOS 需 15+（WebGL2）；建議橫向。首次進大廳需連網下載該大廳資源 |
+
+### Linux 執行需求（desktop 版）
+
+AppImage／deb 需要系統函式庫；精簡發行版若缺會「開不起來但沒有訊息」：
+
+```bash
+# Debian/Ubuntu
+sudo apt install libasound2t64 libnss3 libgtk-3-0 libxss1 libgbm1   # 22.04 以前是 libasound2
+# Fedora
+sudo dnf install alsa-lib nss gtk3 libXScrnSaver mesa-libgbm
+```
+
+- Ubuntu 24.04+ 的 AppArmor 限制（未簽章 AppImage）會顯示 `The SUID sandbox helper binary was found, but is not configured correctly` → 以 `--no-sandbox` 啟動，或改用 deb／AppImage `--appimage-extract` 後執行。
+- AppImage 需要 FUSE（`libfuse2`）；沒有時用 `./BA-MemorialLobby-*.AppImage --appimage-extract`。
+- Wayland：預設以 XWayland 執行（`ozone-platform-hint=x11`）。原生 Wayland 無 XWayland 時請設 `ELECTRON_OZONE_PLATFORM_HINT=wayland`，但全螢幕暫停偵測在 Wayland 下無效。
+
+### macOS 首次開啟
+
+產物未簽章／未公證，Gatekeeper 會擋。macOS 14 以前：右鍵 →「打開」；**macOS 15 起已移除此繞道**，請到「系統設定 → 隱私權與安全性」→ 找到被擋的 App →「仍要打開」。
+
+### 影片匯出需要 ffmpeg
+
+影片匯出以系統 `ffmpeg` 編碼（`ffmpeg-static` 未列入依賴，避免每次安裝多抓 ~70MB）：
+
+- 有裝 ffmpeg 且 `ffmpeg -version` 可用 → 匯出正常。
+- 沒裝 → 匯出會回報「找不到 ffmpeg」，其他功能不受影響。Windows 可 `winget install Gyan.FFmpeg`；macOS `brew install ffmpeg`；Linux 用發行版套件。
+
+### 效能／畫格率
+
+- 播放器預設上限 60fps（高刷螢幕上不會白燒 2.4 倍電力）；`#fps=0` 可解除上限、`#fps=120` 可指定，供診斷用。
+- 桌布模式預設 30fps，電池供電自動 −15；設定頁可直接調整。
 
 ## 已知限制
 
 - 偶爾顯示日文＝該角色 Global 版尚未實裝，無官方翻譯時 fallback 日文；實裝後管線自動補上
 - 資源更新以 Global 版本為準
+- 簡體中文沒有官方字幕／角色簡介（遊戲本身只有 en/ja/kr/tw 四語），選「簡」時字幕沿用繁體
+- 手機（線上版）的儲存空間可能被瀏覽器回收（iOS 約 7 天未使用）；被清掉後下次進大廳會自動重新下載
 
 ---
 
@@ -221,8 +255,50 @@ Source paths overridable via env (`BA_SRC_SPINE`, `BA_SRC_MEDIA`, `BA_SRC_BGM`, 
 | Windows 10/11 | ✅ Fully supported | WorkerW mounting (koffi) + fullscreen pause |
 | Linux (X11/XWayland) | ✅ Fully supported | `type:'desktop'`; GNOME needs AppIndicator extension |
 | macOS 11+ (Intel/Apple Silicon universal) | 🧪 **Beta** | Wallpaper layering / interaction / menu-bar icon tested in a VM (see `docs/wallpaper-mode.md`); Space following, login autostart (packaged build only) and real-hardware performance unverified |
+| Mobile / tablet browser (web build) | ✅ Usable | iOS 15+ (WebGL2); landscape recommended. The first visit to a lobby downloads its assets (needs internet) |
+
+### Linux runtime requirements (desktop)
+
+AppImage/deb need system libraries; on minimal distros the app can fail to start
+without any message:
+
+```bash
+sudo apt install libasound2t64 libnss3 libgtk-3-0 libxss1 libgbm1   # libasound2 before 22.04
+sudo dnf install alsa-lib nss gtk3 libXScrnSaver mesa-libgbm
+```
+
+- Ubuntu 24.04+ AppArmor restrictions on unsigned AppImages can produce
+  `The SUID sandbox helper binary was found, but is not configured correctly`
+  → start with `--no-sandbox`, use the deb, or run `--appimage-extract` first.
+- AppImage needs FUSE (`libfuse2`).
+- Wayland: runs through XWayland by default (`ozone-platform-hint=x11`). On a
+  pure-Wayland session set `ELECTRON_OZONE_PLATFORM_HINT=wayland` (fullscreen
+  pause detection is unavailable there).
+
+### macOS first launch
+
+Artifacts are unsigned/un-notarized, so Gatekeeper blocks them. macOS <=14:
+right-click > Open. **macOS 15 removed that shortcut**: System Settings >
+Privacy & Security > "Open Anyway".
+
+### Video export needs ffmpeg
+
+Video export uses the system `ffmpeg` (`ffmpeg-static` is intentionally not a
+dependency, to avoid a ~70 MB download on every install):
+
+- ffmpeg present (`ffmpeg -version` works) -> export works.
+- Otherwise export reports "ffmpeg not found"; everything else still works.
+  Windows: `winget install Gyan.FFmpeg`; macOS: `brew install ffmpeg`; Linux: distro package.
+
+### Performance / frame rate
+
+- The player caps at 60 fps by default (avoids burning 2.4x power on 144 Hz
+  panels); `#fps=0` uncaps and `#fps=120` sets an explicit cap (diagnostics).
+- Wallpaper mode defaults to 30 fps, with a -15 reduction on battery.
 
 ## Known limitations
 
 - Occasional Japanese text = character not yet in Global; falls back to Japanese until official translations land (pipeline backfills automatically)
 - Resources track the Global version
+- Simplified Chinese has no official subtitles/profile text (the game ships en/ja/kr/tw only); choosing CHS reuses the Traditional Chinese strings
+- Mobile (web build) storage can be evicted by the browser (~7 days of inactivity on iOS); evicted packs are re-downloaded automatically on the next lobby visit

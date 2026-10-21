@@ -24,6 +24,8 @@ jobs:
         run: |
           python3 scripts/check_i18n.py
           python3 scripts/check_asset_core_parity.py
+      - name: Unit tests (web installer tar/sha pipeline)
+        run: node tests/tar_stream_test.mjs
       - uses: actions/setup-node@v4
         with:
           node-version: 22

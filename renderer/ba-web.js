@@ -4,6 +4,7 @@
 // 完成後只寫一次 __meta。SW 只看 active cache（O(1) 查找）。
 import { gunzipSync } from 'fflate';
 import { selectPacks, mergeManifests, companionTag } from './asset-core.js';
+import { gunzipStreamToBlob, iterateTar } from './tar-stream.js';
 
 const WORKER_BASE = 'https://ba-assets.imlindora.workers.dev';
 const LATEST_VERSION_URL = `${WORKER_BASE}/latest/assets_version.json`;
@@ -199,17 +200,83 @@ function cacheKey(p) {
 }
 
 // ---- 下載單包 → 解壓進 cache ----
+// 兩條路徑：
+//   ①串流（現代瀏覽器；DecompressionStream）：下載流邊算 sha256 邊 gunzip 成
+//     Blob（瀏覽器自行落地存放），再逐檔從 Blob 切片寫進 Cache。記憶體用量
+//     ≈ 單一檔案——舊版 gunzipSync 整包＋entries 陣列在 400MB 的 assets-player
+//     上峰值約 2.5~3 倍，手機分頁直接被砍掉。
+//   ②legacy（無 DecompressionStream）：整包進記憶體（fflate gunzipSync）。
+async function installEntries(name, source, onProgress, c) {
+  const rels = [];
+  const put = async (rel, body) => {
+    rels.push(rel);
+    await c.put(cacheKey(rel), new Response(body, {
+      headers: { 'Content-Type': guessMime(rel), 'Cache-Control': 'immutable' },
+    }));
+  };
+  if (source.blob) {
+    await iterateTar(source.blob, async (path, size, body) => {
+      const rel = path.replace(/^assets\//, '');
+      // 惡意/壞掉的 tar 可能用絕對路徑或 ../ 逃出 assets 命名空間
+      if (!rel || rel.startsWith('/') || rel.split('/').includes('..')) return;
+      await put(rel, body);
+    });
+  } else {
+    const entries = [];
+    untarGz(source.buf, (path, data) => entries.push([path, data]));
+    const batch = [];
+    for (const [path, data] of entries) {
+      const rel = path.replace(/^assets\//, '');
+      if (!rel || rel.startsWith('/') || rel.split('/').includes('..')) continue;
+      rels.push(rel);
+      batch.push(c.put(cacheKey(rel), new Response(data.slice().buffer, {
+        headers: { 'Content-Type': guessMime(rel), 'Cache-Control': 'immutable' },
+      })));
+      if (batch.length >= 64) { await Promise.all(batch); batch.length = 0; }
+    }
+    await Promise.all(batch);
+  }
+  onProgress?.({ status: 'done', percent: 100 });
+  // 回傳包內檔案清單：呼叫端併入 __meta.__files，供管理空間按包刪除用
+  return rels;
+}
+
 async function fetchAndInstallPack(meta, name, onProgress, signal) {
   const url = packUrl(meta, name);
   const c = await activeCache();
   onProgress?.({ status: 'downloading', percent: 0 });
-  const resp = await fetch(url, { cache: 'force-cache', ...(signal ? { signal } : {}) });
-  if (!resp.ok) throw new Error(`pack ${name}: HTTP ${resp.status}`);
-  // 串流讀取回報進度（大包如 400MB 的 assets-player 否則 0% 卡數分鐘）
-  const total = Number(resp.headers.get('content-length')) || 0;
+  const want = meta.packages?.[name]?.sha256;
+
+  if (typeof DecompressionStream === 'function') {
+    const resp = await fetch(url, { cache: 'force-cache', ...(signal ? { signal } : {}) });
+    if (!resp.ok) throw new Error(`pack ${name}: HTTP ${resp.status}`);
+    const total = Number(resp.headers.get('content-length')) || 0;
+    try {
+      const { blob, sha256 } = await gunzipStreamToBlob(resp.body, total, (received) => {
+        onProgress?.(total
+          ? { status: 'downloading', percent: Math.min(99, Math.floor((received / total) * 100)) }
+          : { status: 'downloading', received });
+      });
+      if (want && sha256 !== want) {
+        throw new Error(`pack ${name}: sha256 不符（下載 ${sha256.slice(0, 12)}…，預期 ${want.slice(0, 12)}…）`);
+      }
+      onProgress?.({ status: 'extracting', percent: 0 });
+      return await installEntries(name, { blob }, onProgress, c);
+    } catch (e) {
+      // 完整性失敗不退回舊路徑（同一份壞檔重試沒意義）；其餘（串流解壓不支援、
+      // 管線被中斷）退回 legacy 全量路徑。
+      if (/sha256 不符/.test(e?.message || '')) throw e;
+      console.warn('[ba-web] 串流安裝失敗，退回舊路徑:', e?.message || e);
+    }
+  }
+
+  // legacy：整包進記憶體
+  const resp2 = await fetch(url, { cache: 'force-cache', ...(signal ? { signal } : {}) });
+  if (!resp2.ok) throw new Error(`pack ${name}: HTTP ${resp2.status}`);
+  const total2 = Number(resp2.headers.get('content-length')) || 0;
   let buf;
-  if (resp.body?.getReader) {
-    const reader = resp.body.getReader();
+  if (resp2.body?.getReader) {
+    const reader = resp2.body.getReader();
     const chunks = [];
     let received = 0;
     for (;;) {
@@ -217,22 +284,19 @@ async function fetchAndInstallPack(meta, name, onProgress, signal) {
       if (done) break;
       chunks.push(value);
       received += value.length;
-      if (total) {
-        onProgress?.({ status: 'downloading', percent: Math.min(99, Math.floor((received / total) * 100)) });
-      } else {
-        onProgress?.({ status: 'downloading', received });
-      }
+      onProgress?.(total2
+        ? { status: 'downloading', percent: Math.min(99, Math.floor((received / total2) * 100)) }
+        : { status: 'downloading', received });
     }
     buf = new Uint8Array(received);
     let off = 0;
     for (const ch of chunks) { buf.set(ch, off); off += ch.length; }
     buf = buf.buffer;
   } else {
-    buf = await resp.arrayBuffer();
+    buf = await resp2.arrayBuffer();
   }
   // 完整性：manifest 有 sha256 就必須對上（下載損毀／被中間改寫 → 直接失敗，
   // 不讓壞檔進快取；否則之後 verify 只會說「檔案在」）。
-  const want = meta.packages?.[name]?.sha256;
   if (want) {
     let got = '';
     try {
@@ -246,25 +310,21 @@ async function fetchAndInstallPack(meta, name, onProgress, signal) {
     }
   }
   onProgress?.({ status: 'extracting', percent: 0 });
-  const entries = [];
-  untarGz(buf, (path, data) => entries.push([path, data]));
-  const batch = [];
-  const rels = [];
-  for (const [path, data] of entries) {
-    const rel = path.replace(/^assets\//, '');
-    // 惡意/壞掉的 tar 可能用絕對路徑或 ../ 逃出 assets 命名空間
-    if (!rel || rel.startsWith('/') || rel.split('/').includes('..')) continue;
-    rels.push(rel);
-    const body = new Response(data.slice().buffer, {
-      headers: { 'Content-Type': guessMime(rel), 'Cache-Control': 'immutable' },
-    });
-    batch.push(c.put(cacheKey(rel), body));
-    if (batch.length >= 64) { await Promise.all(batch); batch.length = 0; }
+  return installEntries(name, { buf }, onProgress, c);
+}
+
+// 快取是否還在：sha 記帳相符不代表檔案還在——iOS/瀏覽器會主動清 Cache Storage
+// （也包含使用者清資料），此時 __meta 仍寫著「已安裝」→ 開機照走、之後整片 404。
+// 有 __files 清單的包就抽頭/中/尾三個檔案確認（3 次 cache.match，成本可忽略）。
+async function packLooksPresent(c, key, files) {
+  const list = files?.[key];
+  if (!Array.isArray(list) || !list.length) return true;   // 沒有清單，無法判斷
+  const probes = [list[0], list[Math.floor(list.length / 2)], list[list.length - 1]];
+  for (const rel of probes) {
+    try { if (await c.match(cacheKey(rel))) continue; } catch {}
+    return false;
   }
-  await Promise.all(batch);
-  onProgress?.({ status: 'done', percent: 100 });
-  // 回傳包內檔案清單：呼叫端併入 __meta.__files，供管理空間按包刪除用
-  return rels;
+  return true;
 }
 
 // ---- cacheGet：快取 miss → 回傳 null（由呼叫端處理 fallback） ----
@@ -285,9 +345,19 @@ async function ensureAssets(neededPacks, onProgress) {
   await migrateFromPreviousCache(meta, c, onProgress);
   const installed = await readMeta(c);
 
-  const toDownload = neededPacks.filter(
-    (k) => meta.packages?.[k] && installed[k] !== meta.packages[k].sha256
-  );
+  const toDownload = [];
+  {
+    const files = installed.__files || {};
+    for (const k of neededPacks) {
+      const pkg = meta.packages?.[k];
+      if (!pkg) continue;
+      if (installed[k] !== pkg.sha256) { toDownload.push(k); continue; }
+      if (!(await packLooksPresent(c, k, files))) {
+        console.warn(`[ba-web] ${k} 快取已被清除，重新下載`);
+        toDownload.push(k);
+      }
+    }
+  }
 
   if (!toDownload.length) {
     // 所有需要的包都已安裝
@@ -428,6 +498,7 @@ const ba = {
   abortAnimVideo: () => {},
   exportBgm: async () => null,
   screenSize: async () => ({ width: window.innerWidth, height: window.innerHeight }),
+  ffmpegAvailable: async () => ({ ok: false, path: null }),   // 網頁版沒有 ffmpeg
 
   _progressHandlers: [],
   onDownloadProgress(cb) {
@@ -560,7 +631,18 @@ const ba = {
     }
     packs = [...new Set(packs)];
     const missing = packs.filter((k) => installed[k] !== meta.packages[k]?.sha256);
-    if (!missing.length) return { ok: true, cached: true };
+    if (!missing.length) {
+      // sha 相符也要確認檔案真的還在（瀏覽器可能已清掉快取）
+      const files = installed.__files || {};
+      for (const k of packs) {
+        if (!meta.packages[k]) continue;
+        if (!(await packLooksPresent(c, k, files))) {
+          console.warn(`[ba-web] ${k} 快取已被清除，重新下載`);
+          missing.push(k);
+        }
+      }
+      if (!missing.length) return { ok: true, cached: true };
+    }
 
     const results = [];
     const fileMap = { ...(installed.__files || {}) };

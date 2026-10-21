@@ -5,6 +5,7 @@
 // 設定持久化：userData/wallpaper.json；renderer 端只讀 config（wallpaperConfig IPC）。
 'use strict';
 const { app, BrowserWindow, ipcMain, screen, powerMonitor, Notification } = require('electron');
+const { mainT } = require('./main-i18n');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -189,7 +190,15 @@ function createWorker(display, index) {
         if (m) {
           const r = m.attachWorker(win, display);
           rec.winHost = r.ok ? r.host : null;
-          if (!r.ok) notify('BA Memorial Lobby', `桌布掛載失敗：${r.reason}`);
+          if (!r.ok) {
+            // 掛不進 WorkerW 時，這個視窗會變成「蓋住整個桌面（含工作列）又沒有
+            // 標題列／工作列按鈕」的無底洞——使用者只能靠系統匣離開。改為：不顯示、
+            // 標記失敗（watchdog 會依 failWorker 走回退/停用），並通知可行動的訊息。
+            rec.hidden = true;
+            rec.mountFailed = r.reason || 'unknown';
+            try { win.hide(); } catch {}
+            console.error('[wallpaper] WorkerW 掛載失敗，略過此螢幕:', r.reason);
+          }
         }
       }
       // 代理測試模式（BA_WALLPAPER_TYPE=normal）即時顯示；真桌布等 stage=ready
@@ -396,17 +405,17 @@ function failWorker(w, why) {
         keep.retired = false;
         workers.set(did, keep);
         wcIndex.set(keep.win.webContents.id, keep);
-        notify('BA Memorial Lobby', `桌布更新失敗，保留原桌布（${why}）`);
+        notify('BA Memorial Lobby', mainT('wp.updateFailed', { why }));
         broadcastState();
         return;
       }
     }
     active = false;
     stopPollers();
-    notify('BA Memorial Lobby', '桌布已停止（worker 無法啟動）');
+    notify('BA Memorial Lobby', mainT('wp.workerFailed'));
     broadcastState();
   } else {
-    notify('BA Memorial Lobby', `螢幕 ${w.index + 1} 的桌布已停止：${why}`);
+    notify('BA Memorial Lobby', mainT('wp.screenStopped', { n: w.index + 1, why }));
   }
 }
 
@@ -713,6 +722,15 @@ ipcMain.on('wallpaper-stage', (e, stage) => {
     w.ready = true;
     w.reloading = false;
     w.lastBeat = Date.now();
+    // rec.hidden＝WorkerW 掛載失敗（見 ready-to-show）：絕不顯示全螢幕普通視窗，
+    // 否則會蓋住桌面/工作列又無法關閉。renderer 就緒後直接走 failWorker，讓
+    // 系統匣/狀態顯示真實情況（該螢幕沒有桌布），而不是假裝在跑。
+    if (w.hidden) {
+      setTimeout(() => {
+        try { failWorker(w, mainT('wp.mountFailed', { why: w.mountFailed || 'unknown' })); } catch {}
+      }, 0);
+      return;
+    }
     try { if (!w.win.isVisible() && !TYPE_OVERRIDE) w.win.showInactive(); } catch {}
     // Linux：mapped 後才能送 _NET_WM_STATE ClientMessage（unmapped 時 WM 查無此窗）。
     // 立即送一次＋1.2s 補一次，蓋掉 KWin manage 競態；操作冪等。

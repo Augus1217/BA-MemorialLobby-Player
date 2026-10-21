@@ -15,6 +15,7 @@
     "lint:i18n": "python3 scripts/check_i18n.py",
     "lint:parity": "python3 scripts/check_asset_core_parity.py",
     "lint": "python3 scripts/check_i18n.py && python3 scripts/check_asset_core_parity.py",
+    "test:tar": "node tests/tar_stream_test.mjs",
     "dist": "vite build && electron-builder -mwl --publish always"
   },
   "build": {

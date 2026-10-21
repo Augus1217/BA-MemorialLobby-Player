@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('ba', {
   abortAnimVideo: () => ipcRenderer.send('anim-abort'),
   exportBgm: (payload) => ipcRenderer.invoke('bgm-export', payload),
   screenSize: () => ipcRenderer.invoke('screen-size'),
+  ffmpegAvailable: () => ipcRenderer.invoke('ffmpeg-available'),
   // Asset download (增量 + 串流)
   checkAssets: (payload) => ipcRenderer.invoke('check-assets', payload),
   downloadAssets: (payload) => ipcRenderer.invoke('download-assets', payload),
