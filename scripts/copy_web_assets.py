@@ -9,7 +9,7 @@
   2. assets/loading/（title.webm/font.otf/spinner.png/pv-a.ogg）——開場畫面，
      必須在 pack 下載開始前呈現，屬 app 啟動資源
   3. assets/ui/ui_i18n.json — 本應用自製 UI 字典（首訪需在 pack 安裝前讀取）
-  4. intro/title_h264.mp4 + pv-a.ogg、bgm/Theme_152_Title.ogg（開機畫面媒體）
+  4. intro/title_h264.mp4 + pv-a.ogg（開機畫面媒體）
 
 用法：
   python3 scripts/copy_web_assets.py            # 拷貝到 dist/
@@ -28,8 +28,6 @@ ASSETS = ROOT / "assets"
 UI_KEEP = ["ui_i18n.json"]
 # intro：只帶 h264 mp4 + ogg（title.mp4 原始編碼瀏覽器不一定能播）
 INTRO_FILES = ["intro/title_h264.mp4", "intro/pv-a.ogg"]
-# 標題畫面 BGM（標題畫面在資產下載完成前就播，必須內建）
-TITLE_BGM_FILES = ["bgm/Theme_152_Title.ogg"]
 
 
 def main() -> int:
@@ -58,7 +56,7 @@ def main() -> int:
             if s.exists():
                 copy(s, "ui/" + f)
 
-    for rel in INTRO_FILES + TITLE_BGM_FILES:
+    for rel in INTRO_FILES:
         s = ASSETS / rel
         if s.exists():
             copy(s, rel)
