@@ -50,10 +50,8 @@ const btnCtlFocus = document.getElementById('btnCtlFocus');
 const btnCtlExport = document.getElementById('btnCtlExport');
 const btnCtlSettings = document.getElementById('btnCtlSettings');
 const btnCtlRank = document.getElementById('btnCtlRank');
-const btnCtlVignette = document.getElementById('btnCtlVignette');
 const btnCtlPost = document.getElementById('btnCtlPost');
 const ctlVoiceSegs = document.getElementById('ctlVoiceSegs');
-const fxEl = document.getElementById('fx');
 const exportPanel = document.getElementById('exportPanel');
 const expChar = document.getElementById('expChar');
 const expStart = document.getElementById('expStart');
@@ -231,7 +229,6 @@ const CTL_I18N = {
   export:    { 'zh-TW': '匯出影片',      'zh-CN': '导出视频',  'ja': '動画を書き出す',      'en': 'Export video',         'ko': '영상 내보내기' },
   settings:  { 'zh-TW': '設定',          'zh-CN': '设置',      'ja': '設定',                'en': 'Settings',             'ko': '설정' },
   rank:      { 'zh-TW': '人氣排行',      'zh-CN': '人气排行',  'ja': '人気ランキング',      'en': 'Top lobbies',          'ko': '인기 순위' },
-  vignette:  { 'zh-TW': '電影燈光效果',  'zh-CN': '电影灯光效果', 'ja': '映画ライト効果',    'en': 'Cinematic lighting',   'ko': '시네마 조명 효과' },
   post:      { 'zh-TW': '濾鏡效果',        'zh-CN': '滤镜效果',       'ja': 'フィルター効果',      'en': 'Filter',               'ko': '필터 효과' },
   voiceLang: { 'zh-TW': '語音',          'zh-CN': '语音',      'ja': 'ボイス',              'en': 'Voice',                'ko': '보이스' },
   voiceJp:   { 'zh-TW': '日文',          'zh-CN': '日文',      'ja': '日本語',              'en': 'JP',                   'ko': '일본어' },
@@ -255,7 +252,6 @@ function applyCtlI18n() {
   setLabel('settings', btnCtlSettings);
   setLabel('rank', btnCtlRank);
   setLabel('focus', btnCtlFocus);
-  setLabel('vignette', btnCtlVignette);
   setLabel('post', btnCtlPost);
   const vl = document.getElementById('ctlVoiceLbl');
   if (vl) vl.textContent = ctlText('voiceLang');
@@ -8431,23 +8427,6 @@ async function init() {
     }
   });
 
-  // ---- 電影燈光效果（#fx 電影暈影）開關，持久化 ----
-  let vignetteOn = true;
-  try { vignetteOn = localStorage.getItem('ba_vignette') !== '0'; } catch {}
-  // vignette=0（歷史上是死參數，探針腳本一直帶著它）：URL 強制關閉 #fx
-  try { if (/(?:^|[?&])vignette=0/.test(location.search) || /(?:^|[?#&])vignette=0/.test(location.hash)) vignetteOn = false; } catch {}
-  const syncVignetteUI = () => {
-    fxEl.style.display = vignetteOn ? '' : 'none';
-    btnCtlVignette?.classList.toggle('on', vignetteOn);
-    btnCtlVignette?.classList.toggle('off', !vignetteOn);
-  };
-  btnCtlVignette?.addEventListener('click', () => {
-    vignetteOn = !vignetteOn;
-    try { localStorage.setItem('ba_vignette', vignetteOn ? '1' : '0'); } catch {}
-    syncVignetteUI();
-  });
-  syncVignetteUI();
-
   // ---- 後製濾鏡（Volume 色散/LGG/Panini）開關，持久化（預設開） ----
   const syncPostUI = () => {
     btnCtlPost?.classList.toggle('on', baPostOn);
@@ -8844,10 +8823,10 @@ if (BA_DEBUG.probe) {
       cursorCk: document.getElementById('setCursorCk')?.checked,
       clickfxCk: document.getElementById('setClickFxCk')?.checked,
       // cursorOffClass moved('ba-cursor-off'),
-      fxCanvas: !!document.querySelector('#fx canvas, .baclickfx, [id*="clickfx" i]'),
+      fxCanvas: !!document.querySelector('.baclickfx, [id*="clickfx" i]'),
       uiLang,
       dictLoaded: !!i18nDict,
-      ctlLabels: ['bgm', 'focus', 'vignette', 'post', 'voiceJp'].map(k => `${k}:${ctlText(k)}`).join(', '),
+      ctlLabels: ['bgm', 'focus', 'post', 'voiceJp'].map(k => `${k}:${ctlText(k)}`).join(', '),
       skipTitle: t('skip.title'),
       skipOk: document.getElementById('skipYes')?.textContent,
       jpOnlyCk: document.getElementById('setJpOnlyCk')?.checked,

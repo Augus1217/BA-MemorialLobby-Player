@@ -603,11 +603,6 @@ function stop() {
   broadcastState();
   return status();
 }
-function restoreIfEnabled() {
-  loadConfig();
-  if (config.enabled && !active) return start();
-  return status();
-}
 function isActive() { return active; }
 function status() {
   const cfg = loadConfig();
@@ -734,6 +729,6 @@ function maybeLoginAutostart() {
 }
 
 module.exports = {
-  start, stop, status, setConfig, restoreIfEnabled, isActive,
+  start, stop, status, setConfig, isActive,
   setAutostart, getAutostart, shutdown, onState, maybeLoginAutostart,
 };

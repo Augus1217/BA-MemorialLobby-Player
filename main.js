@@ -1126,12 +1126,11 @@ app.whenReady().then(async () => {
   }
   createWindow();
   try { createTray({ showPlayer, onOpenWallpaperSettings: openWallpaperSettings }); } catch (e) { console.error('[tray] init failed:', e.message); }
-  // --wallpaper CLI（開機自啟）→ 直接進桌布；packaged 下設定 enabled 亦自動恢復
-  // （dev 模式需明確 --wallpaper 或 BA_WALLPAPER=1，避免開發時意外蓋桌面）
+  // 桌布只在明確要求時啟動：--wallpaper CLI（登入自啟的 .desktop 會帶）或
+  // BA_WALLPAPER=1。一般啟動不再自動恢復上次的桌布設定——使用者沒按就別蓋桌面。
   const wantWallpaper = process.argv.includes('--wallpaper') || process.env.BA_WALLPAPER === '1';
   try {
     if (wantWallpaper) wallpaper.start();
-    else if (!isDev) wallpaper.restoreIfEnabled();
     // mac 登入啟動：login item 帶不了 args（LSSharedFileList）→ 以
     // wasOpenedAtLogin + config.launchAtLogin 判定是否直接進桌布
     if (process.platform === 'darwin') {

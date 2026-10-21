@@ -31,18 +31,10 @@
     /* 長按手勢（摸頭 420ms）不被系統選單/放大鏡搶走；按鈕同理 */
     .ctl-btn, .btn { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
 
-    /* cinematic vignette + soft top shading (non-interactive) */
-    #fx {
-      position: fixed; inset: 0; z-index: 5; pointer-events: none;
-      background:
-        radial-gradient(ellipse at 50% 46%, transparent 55%, rgba(2,3,10,.55) 100%),
-        linear-gradient(rgba(0,0,0,.28), transparent 18%, transparent 82%, rgba(0,0,0,.32));
-    }
-
     /* memorial intro white-flash overlay — rebuilt 1:1 from the game Timeline
        (Recorded clip: Volume.weight -> ColorAdjustments postExposure 5.5 +
        pure-white sprite alpha). opacity is driven per-frame by renderer/app.js;
-       sits above the camera vignette but below the dialog/HUD (NGUI UI in-game
+       sits above the renderer canvas but below the dialog/HUD (NGUI UI in-game
        renders above the post-processing). */
     #whiteflash {
       position: fixed; inset: 0; z-index: 6; background: #fff;
@@ -537,17 +529,17 @@
     #chatText:empty { display: none; }
 
     /* recording: keep the window as clean as the captured canvas */
-    body.recording #hud, body.recording #fx, body.recording #btnStudents,
+    body.recording #hud, body.recording #btnStudents,
     body.recording #sidePanel, body.recording #exportPanel, body.recording #settingsPanel, body.recording #chatDialog, body.recording #infoPanel { display: none !important; }
 
     /* focus / cinema mode — only spine character + dialogue bubble visible */
-    body.focusMode #hud, body.focusMode #fx, body.focusMode #btnStudents,
+    body.focusMode #hud, body.focusMode #btnStudents,
     body.focusMode #sidePanel, body.focusMode #exportPanel,
     body.focusMode #skipConfirm, body.focusMode #settingsPanel { display: none !important; }
     /* 桌布模式（wallpaper.js worker）：UI 全隱（對話框除外＝互動回饋）；
        游標不可 hide——Chromium 對 focusable 視窗的游標會被 compositor 採用，
        hide 掉會讓滑鼠移過桌面時整個消失 */
-    body.wallpaperMode #hud, body.wallpaperMode #fx, body.wallpaperMode #btnStudents,
+    body.wallpaperMode #hud, body.wallpaperMode #btnStudents,
     body.wallpaperMode #sidePanel, body.wallpaperMode #exportPanel, body.wallpaperMode #skipConfirm,
     body.wallpaperMode #settingsPanel, body.wallpaperMode #loadingScreen, body.wallpaperMode #infoPanel,
     body.wallpaperMode #toast, body.wallpaperMode #whiteflash { display: none !important; }
@@ -729,7 +721,6 @@
 <body>
   <div id="app"></div>
   <div id="lbTop"></div><div id="lbBottom"></div><div id="lbLeft"></div><div id="lbRight"></div>
-  <div id="fx"></div>
   <div id="hud">
     <div id="hudTop" class="hudbar">
       <div id="titleBlock">
@@ -774,7 +765,6 @@
         <button id="btnCtlExport" class="ctl-btn" title="匯出影片"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7.2" width="13.4" height="9.6" rx="2.4"/><circle cx="9.7" cy="12" r="2.6"/><path d="M16.4 10.2l4.6-2.2v8l-4.6-2.2"/></svg></span><span class="tt" data-ck="export">匯出影片</span></button>
         <button id="btnCtlSettings" class="ctl-btn" title="設定"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.4"/><path d="M12 3.5V7"/><path d="M20.5 12H17"/><path d="M3.5 12H7"/><path d="M12 20.5V17"/><path d="M6.2 6.2l2.3 2.3"/><path d="M17.8 6.2l-2.3 2.3"/><path d="M6.2 17.8l2.3-2.3"/><path d="M17.8 17.8l-2.3-2.3"/></svg></span><span class="tt" data-ck="settings">設定</span></button>
         <button id="btnCtlRank" class="ctl-btn" title="人氣排行"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v4.5a5 5 0 0 1-10 0V4z"/><path d="M7 5.5H4.5a2.6 2.6 0 0 0 2.7 4.6M17 5.5h2.5a2.6 2.6 0 0 1-2.7 4.6"/><path d="M12 13.5V17M8.5 20h7M10 17.2h4"/></svg></span><span class="tt" data-ck="rank">人氣排行</span></button>
-        <button id="btnCtlVignette" class="ctl-btn" title="電影燈光效果"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><path d="M12 3.8a8.2 8.2 0 0 1 0 16.4z" fill="currentColor" stroke="none" opacity=".4"/></svg></span><span class="tt" data-ck="vignette">電影燈光效果</span></button>
         <button id="btnCtlPost" class="ctl-btn" title="濾鏡效果"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9.3" cy="12" r="5.6" opacity=".55"/><circle cx="12" cy="12" r="5.6" opacity=".55"/><circle cx="14.7" cy="12" r="5.6" opacity=".55"/></svg></span><span class="tt" data-ck="post">濾鏡效果</span></button>
       </div>
       <div class="ctl-sep"></div>
