@@ -1270,8 +1270,15 @@ function probeAudioFormat() {
   try {
     const a = new Audio();
     if (!a.canPlayType) return 'ogg';
-    if (a.canPlayType('audio/ogg; codecs="vorbis"')) return 'ogg';
-    if (a.canPlayType('audio/mp4; codecs="mp4a.40.2"') || a.canPlayType('audio/x-m4a') || a.canPlayType('audio/aac')) return 'm4a';
+    // 只有 "probably" 才算真的能播 ogg：iOS Safari 17.4~18.3 對
+    // `audio/ogg; codecs="vorbis"` 回 "maybe"（認 codec 但容器不支援）——
+    // 舊版把 "maybe" 當可以，結果 iOS 選了 ogg → 語音/BGM 全靜音，
+    // 而且不會去下載 voice-m4a 包。m4a 一定可用（Safari 原生 AAC）。
+    const ogg = a.canPlayType('audio/ogg; codecs="vorbis"');
+    if (ogg === 'probably') return 'ogg';
+    const m4a = a.canPlayType('audio/mp4; codecs="mp4a.40.2"') || a.canPlayType('audio/x-m4a') || a.canPlayType('audio/aac');
+    if (m4a) return 'm4a';
+    if (ogg) return 'ogg';   // 只有 maybe：沒有 m4a 時仍可一試（失敗會退回）
   } catch {}
   return 'ogg';
 }
