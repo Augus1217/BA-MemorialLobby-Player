@@ -139,6 +139,19 @@ sudo dnf install alsa-lib nss gtk3 libXScrnSaver mesa-libgbm
 - 播放器預設上限 60fps（高刷螢幕上不會白燒 2.4 倍電力）；`#fps=0` 可解除上限、`#fps=120` 可指定，供診斷用。
 - 桌布模式預設 30fps，電池供電自動 −15；設定頁可直接調整。
 
+### 慢速網路／斷線
+
+- **只下載需要的**：開機只等 `core`＋`meta`（intro 背景補齊），其他大廳是「進場才下載」。想離線看就先在設定 → 資源狀態預先下載。
+- **看得出有在動**：進度顯示百分比、速度與預估剩餘時間；速度低於 ~150KB/s 會多一行「網路較慢」提示（只是提示，不會中斷）。
+- **慢而活的連線不會被砍**：桌機版只在「連續 25 秒完全沒有資料」時重試；低於 4KB/s 連續兩分鐘才視為掉速換線。
+- **斷線自動重試**：
+  - 桌機版：最多 5 次指數退避，且用 HTTP Range **續傳**（`.part` 保留，關掉 App 下次再開也會接著抓）。
+  - 網頁版：最多 3 次，停滯 30 秒即重試（不支援續傳，重新下載該包）。
+- **開機檢查**（讀 manifest）15 秒沒回應會自動重試一次並顯示「網路較慢，請稍候」，不會直接失敗。
+- 下載後都會驗 sha256；中斷/損毀的包不會被當成已安裝。
+
+如果完全連不上 Worker：開機仍可進入（顯示既有資源），設定頁的資源狀態會顯示離線，之後按「開始下載」即可重試。
+
 ## 已知限制
 
 - 偶爾顯示日文＝該角色 Global 版尚未實裝，無官方翻譯時 fallback 日文；實裝後管線自動補上
@@ -295,6 +308,27 @@ dependency, to avoid a ~70 MB download on every install):
 - The player caps at 60 fps by default (avoids burning 2.4x power on 144 Hz
   panels); `#fps=0` uncaps and `#fps=120` sets an explicit cap (diagnostics).
 - Wallpaper mode defaults to 30 fps, with a -15 reduction on battery.
+
+### Slow / flaky networks
+
+- **Only what you need is downloaded**: boot waits for `core` + `meta` only
+  (`intro` fills in the background); other lobbies download when you open them.
+  Use Settings -> Storage to pre-download for offline viewing.
+- **You can see it moving**: progress shows percent, speed and ETA; below
+  ~150 KB/s a "slow network" note is added (informational only).
+- **Slow-but-alive connections are not killed**: desktop only retries after 25 s
+  of *zero* bytes; sustained < 4 KB/s for two minutes counts as a dying link.
+- **Automatic retry on drop**:
+  - Desktop: up to 5 attempts with exponential backoff, resuming via HTTP Range
+    (`.part` survives restarts).
+  - Web: up to 3 attempts, retrying after 30 s of no data (no resume; the pack
+    is re-downloaded).
+- **Boot check** (manifest fetch) retries once after 15 s and shows a
+  "slow network, please wait" note instead of failing outright.
+- Every install verifies sha256, so interrupted/corrupt packs never count as installed.
+
+If the worker is unreachable the app still boots with whatever is installed, and
+Settings -> Storage shows offline with a button to retry.
 
 ## Known limitations
 

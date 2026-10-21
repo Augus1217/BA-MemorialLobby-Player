@@ -233,3 +233,24 @@ export async function iterateTar(blob, onEntry) {
   }
   return { count };
 }
+
+// ---------------------------------------------------------------------------
+// 停滯守門員：超過 ms 沒有任何新資料就讓串流失敗（並由呼叫端 abort 底層
+// fetch）。慢速但持續有資料的連線不受影響——慢網不該被砍。
+// ---------------------------------------------------------------------------
+export function stallGuard(src, ms, onStall) {
+  let timer = null, done = false;
+  const arm = (ctrl) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (done) return;
+      try { onStall?.(); } catch {}
+      try { ctrl.error(new Error('stalled')); } catch {}
+    }, ms);
+  };
+  return src.pipeThrough(new TransformStream({
+    start(ctrl) { arm(ctrl); },
+    transform(chunk, ctrl) { arm(ctrl); ctrl.enqueue(chunk); },
+    flush() { done = true; if (timer) clearTimeout(timer); },
+  }));
+}

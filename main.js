@@ -595,13 +595,15 @@ async function fetchJSONRetry(url, attempts = 3) {
 //  - Range 續傳：dest.part 存在則帶 Range 接著抓（206 續寫、200 重來、416 棄 part）；
 //    成功才 rename 成 dest，中斷/取消都保留 .part 供下次（含下次啟動）續傳
 //  - 自動重試：網路類失敗指數退避（最多 DL_RETRY_MAX 次）；4xx（除 429/416）不重試
-//  - 吞吐 watchdog：完全無進度 DL_STALL_MS、或 DL_SLOW_SPAN_MS 窗口均速
-//    < DL_SLOW_BPS → 砍線重試（取代舊 300s 硬 timeout——慢而活的連線不再誤殺，
-//    卡死/掉速則換一條線接著抓）
+//  - 吞吐 watchdog：完全無進度 DL_STALL_MS → 砍線重試；「慢而活」不再砍線
+//    （只有低到 DL_SLOW_BPS 且持續兩個窗口才視為掉速換線），並且會用
+//    onProgress 回報慢速旗標讓 UI 顯示提示——使用者可能只有 2G/熱點速度，
+//    砍掉重試只會讓進度倒退（每輪都要重新暖線）。
 const DL_RETRY_MAX = 5;
-const DL_STALL_MS = 20000;      // 完全無位元組
-const DL_SLOW_SPAN_MS = 30000;  // 速度採樣窗
-const DL_SLOW_BPS = 10 * 1024;  // 均速低於此值持續一個窗口 → 重試
+const DL_STALL_MS = 25000;      // 完全無位元組才判死（慢網的 TCP 停滯容忍久一點）
+const DL_SLOW_SPAN_MS = 60000;  // 速度採樣窗（拉長，避免短暫壅塞誤判）
+const DL_SLOW_BPS = 4 * 1024;   // 均速低於 4KB/s 持續兩個窗口 → 才換線重試
+const DL_SLOW_HINT_BPS = 150 * 1024;  // 低於此值 → UI 顯示「網路較慢」提示（不砍線）
 function downloadFile(url, dest, onProgress, ctl) {
   return new Promise((resolve, reject) => {
     let settled = false, cancelled = false, attempt = 0, active = null, retryScheduled = false;
@@ -689,6 +691,7 @@ function downloadFile(url, dest, onProgress, ctl) {
           });
           ws.on('error', (e) => abort(e, true));
 
+          let slowWindows = 0;
           watchdog = setInterval(() => {
             const cur = startOffset + received;
             const now = Date.now();
@@ -696,7 +699,15 @@ function downloadFile(url, dest, onProgress, ctl) {
             else if (now - lastCurT > DL_STALL_MS) return abort(new Error(`stall ${DL_STALL_MS / 1000}s`), true);
             if (now - winT >= DL_SLOW_SPAN_MS) {
               const bps = (cur - winB) / ((now - winT) / 1000);
-              if (bps < DL_SLOW_BPS) return abort(new Error(`slow ${Math.round(bps / 1024)}KB/s`), true);
+              // UI 提示（不砍線）：讓慢網使用者知道有在動、只是慢
+              try { onProgress && onProgress(cur, total, { bps, slow: bps < DL_SLOW_HINT_BPS }); } catch {}
+              if (bps < DL_SLOW_BPS) {
+                slowWindows++;
+                // 連續兩個窗口都低於 4KB/s → 視為掉速，換一條線續傳（.part 不丟）
+                if (slowWindows >= 2) return abort(new Error(`slow ${Math.round(bps / 1024)}KB/s`), true);
+              } else {
+                slowWindows = 0;
+              }
               winT = now; winB = cur;
             }
           }, 1000);
@@ -887,8 +898,9 @@ async function runDownloadAssets({ version, packages, onlyPacks, voice, audioFmt
     try {
       sendProgress({ status: 'downloading', percent: 0 });
       const url = `${ASSETS_PACKAGES_URL}/${packTagFor(name, version)}/${tarName}`;
-      await downloadFile(url, tarPath, (dl, total) => {
-        sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total });
+      await downloadFile(url, tarPath, (dl, total, extra) => {
+        // extra: { bps, slow }（watchdog 每分鐘回報一次；慢網提示用）
+        sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total, ...(extra || {}) });
       }, dlCancel);
       await verifyPackFile(tarPath, pkg, name);
       sendProgress({ status: 'extracting', percent: 0 });
@@ -974,8 +986,8 @@ async function runEnsureLobby({ lobby, version, packages, lobbies, voice, audioF
     try {
       sendProgress({ status: 'downloading', percent: 0 });
       const url = `${ASSETS_PACKAGES_URL}/${packTagFor(name, version)}/${tarName}`;
-      await downloadFile(url, tarPath, (dl, total) => {
-        sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total });
+      await downloadFile(url, tarPath, (dl, total, extra) => {
+        sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total, ...(extra || {}) });
       });
       await verifyPackFile(tarPath, pkg, name);
       sendProgress({ status: 'extracting', percent: 0 });

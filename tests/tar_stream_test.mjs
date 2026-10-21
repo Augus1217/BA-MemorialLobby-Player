@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { Sha256, gunzipStreamToBlob, iterateTar } from '../renderer/tar-stream.js';
+import { Sha256, gunzipStreamToBlob, iterateTar, stallGuard } from '../renderer/tar-stream.js';
 
 let pass = 0, fail = 0;
 const ok = (m) => { pass++; console.log(`  OK ${m}`); };
@@ -73,6 +73,44 @@ for (const [label, buf, expect] of [['ustar', gzUstar, 2], ['PAX', gzPax, 4], ['
   (entries.get('assets/data/lobby_index.json')?.data.length === 18 ? ok : bad)(`${label}: 小檔內容長度`);
 }
 void EXISTING;
+
+// ---- 2.5 停滯守門員（慢網不砍、完全沒資料才失敗）----
+{
+  // 持續有資料（即使很慢）→ 不應中斷
+  const slow = new ReadableStream({
+    start(ctrl) {
+      let n = 0;
+      const tick = () => {
+        if (n++ >= 5) return ctrl.close();
+        ctrl.enqueue(new Uint8Array(1024));
+        setTimeout(tick, 60);          // 每 60ms 只有 1KB ≈ 17KB/s
+      };
+      tick();
+    },
+  });
+  const out = [];
+  try {
+    for await (const chunk of stallGuard(slow, 300, () => { throw new Error('不該觸發停滯'); })) out.push(chunk.length);
+    (out.length === 5 ? ok : bad)(`慢速但持續有資料不中斷（${out.length} chunks）`);
+  } catch (e) { bad(`慢速連線被誤砍：${e.message}`); }
+
+  // 完全沒資料 → 逾時失敗，且 onStall 被呼叫（呼叫端據此 abort fetch）
+  let stalled = false;
+  const dead = new ReadableStream({ start(ctrl) { ctrl.enqueue(new Uint8Array(4)); /* 之後永不給資料 */ } });
+  try {
+    for await (const _ of stallGuard(dead, 150, () => { stalled = true; })) { /* drain */ }
+    bad('停滯連線未被偵測');
+  } catch (e) {
+    (stalled && /stalled/.test(e.message) ? ok : bad)(`停滯偵測＋回呼（${e.message}）`);
+  }
+
+  // 正常結束後不應再觸發逾時
+  let lateStall = false;
+  const fine = new ReadableStream({ start(ctrl) { ctrl.enqueue(new Uint8Array(8)); ctrl.close(); } });
+  for await (const _ of stallGuard(fine, 100, () => { lateStall = true; })) { /* drain */ }
+  await new Promise((r) => setTimeout(r, 200));
+  (lateStall ? bad : ok)('串流正常結束後不再觸發逾時');
+}
 
 // ---- 3. 壞資料：截斷的 tar 不應無限迴圈 ----
 {

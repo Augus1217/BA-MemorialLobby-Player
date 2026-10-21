@@ -204,7 +204,11 @@
     "a11y.fps": "畫格率（每秒張數）",
     "a11y.sortBy": "排序方式",
     "a11y.clickfxStyle": "點擊特效樣式",
-    "a11y.searchStudents": "搜尋學生"
+    "a11y.searchStudents": "搜尋學生",
+    "dl.slowNet": "網路較慢（約 {speed}），仍在下載中，請保持連線",
+    "dl.stalled": "連線中斷，正在重試（{i}/{n}）…",
+    "dl.giveUp": "下載失敗（已重試 {n} 次）。可稍後在設定 → 資源狀態重試；已下載的部分會續傳",
+    "dl.checkingSlow": "檢查更新中……（網路較慢，請稍候）"
   },
   "zh-CN": {
     "boot.checking": "检查更新中……",
@@ -411,7 +415,11 @@
     "a11y.fps": "帧率（每秒张数）",
     "a11y.sortBy": "排序方式",
     "a11y.clickfxStyle": "点击特效样式",
-    "a11y.searchStudents": "搜索学生"
+    "a11y.searchStudents": "搜索学生",
+    "dl.slowNet": "网络较慢（约 {speed}），仍在下载中，请保持连接",
+    "dl.stalled": "连接中断，正在重试（{i}/{n}）…",
+    "dl.giveUp": "下载失败（已重试 {n} 次）。可稍后在设置 → 资源状态重试；已下载部分会续传",
+    "dl.checkingSlow": "正在检查更新……（网络较慢，请稍候）"
   },
   "ja": {
     "boot.checking": "確認中です……",
@@ -618,7 +626,11 @@
     "a11y.fps": "フレームレート（fps）",
     "a11y.sortBy": "並び順",
     "a11y.clickfxStyle": "クリックエフェクトの種類",
-    "a11y.searchStudents": "生徒を検索"
+    "a11y.searchStudents": "生徒を検索",
+    "dl.slowNet": "回線が遅いようです（約 {speed}）。ダウンロードは続行中です",
+    "dl.stalled": "接続が途切れました。再試行中（{i}/{n}）…",
+    "dl.giveUp": "ダウンロードに失敗しました（{n} 回再試行）。設定 → リソース状態から再開できます（続きから再開します）",
+    "dl.checkingSlow": "更新を確認中……（回線が遅いため時間がかかります）"
   },
   "en": {
     "boot.checking": "Checking for updates...",
@@ -825,7 +837,11 @@
     "a11y.fps": "Frame rate (fps)",
     "a11y.sortBy": "Sort by",
     "a11y.clickfxStyle": "Click FX style",
-    "a11y.searchStudents": "Search students"
+    "a11y.searchStudents": "Search students",
+    "dl.slowNet": "Slow network (~{speed}); still downloading, please stay connected",
+    "dl.stalled": "Connection stalled; retrying ({i}/{n})…",
+    "dl.giveUp": "Download failed after {n} attempts. Retry from Settings → Assets; finished parts are resumed",
+    "dl.checkingSlow": "Checking for updates… (slow network, please wait)"
   },
   "ko": {
     "boot.checking": "업데이트 확인 중...",
@@ -1032,6 +1048,10 @@
     "a11y.fps": "프레임 레이트(fps)",
     "a11y.sortBy": "정렬 기준",
     "a11y.clickfxStyle": "클릭 효과 스타일",
-    "a11y.searchStudents": "학생 검색"
+    "a11y.searchStudents": "학생 검색",
+    "dl.slowNet": "네트워크가 느립니다(약 {speed}). 다운로드 중이니 연결을 유지해 주세요",
+    "dl.stalled": "연결이 끊겼습니다. 재시도 중({i}/{n})…",
+    "dl.giveUp": "다운로드에 실패했습니다({n}회 재시도). 설정 → 리소스 상태에서 재시도할 수 있으며 이어받기가 됩니다",
+    "dl.checkingSlow": "업데이트 확인 중……(네트워크가 느립니다)"
   }
 }

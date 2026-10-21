@@ -5,6 +5,7 @@ import { Vector2 } from '@esotericsoftware/spine-core';
 import { i as initClickFx } from '../assets/clickfx/clickFx.js';
 import { initClickFxAuthentic } from './clickfx-authentic.js';
 import { initClickFxAuthenticPixi } from './clickfx-authentic-pixi.js';
+import { fetchWithRetry } from './net-retry.js';
 
 window.addEventListener('error', (e) => console.error('[renderer][uncaught]', e.message, e.filename, e.lineno));
 window.addEventListener('unhandledrejection', (e) => console.error('[renderer][unhandled]', e.reason));
@@ -206,6 +207,16 @@ function t(key, params) {
   if (params) for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v);
   return s;
 }
+
+// 速度字串（慢網提示/進度顯示共用）
+function fmtSpeed(bps) {
+  if (!Number.isFinite(bps) || bps <= 0) return '';
+  if (bps >= 1048576) return (bps / 1048576).toFixed(1) + ' MB/s';
+  if (bps >= 1024) return (bps / 1024).toFixed(0) + ' KB/s';
+  return Math.round(bps) + ' B/s';
+}
+// 低於此速度且已持續一段時間 → 顯示「網路較慢」提示（不影響下載）
+const SLOW_NET_BPS = 150 * 1024;
 
 // 技術性錯誤 → 可翻譯的說明（原始訊息保留給 console）。下載失敗最常見的是
 // HTTP 4xx/5xx、sha 不符、磁碟滿；直接把 "HTTP 404 for https://…" 丟給使用者
@@ -5324,17 +5335,10 @@ function assetUrl(p) {
   return IS_ELECTRON_PROD ? 'app://' + p : p;
 }
 
-async function fetchRetry(url, retries = 4) {
-  const fullUrl = url.startsWith('assets/') ? assetUrl(url) : url;
-  for (let i = 0; ; i++) {
-    try {
-      const r = await fetch(fullUrl);
-      if (r.ok) return r;
-    } catch (e) {
-      if (i >= retries - 1) throw e;
-    }
-    await new Promise((res) => setTimeout(res, 300 * (i + 1)));
-  }
+// 韌性抓取：實作在 ./net-retry.js（可單元測試）。這裡只負責把 'assets/…'
+// 轉成實際 URL（app:// 或相對路徑）。
+function fetchRetry(url, retries = 4) {
+  return fetchWithRetry(url.startsWith('assets/') ? assetUrl(url) : url, { retries });
 }
 
 function prettyName(name) {
@@ -7635,16 +7639,48 @@ async function applyBootAssets() {
 // ---- ensureReady：唯一的資產 gate（下載 core，不 block intro） ----
 async function ensureReady() {
   const bootText = document.getElementById('bootLoadingText');
-  const showP = (p) => {
-    if (!bootText) return;
-    if (p.status === 'downloading') {
-      bootText.textContent = t('dl.downloading', { pkg: p.package, i: 1, n: 1 });
-    } else if (p.status === 'extracting') {
-      bootText.textContent = t('dl.extracting', { pkg: p.package });
-    } else if (p.status === 'done') {
-      bootText.textContent = t('dl.packDone', { pkg: p.package });
-    }
-  };
+  // 網頁版開機進度：%數＋速度＋ETA（慢網使用者要能看到「有在動」）＋
+  // 斷線重試提示。包級 index/total 由 ba-web 提供（多包併發才有意義）。
+  const showP = (() => {
+    let meter = { t: 0, b: 0, ema: 0 };
+    const rate = (received) => {
+      const now = performance.now();
+      if (!meter.t) { meter.t = now; meter.b = received; return 0; }
+      const dt = now - meter.t;
+      if (dt < 700) return meter.ema;
+      const inst = (received - meter.b) * 1000 / dt;
+      meter.ema = meter.ema ? meter.ema * 0.6 + inst * 0.4 : inst;
+      meter.t = now; meter.b = received;
+      return meter.ema;
+    };
+    const startedAt = performance.now();
+    return (p) => {
+      if (!bootText || !p) return;
+      if (p.status === 'retrying') {
+        bootText.textContent = t('dl.stalled', { i: p.attempt ?? 2, n: p.total ?? 3 });
+        return;
+      }
+      if (p.status === 'extracting') { bootText.textContent = t('dl.extracting', { pkg: p.package }); return; }
+      if (p.status === 'done') { bootText.textContent = t('dl.packDone', { pkg: p.package }); return; }
+      if (p.status === 'error') { bootText.textContent = friendlyErr(p.error) || t('dl.giveUp', { n: 3 }); return; }
+      if (p.status !== 'downloading') return;
+      let line = t('dl.downloading', { pkg: p.package, i: p.index ?? 1, n: p.total ?? 1 });
+      if (p.percent != null) line += ` ${p.percent}%`;
+      else if (p.received) line += ` ${fmtBytes(p.received)}`;
+      const bps = p.bps || (p.received ? rate(p.received) : 0);
+      if (bps > 4096) {
+        line += ` · ${fmtSpeed(bps)}`;
+        if (p.received && p.bytesTotal && p.bytesTotal > p.received) {
+          const eta = fmtClock((p.bytesTotal - p.received) / bps);
+          if (eta) line += ` · ${t('dl.eta', { t: eta })}`;
+        }
+      }
+      if (bps > 0 && bps < SLOW_NET_BPS && performance.now() - startedAt > 20000) {
+        line += ` · ${t('dl.slowNet', { speed: fmtSpeed(bps) })}`;
+      }
+      bootText.textContent = line;
+    };
+  })();
 
   if (/(?:^|&)skipUpdate=1/.test(location.search + location.hash)) return;
 
@@ -8820,11 +8856,25 @@ async function onSpaceVerify() {
   try {
     window.ba?.onDownloadProgress?.((p) => {
       if (!p) return;
-      if (p.status === 'downloading') {
+      if (p.status === 'retrying') {
+        // 斷線/停滯自動重試（main 端與網頁版都會發）
+        setAssetsProgress.style.display = 'block';
+        setProgressText.textContent = t('dl.stalled', { i: p.attempt ?? 2, n: p.total ?? 3 });
+      } else if (p.status === 'downloading') {
         setAssetsProgress.style.display = 'block';
         const pct = p.percent != null ? `${p.percent}%`
           : p.received != null ? `${(p.received / 1048576).toFixed(0)}MB` : '…';
-        setProgressText.textContent = `${p.package} (${(p.index ?? 0) + 1}/${p.total ?? '?'}) — ${pct}`;
+        // 速度＋ETA（慢網使用者最需要的兩個數字）
+        let extra = '';
+        const bps = p.bps;
+        if (bps > 4096) {
+          extra = ` · ${fmtSpeed(bps)}`;
+          const done = p.downloaded ?? p.received;
+          const total = p.bytesTotal;
+          if (done && total && total > done) extra += ` · ${t('dl.eta', { t: fmtClock((total - done) / bps) })}`;
+          if (bps < SLOW_NET_BPS) extra += ` · ${t('dl.slowNet', { speed: fmtSpeed(bps) })}`;
+        }
+        setProgressText.textContent = `${p.package} (${(p.index ?? 0) + 1}/${p.total ?? '?'}) — ${pct}${extra}`;
         if (p.percent != null) { setProgressFill.style.width = p.percent + '%'; setProgressAria(p.percent); }
         updateTotalProgress(p.package, p.percent ?? 0);
       } else if (p.status === 'done') {

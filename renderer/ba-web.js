@@ -4,7 +4,7 @@
 // 完成後只寫一次 __meta。SW 只看 active cache（O(1) 查找）。
 import { gunzipSync } from 'fflate';
 import { selectPacks, mergeManifests, companionTag } from './asset-core.js';
-import { gunzipStreamToBlob, iterateTar } from './tar-stream.js';
+import { gunzipStreamToBlob, iterateTar, stallGuard } from './tar-stream.js';
 
 const WORKER_BASE = 'https://ba-assets.imlindora.workers.dev';
 const LATEST_VERSION_URL = `${WORKER_BASE}/latest/assets_version.json`;
@@ -241,32 +241,70 @@ async function installEntries(name, source, onProgress, c) {
   return rels;
 }
 
-async function fetchAndInstallPack(meta, name, onProgress, signal) {
+// 慢速/斷線處理：完全沒有位元組進來超過 WEB_STALL_MS 就當連線壞掉（重試），
+// 但「慢而活」的連線不砍——使用者可能只有 2G/熱點速度，砍掉只會更糟。
+const WEB_STALL_MS = 30000;
+const WEB_RETRY_MAX = 3;
+
+// 下載速率 EMA（慢速提示用；每 ~500ms 更新一次）
+function makeRateMeter() {
+  let lastT = 0, lastB = 0, ema = 0;
+  return (received) => {
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    if (!lastT) { lastT = now; lastB = received; return 0; }
+    const dt = now - lastT;
+    if (dt < 500) return ema;
+    const inst = (received - lastB) * 1000 / dt;
+    ema = ema ? ema * 0.6 + inst * 0.4 : inst;
+    lastT = now; lastB = received;
+    return ema;
+  };
+}
+
+// 單次嘗試（含停滯守門）；重試由 fetchAndInstallPack 負責
+async function fetchAndInstallPackOnce(meta, name, onProgress, signal) {
   const url = packUrl(meta, name);
   const c = await activeCache();
   onProgress?.({ status: 'downloading', percent: 0 });
   const want = meta.packages?.[name]?.sha256;
 
   if (typeof DecompressionStream === 'function') {
-    const resp = await fetch(url, { cache: 'force-cache', ...(signal ? { signal } : {}) });
+    const ac = new AbortController();
+    if (signal) {
+      if (signal.aborted) ac.abort();
+      else signal.addEventListener('abort', () => ac.abort(), { once: true });
+    }
+    const resp = await fetch(url, { cache: 'force-cache', signal: ac.signal });
     if (!resp.ok) throw new Error(`pack ${name}: HTTP ${resp.status}`);
     const total = Number(resp.headers.get('content-length')) || 0;
+    const rate = makeRateMeter();
     try {
-      const { blob, sha256 } = await gunzipStreamToBlob(resp.body, total, (received) => {
-        onProgress?.(total
-          ? { status: 'downloading', percent: Math.min(99, Math.floor((received / total) * 100)) }
-          : { status: 'downloading', received });
-      });
+      const { blob, sha256 } = await gunzipStreamToBlob(
+        stallGuard(resp.body, WEB_STALL_MS, () => { try { ac.abort(); } catch {} }),
+        total,
+        (received) => {
+          const bps = rate(received) || undefined;
+          onProgress?.({
+            status: 'downloading',
+            ...(total ? { percent: Math.min(99, Math.floor((received / total) * 100)) } : {}),
+            received, bps,
+            // worker 已透傳 Content-Length → 壓縮檔總長（ETA 用）
+            ...(total ? { bytesTotal: total } : {}),
+          });
+        });
       if (want && sha256 !== want) {
         throw new Error(`pack ${name}: sha256 不符（下載 ${sha256.slice(0, 12)}…，預期 ${want.slice(0, 12)}…）`);
       }
       onProgress?.({ status: 'extracting', percent: 0 });
       return await installEntries(name, { blob }, onProgress, c);
     } catch (e) {
-      // 完整性失敗不退回舊路徑（同一份壞檔重試沒意義）；其餘（串流解壓不支援、
-      // 管線被中斷）退回 legacy 全量路徑。
-      if (/sha256 不符/.test(e?.message || '')) throw e;
-      console.warn('[ba-web] 串流安裝失敗，退回舊路徑:', e?.message || e);
+      const msg = String(e?.message || e);
+      // 完整性失敗＝同一份壞檔，重試沒意義
+      if (/sha256 不符/.test(msg)) throw e;
+      // 連線問題（停滯/斷線/被中止）→ 直接往外拋給重試層。退回 legacy 會把
+      // 已經下載的幾百 MB 丟掉從頭再來，慢網使用者最怕這個。
+      if (e?.name === 'AbortError' || /stalled|network|failed to fetch|terminated|load failed/i.test(msg)) throw e;
+      console.warn('[ba-web] 串流安裝失敗，退回舊路徑:', msg);
     }
   }
 
@@ -274,6 +312,7 @@ async function fetchAndInstallPack(meta, name, onProgress, signal) {
   const resp2 = await fetch(url, { cache: 'force-cache', ...(signal ? { signal } : {}) });
   if (!resp2.ok) throw new Error(`pack ${name}: HTTP ${resp2.status}`);
   const total2 = Number(resp2.headers.get('content-length')) || 0;
+  const rate2 = makeRateMeter();
   let buf;
   if (resp2.body?.getReader) {
     const reader = resp2.body.getReader();
@@ -284,9 +323,12 @@ async function fetchAndInstallPack(meta, name, onProgress, signal) {
       if (done) break;
       chunks.push(value);
       received += value.length;
-      onProgress?.(total2
-        ? { status: 'downloading', percent: Math.min(99, Math.floor((received / total2) * 100)) }
-        : { status: 'downloading', received });
+      onProgress?.({
+        status: 'downloading',
+        ...(total2 ? { percent: Math.min(99, Math.floor((received / total2) * 100)) } : {}),
+        received, bps: rate2(received) || undefined,
+        ...(total2 ? { bytesTotal: total2 } : {}),
+      });
     }
     buf = new Uint8Array(received);
     let off = 0;
@@ -325,6 +367,28 @@ async function packLooksPresent(c, key, files) {
     return false;
   }
   return true;
+}
+
+// 重試外層：斷線/停滯自動重試（最多 WEB_RETRY_MAX 次，指數退避）；完整性失敗
+// （sha 不符＝同一份壞檔）不重試。呼叫端收到 status:'retrying' 可顯示提示。
+async function fetchAndInstallPack(meta, name, onProgress, signal) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= WEB_RETRY_MAX; attempt++) {
+    try {
+      return await fetchAndInstallPackOnce(meta, name, onProgress, signal);
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e?.message || e);
+      if (/sha256 不符/.test(msg)) throw e;                       // 壞檔：不重試
+      if (signal?.aborted) throw e;                               // 使用者取消
+      if (/HTTP 4\d\d/.test(msg)) throw e;                        // 4xx（含 404）：重試無用
+      if (attempt >= WEB_RETRY_MAX) break;
+      console.warn(`[ba-web] ${name} 第 ${attempt} 次失敗（${msg}），重試中`);
+      onProgress?.({ status: 'retrying', attempt: attempt + 1, total: WEB_RETRY_MAX, error: msg });
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
+    }
+  }
+  throw lastErr || new Error(`pack ${name}: unknown error`);
 }
 
 // ---- cacheGet：快取 miss → 回傳 null（由呼叫端處理 fallback） ----
@@ -367,12 +431,13 @@ async function ensureAssets(neededPacks, onProgress) {
   }
 
   // 併發下載（同一包不會重複下載）
-  const results = await Promise.allSettled(toDownload.map(async (name) => {
+  const results = await Promise.allSettled(toDownload.map(async (name, idx) => {
     const dedupKey = `${meta.version}:${name}`;
     if (_inflight.has(dedupKey)) return _inflight.get(dedupKey);
 
+    // 帶上包序（i/n）：開機畫面才能顯示「下載 core (1/2)」而不是永遠 (1/1)
     const sendProgress = onProgress
-      ? (p) => onProgress({ package: name, ...p })
+      ? (p) => onProgress({ package: name, index: idx, total: toDownload.length, ...p })
       : undefined;
 
     const p = fetchAndInstallPack(meta, name, sendProgress)
