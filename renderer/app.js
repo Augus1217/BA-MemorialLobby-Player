@@ -8551,10 +8551,11 @@ async function init() {
     }).map((p) => p.key));
   });
   document.getElementById('setSpaceCleanOrphans')?.addEventListener('click', async () => {
-    const r = await window.ba.cleanOrphans?.().catch(() => null) || { removed: 0 };
+    const r = await window.ba.cleanOrphans?.().catch(() => null);
     await refreshSpaceManager();
-    setSpaceMessage(t('set.space.orphans', { n: 0 }));
-    void r;
+    if (!r) { setSpaceMessage(t('set.space.orphansFail')); return; }
+    if (r.skipped) { setSpaceMessage(t('set.space.orphansSkipped')); return; }
+    setSpaceMessage(t('set.space.orphans', { n: r.removed || 0 }));
   });
 
 // ---- 完整性檢查：缺檔的包去掉 sha（保留檔案清單），下次下載自動補回 ----
@@ -8741,6 +8742,7 @@ async function onSpaceVerify() {
       ? m[1]
       : (remembered && LOBBY_INDEX[remembered] ? remembered : ORDER[0]);
     log(`[lobby] boot選擇 hash="${location.hash}" m=${m ? m[1] : 'null'} inIndex=${m ? !!LOBBY_INDEX[m[1]] : '-'} first=${first}`);
+    let bootOk = false;
     if (WALLPAPER_MODE) {
       // dev vite 可能短暫掛掉（main watchdog 會把 server 帶回來，約 1-2s）→ 載入失敗自動重試。
       // loadLobby 內部吞錯（只 showErr＋return），以 currentLobby===first 判成敗（成功尾端才指派）。
@@ -8753,12 +8755,16 @@ async function onSpaceVerify() {
           await new Promise((r) => setTimeout(r, 5000));
         }
       }
+      bootOk = okBoot;
       if (!okBoot) log('[wallpaper] 大廳載入重試耗盡——維持錯誤列；vite 恢復後可從系統匣重啟桌布');
     } else {
       await loadLobby(first);
+      bootOk = currentLobby === first;
     }
-    // 桌布 worker：資產就緒才 show（免開機閃屏）；watchdog 由此進入心跳巡檢
-    if (WALLPAPER_MODE) { try { window.ba?.wallpaperStage?.('ready'); } catch {} }
+    // 桌布 worker：資產「真的」就緒才 show（免開機閃屏／黑桌面）。
+    // 失敗時不回報 ready：worker 保持隱藏，watchdog 10 分鐘後重試，而不是把
+    // 一張全黑視窗蓋到桌面上（舊版無論成敗都送 ready）。
+    if (WALLPAPER_MODE && bootOk) { try { window.ba?.wallpaperStage?.('ready'); } catch {} }
   } else {
     showErr(t('msg.emptyIndex'));
   }
@@ -9457,6 +9463,9 @@ function tickLobbyParticles(dt) {
       const t = p.age / p.life;
       if (t >= 1) { p.sp.destroy(); sys.parts.splice(i, 1); continue; }
       p.x += p.vx * dt; p.y += p.vy * dt;
+      // 位置要每幀寫回 sprite：舊版只在生成時 set 一次，粒子全部黏在出生點
+      // （p.x/p.y 的漂移算了卻沒套用）。
+      p.sp.position.set(p.x, p.y);
       const sizeOL = d.sizeOverLifetime?.length ? mmcAt({mode:'curve', keys:d.sizeOverLifetime}, t, sys.rng) : 1;
       // 目標編輯單位寬＝baseSize×sizeOL；sprite scale＝目標寬/貼圖像素寬
       p.sp.scale.set((p.baseSize * sizeOL) / (p.sp.texture?.width || 128));
@@ -9511,6 +9520,9 @@ function spawnParticle(sys) {
 // 遊戲以透視相機把 mesh 的 z（深度）投成畫面上的弧形；pixi 端以線性係數
 // WATER_Z2Y 近似（對遊戲截圖校準）。貼圖：assets/particles/{lobby}/waterwave_0*.png。
 let waterLayer = null, waterUniforms = null;
+// 世代號：貼圖是非同步載入的，換大廳後舊的 Promise 仍會回來；只有同一世代
+// 才准把 mesh 掛上去（否則 A 的水波會畫在 B 的水面上）。
+let waterGen = 0;
 const WATER_Z2Y = 0.25;   // mesh z（米制深度）→ pixi y 係數（透視近似，截圖校準）
 // 弧光強度：遊戲端弧光明顯亮於貼圖原值（mesh 頂點色通道含負值、機制未明），
 // 以遊戲截圖校準（waterStr=3.0≈遊戲弧線亮度）。
@@ -9523,11 +9535,13 @@ const BG_BLUR = Number(/(?:[&?#])bgBlur=([\d.]+)/.exec(location.search + locatio
 // waterStr=3.0 可開啟實驗性波光，但在實機序列幀證實其遊戲內樣貌前不應預設開啟。
 
 function destroyLobbyWater() {
+  waterGen++;
   if (waterLayer) { waterLayer.destroy({ children: true }); waterLayer = null; waterUniforms = null; }
 }
 
 function initLobbyWater(lobbyKey) {
   destroyLobbyWater();
+  const gen = waterGen;
   const def = LOBBY_PARTICLES?.[lobbyKey]?.waterMesh;
   if (!def?.verts_xz?.length || !spine) { log(`[particles] water 跳過（def=${!!def} spine=${!!spine}）`); return; }
   // screen_map＝對遊戲截圖的單幀校準；十七輪背景色變更後校準失效已標記為
@@ -9558,7 +9572,7 @@ function initLobbyWater(lobbyKey) {
     Assets.load(assetUrl(base + mat.tex_main + '.png')),
     Assets.load(assetUrl(base + mat.tex_distort + '.png')),
   ]).then(([texMain, texDistort]) => {
-    if (!waterLayer) return;   // teardown 競態防護
+    if (gen !== waterGen || !waterLayer) return;   // 已換大廳／teardown 競態防護
     waterUniforms = new UniformGroup({
       uTime: { value: 0, type: 'f32' },
       uDistortScale: { value: mat.distort_scale, type: 'vec2<f32>' },
@@ -9596,7 +9610,7 @@ function initLobbyWater(lobbyKey) {
     log(`[particles] ${lobbyKey}: 水面波光層就緒（${n} 頂點）`);
     // 診斷：mesh 編輯 bbox 與螢幕 bbox（校準 screen_map 用）
     setTimeout(() => {
-      if (!waterLayer) return;
+      if (gen !== waterGen || !waterLayer) return;
       const xs = [], ys = [];
       for (let i = 0; i < n; i++) {
         const g = spine.toGlobal({ x: positions[i*2], y: positions[i*2+1] });
@@ -9604,11 +9618,13 @@ function initLobbyWater(lobbyKey) {
       }
       log(`[particles] water screen bbox: x ${Math.min(...xs).toFixed(0)}~${Math.max(...xs).toFixed(0)}, y ${Math.min(...ys).toFixed(0)}~${Math.max(...ys).toFixed(0)}`);
     }, 2500);
-  }).catch((e) => log('[particles] 水面貼圖載入失敗: ' + e.message));
+  }).catch((e) => { if (gen === waterGen) log('[particles] 水面貼圖載入失敗: ' + e.message); });
 }
 
 function tickLobbyWater(dtMs) {
-  if (waterUniforms) waterUniforms.uTime = (performance.now() / 1000) % 3600;
+  // UniformGroup 的值在 .uniforms 裡；寫 waterUniforms.uTime 只是多一個
+  // 沒人讀的屬性，shader 的 uTime 永遠是 0（水面完全靜止）。
+  if (waterUniforms) waterUniforms.uniforms.uTime = (performance.now() / 1000) % 3600;
 }
 
 // ---- 水槽渲染探針（PROBE=1&probeWater=1&lobby=<key>&autostart=1&vignette=0）----

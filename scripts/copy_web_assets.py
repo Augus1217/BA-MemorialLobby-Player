@@ -26,6 +26,10 @@ ASSETS = ROOT / "assets"
 # 官方素材目錄一律不拷；無 CORE_DIRS。
 # ui/：只帶自製檔（ui_i18n.json）。
 UI_KEEP = ["ui_i18n.json"]
+# loading/：開場畫面（首屏在 core pack 安裝前就要顯示，不能等到 pack 下載完）——
+# title.webm 背景影片、spinner.png、font.otf 開場字型。缺了它們 Pages 版首屏
+# 會是破圖＋系統字型（舊版原始碼註解說「build 會拷進 dist」但實際沒有，這裡補上）。
+LOADING_KEEP = ["title.webm", "spinner.png", "font.otf"]
 # intro：只帶 h264 mp4 + ogg（title.mp4 原始編碼瀏覽器不一定能播）
 INTRO_FILES = ["intro/title_h264.mp4", "intro/pv-a.ogg"]
 
@@ -55,6 +59,20 @@ def main() -> int:
             s = ui_dir / f
             if s.exists():
                 copy(s, "ui/" + f)
+
+    # loading/：開場畫面素材（缺檔視為部署錯誤——首屏會壞）
+    loading_dir = ASSETS / "loading"
+    missing_loading = []
+    for f in LOADING_KEEP:
+        s = loading_dir / f
+        if s.exists():
+            copy(s, "loading/" + f)
+        else:
+            missing_loading.append(f)
+    if missing_loading:
+        print(f"[web] 錯誤：缺開場素材 assets/loading/{{{','.join(missing_loading)}}}"
+              f"——Pages 首屏會破圖；請先跑 core pack 下載步驟。", file=sys.stderr)
+        return 1
 
     for rel in INTRO_FILES:
         s = ASSETS / rel

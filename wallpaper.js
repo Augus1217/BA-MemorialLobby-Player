@@ -59,9 +59,26 @@ function configPath() {
 }
 function loadConfig() {
   if (config) return config;
-  try { config = { ...DEFAULT_CFG, ...JSON.parse(fs.readFileSync(configPath(), 'utf-8')) }; }
-  catch { config = { ...DEFAULT_CFG }; }
+  try { config = sanitizeConfig(JSON.parse(fs.readFileSync(configPath(), 'utf-8'))); }
+  catch { config = sanitizeConfig(null); }
   return config;
+}
+// 設定檔是使用者可手改的 JSON：型別不對（fps:"60"、perScreen:null）不該讓
+// 桌布用 0fps 或 NaN 跑。逐欄位驗證並夾範圍，壞值一律退回預設。
+function sanitizeConfig(raw) {
+  const src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  const c = { ...DEFAULT_CFG, perScreen: {} };
+  for (const k of ['enabled', 'sound', 'interact', 'launchAtLogin', 'pauseFullscreen', 'pauseBattery']) {
+    if (typeof src[k] === 'boolean') c[k] = src[k];
+  }
+  if (typeof src.lobby === 'string') c.lobby = src.lobby.slice(0, 120);
+  if (Number.isFinite(src.fps)) c.fps = Math.min(120, Math.max(10, Math.round(src.fps)));
+  if (src.perScreen && typeof src.perScreen === 'object' && !Array.isArray(src.perScreen)) {
+    for (const [k, v] of Object.entries(src.perScreen)) {
+      if (/^\d+$/.test(k) && typeof v === 'string') c.perScreen[k] = v.slice(0, 120);
+    }
+  }
+  return c;
 }
 function saveConfig() {
   try { fs.mkdirSync(path.dirname(configPath()), { recursive: true }); fs.writeFileSync(configPath(), JSON.stringify(config, null, 2)); }
@@ -338,14 +355,17 @@ function watchdogTick() {
     if (!w.win || w.win.isDestroyed()) continue;
     if (w.reloading) continue;
     if (!w.ready) {
-      // boot 長（首訪串流下載 lobby pack 可達分鐘級）→ 10 分鐘才判死，只重試一次
-      if (now - w.created > 10 * 60000 && w.reloads < 1) reloadWorker(w);
-      else if (now - w.created > 20 * 60000) failWorker(w, 'boot timeout');
+      // boot 長（首訪串流下載 lobby pack 可達分鐘級）→ 10 分鐘才判死。
+      // reload 後 created 會重置，才有第二次完整的 10 分鐘可用；先前沒重置，
+      // 重新載入後 watchdog 立刻用「最初建立時間」判定逾時 → 直接放棄。
+      if (now - w.created > 10 * 60000) {
+        if (w.reloads < 1) reloadWorker(w);
+        else failWorker(w, 'boot timeout');
+      }
       continue;
     }
     if (w.lastBeat && now - w.lastBeat > 20000) {
-      w.reloads++;
-      if (w.reloads <= 3) reloadWorker(w);
+      if (w.reloads < 3) reloadWorker(w);
       else failWorker(w, 'heartbeat lost');
     }
   }
@@ -354,6 +374,8 @@ function reloadWorker(w) {
   w.reloading = true;
   w.ready = false;
   w.lastBeat = 0;
+  w.reloads++;
+  w.created = Date.now();
   w.bootStage = 'reload';
   try { w.win.webContents.reload(); } catch {}
   // 心跳恢復時清除 reloading（見 heartbeat handler）；逾時保險
@@ -635,18 +657,20 @@ function status() {
 }
 function setConfig(patch) {
   const cfg = loadConfig();
-  const prev = { ...cfg };
-  const p = patch || {};
+  const prev = { ...cfg, perScreen: { ...(cfg.perScreen || {}) } };
+  const p = (patch && typeof patch === 'object') ? patch : {};
+  const merged = { ...cfg, perScreen: { ...(cfg.perScreen || {}) } };
   for (const k of Object.keys(DEFAULT_CFG)) {
-    if (k in p) cfg[k] = p[k];
+    if (k in p) merged[k] = p[k];
   }
+  // 只接受合法值（同 loadConfig）：IPC 也可能送來字串/超界數字
+  Object.assign(cfg, sanitizeConfig(merged));
   saveConfig();
   // 即時套用
   if (prev.interact !== cfg.interact) {
     for (const w of [...workers.values()]) applyIgnoreMouse(w);
   }
   if (prev.fps !== cfg.fps || prev.pauseBattery !== cfg.pauseBattery) applyBattery();
-  if (!prev.pauseFullscreen && cfg.pauseFullscreen === false) { /* noop */ }
   if (prev.pauseFullscreen !== cfg.pauseFullscreen && !cfg.pauseFullscreen) { lastFsState = false; setPaused(false); }
   // lobby/sound 變更 → 無縫換角（新 worker ready 顯示後才拆舊的；renderer 於載入時讀 config）
   if (active && (prev.lobby !== cfg.lobby

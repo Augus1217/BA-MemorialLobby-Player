@@ -11,8 +11,9 @@ permissions:
   id-token: write
 
 concurrency:
+  # 部署不可中途取消（cancel 會讓 Pages 停留在半套用狀態）；排隊等前一輪完成。
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:

@@ -130,26 +130,55 @@ function packUrl(meta, name) {
 
 // 唯一選包入口見 ./asset-core.js（與 Electron main.js selectPacks 同語義，parity 由 CI 鎖死）
 
-// ---- mini tar parser（ustar；strip:1） ----
+// ---- mini tar parser（ustar/PAX/GNU；strip:1） ----
+// Python tarfile 預設寫 PAX 格式：長檔名會走 'x' 擴充標頭、非 ASCII 以 UTF-8
+// 存 path=；舊版 parser 只認 ustar 的 100+155 位元組欄位、又逐 byte 轉 ASCII，
+// 遇到 PAX 包會把檔案名解成亂碼（快取 key 錯 → 之後永遠 miss）。
 function untarGz(buf, onEntry) {
   const files = gunzipSync(new Uint8Array(buf));
-  let off = 0;
+  const td = new TextDecoder('utf-8');
+  const nulStr = (bytes) => {
+    let end = 0;
+    while (end < bytes.length && bytes[end]) end++;
+    return td.decode(bytes.subarray(0, end));
+  };
+  // PAX 記錄格式："<len> <key>=<value>\n"，取 path= 那行
+  const paxPath = (data) => {
+    for (const line of td.decode(data).split('\n')) {
+      const eq = line.indexOf('=');
+      if (eq < 0) continue;
+      if (line.slice(line.indexOf(' ') + 1, eq) === 'path') return line.slice(eq + 1);
+    }
+    return null;
+  };
+  let off = 0, longName = null, paxName = null;
   while (off + 512 <= files.length) {
     const header = files.subarray(off, off + 512);
-    if (header.every((b) => b === 0)) break;
-    let name = '';
-    for (const b of header.subarray(0, 100)) { if (!b) break; name += String.fromCharCode(b); }
-    let prefix = '';
-    for (const b of header.subarray(345, 345 + 155)) { if (!b) break; prefix += String.fromCharCode(b); }
-    if (prefix) name = prefix + '/' + name;
-    const sizeStr = String.fromCharCode(...header.subarray(124, 136)).replace(/\0.*$/, '').trim();
-    const size = parseInt(sizeStr, 8) || 0;
+    let allZero = true;
+    for (let i = 0; i < 512; i++) if (header[i]) { allZero = false; break; }
+    if (allZero) break;                       // 結尾的兩個空區塊
+    const sizeStr = td.decode(header.subarray(124, 136)).replace(/\0.*$/, '').trim();
+    const size = sizeStr ? (parseInt(sizeStr, 8) || 0) : 0;
     const typeFlag = String.fromCharCode(header[156]);
-    off += 512;
-    if (typeFlag === '0' || typeFlag === '\0' || typeFlag === '') {
-      onEntry(name, files.subarray(off, off + size));
+    const dataOff = off + 512;
+    const data = files.subarray(dataOff, dataOff + size);
+    if (typeFlag === 'x' || typeFlag === 'g') {          // PAX 擴充標頭
+      if (typeFlag === 'x') paxName = paxPath(data) || paxName;
+    } else if (typeFlag === 'L') {                       // GNU 長檔名
+      longName = nulStr(data);
+    } else if (typeFlag === '0' || typeFlag === '\0' || typeFlag === '') {
+      let name = longName || paxName;
+      if (!name) {
+        const base = nulStr(header.subarray(0, 100));
+        const prefix = nulStr(header.subarray(345, 500));
+        name = prefix ? prefix + '/' + base : base;
+      }
+      onEntry(name, data);
+      longName = null; paxName = null;
+    } else {
+      longName = null; paxName = null;                   // 目錄/連結等：略過
     }
-    off += Math.ceil(size / 512) * 512;
+    off = dataOff + Math.ceil(size / 512) * 512;
   }
 }
 
@@ -201,6 +230,21 @@ async function fetchAndInstallPack(meta, name, onProgress, signal) {
   } else {
     buf = await resp.arrayBuffer();
   }
+  // 完整性：manifest 有 sha256 就必須對上（下載損毀／被中間改寫 → 直接失敗，
+  // 不讓壞檔進快取；否則之後 verify 只會說「檔案在」）。
+  const want = meta.packages?.[name]?.sha256;
+  if (want) {
+    let got = '';
+    try {
+      const d = await crypto.subtle.digest('SHA-256', buf);
+      got = [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) {
+      console.warn('[ba-web] sha256 無法計算，跳過驗證:', e?.message || e);
+    }
+    if (got && got !== want) {
+      throw new Error(`pack ${name}: sha256 不符（下載 ${got.slice(0, 12)}…，預期 ${want.slice(0, 12)}…）`);
+    }
+  }
   onProgress?.({ status: 'extracting', percent: 0 });
   const entries = [];
   untarGz(buf, (path, data) => entries.push([path, data]));
@@ -208,6 +252,8 @@ async function fetchAndInstallPack(meta, name, onProgress, signal) {
   const rels = [];
   for (const [path, data] of entries) {
     const rel = path.replace(/^assets\//, '');
+    // 惡意/壞掉的 tar 可能用絕對路徑或 ../ 逃出 assets 命名空間
+    if (!rel || rel.startsWith('/') || rel.split('/').includes('..')) continue;
     rels.push(rel);
     const body = new Response(data.slice().buffer, {
       headers: { 'Content-Type': guessMime(rel), 'Cache-Control': 'immutable' },
@@ -592,10 +638,18 @@ const ba = {
         }
         const inCache = new Set(rels);
         const PLAYER_DIRS = ['bgm/', 'students/', 'loading/', 'ui/', 'fonts/', 'clickfx/'];
+        // core 也必須 backfill：core 與 assets-player 共用 students/ui/loading/fonts，
+        // 少了 core 的清單，刪除 assets-player 時那些共用檔會被當成「沒人認領」刪掉，
+        // 整個 UI 直接壞掉（refcount 保護失效）。
+        const CORE_DIRS = ['students/', 'ui/', 'loading/', 'fonts/', 'voice_title/'];
         const rebuilt = {};
         for (const k of unmapped) {
           let list = null;
-          if (k === 'intro') {
+          if (k === 'core') {
+            list = rels.filter((r) => CORE_DIRS.some((d) => r.startsWith(d)));
+          } else if (k === 'meta') {
+            list = rels.filter((r) => r.startsWith('data/'));
+          } else if (k === 'intro') {
             list = rels.filter((r) => r.startsWith('intro/'));
           } else if (k === 'assets-player') {
             list = rels.filter((r) => PLAYER_DIRS.some((d) => r.startsWith(d)));
@@ -717,6 +771,10 @@ const ba = {
     if (!c) return { removed: 0 };
     const meta = await readMeta(c);
     const files = meta.__files || {};
+    const listed = Object.keys(meta).filter((k) => !k.startsWith('__'));
+    // 沒有完整的檔案清單就不准清：認領集合會不完整，會把現役資產當無主檔刪掉。
+    if (!listed.length) return { removed: 0, skipped: 'not_installed' };
+    if (listed.some((k) => !Array.isArray(files[k]))) return { removed: 0, skipped: 'no_filelist' };
     const claimed = new Set();
     for (const [p, rels] of Object.entries(files)) {
       if (p.startsWith('__') || !(p in meta)) continue;

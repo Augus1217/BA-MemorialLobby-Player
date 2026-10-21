@@ -654,8 +654,12 @@ function renderScene(list) {
       const pL = [];
       for (let i = 0; i < gP.A.length; i++) pL.push(gP.A[i]);
       const pr2 = [0.1, 0.5, 0.9].map((p) => (qs(sL, p) / qs(pL, p)).toFixed(3)).join(',');
-      report('T11-pagebake-uv', true,
-        `plain/pagebake R p10,p50,p90=${pr2} (plain p50=${qs(sL, 0.5)}, pagebake p50=${qs(pL, 0.5)}) => ${(() => { const r = qs(sL, 0.5) / qs(pL, 0.5); return Math.abs(r - 1) < 0.12 ? 'UV-OK' : 'UV-MISMATCH'; })()}`);
+      // 真正的判定要進 ok（舊版固定傳 true，UV-MISMATCH 只出現在字串裡，
+      // 測試永遠 PASS——等於沒測）。
+      const r11 = qs(pL, 0.5) > 0 ? qs(sL, 0.5) / qs(pL, 0.5) : NaN;
+      const ok11 = Number.isFinite(r11) && Math.abs(r11 - 1) < 0.12;
+      report('T11-pagebake-uv', ok11,
+        `plain/pagebake R p10,p50,p90=${pr2} (plain p50=${qs(sL, 0.5)}, pagebake p50=${qs(pL, 0.5)}) => ${ok11 ? 'UV-OK' : 'UV-MISMATCH'}`);
       att0.region.texture = oldTex;
     } catch (e) {
       skipTest('T11-pagebake-uv', 'exception: ' + (e?.message || e));

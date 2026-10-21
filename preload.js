@@ -1,7 +1,29 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// download-progress handler 精確刪除用（app 會在單次下載結束後反註冊）
-const _progWraps = new Map();
+// 事件訂閱包裝：同一個 callback 重複訂閱同一 channel 時先移除舊的包裝，
+// 避免 HMR／重新初始化把 listener 疊起來（每次事件觸發 N 次）。
+// key = callback 物件，value = Map(channel → wrapper)
+const _wraps = new Map();
+
+function subscribe(channel, cb, passValue = true) {
+  if (typeof cb !== 'function') return;
+  let byChannel = _wraps.get(cb);
+  if (!byChannel) { byChannel = new Map(); _wraps.set(cb, byChannel); }
+  const old = byChannel.get(channel);
+  if (old) ipcRenderer.removeListener(channel, old);
+  const wrap = (_, v) => { try { cb(passValue ? v : undefined); } catch {} };
+  byChannel.set(channel, wrap);
+  ipcRenderer.on(channel, wrap);
+}
+
+function unsubscribe(channel, cb) {
+  const byChannel = _wraps.get(cb);
+  const wrap = byChannel && byChannel.get(channel);
+  if (!wrap) return;
+  ipcRenderer.removeListener(channel, wrap);
+  byChannel.delete(channel);
+  if (!byChannel.size) _wraps.delete(cb);
+}
 
 contextBridge.exposeInMainWorld('ba', {
   __electron: true,
@@ -18,15 +40,8 @@ contextBridge.exposeInMainWorld('ba', {
   checkAssets: (payload) => ipcRenderer.invoke('check-assets', payload),
   downloadAssets: (payload) => ipcRenderer.invoke('download-assets', payload),
   cancelDownload: () => ipcRenderer.invoke('cancel-download-assets'),
-  onDownloadProgress: (cb) => {
-    const w = (_, data) => { try { cb(data); } catch {} };
-    _progWraps.set(cb, w);
-    ipcRenderer.on('download-progress', w);
-  },
-  offDownloadProgress: (cb) => {
-    const w = _progWraps.get(cb);
-    if (w) { ipcRenderer.removeListener('download-progress', w); _progWraps.delete(cb); }
-  },
+  onDownloadProgress: (cb) => subscribe('download-progress', cb),
+  offDownloadProgress: (cb) => unsubscribe('download-progress', cb),
   ensureLobby: (payload) => ipcRenderer.invoke('ensure-lobby', payload),
   // 管理空間：檢視已下載資源包與磁碟用量、刪除
   assetsManageList: () => ipcRenderer.invoke('assets-manage-list'),
@@ -44,9 +59,14 @@ contextBridge.exposeInMainWorld('ba', {
   wallpaperSetAutostart: (on) => ipcRenderer.invoke('wallpaper-set-autostart', !!on),
   wallpaperBeat: () => ipcRenderer.send('wallpaper-heartbeat'),
   wallpaperStage: (s) => ipcRenderer.send('wallpaper-stage', String(s || '')),
-  onOpenWallpaperSettings: (cb) => ipcRenderer.on('open-wallpaper-settings', () => { try { cb(); } catch {} }),
-  onWallpaperCursor: (cb) => ipcRenderer.on('wallpaper-cursor', (_, p) => { try { cb(p); } catch {} }),
-  onWallpaperFps: (cb) => ipcRenderer.on('wallpaper-fps', (_, v) => { try { cb(v); } catch {} }),
-  onWallpaperPaused: (cb) => ipcRenderer.on('wallpaper-pause', (_, v) => { try { cb(v); } catch {} }),
-  onWallpaperState: (cb) => ipcRenderer.on('wallpaper-state', (_, v) => { try { cb(v); } catch {} }),
+  onOpenWallpaperSettings: (cb) => subscribe('open-wallpaper-settings', cb, false),
+  offOpenWallpaperSettings: (cb) => unsubscribe('open-wallpaper-settings', cb),
+  onWallpaperCursor: (cb) => subscribe('wallpaper-cursor', cb),
+  offWallpaperCursor: (cb) => unsubscribe('wallpaper-cursor', cb),
+  onWallpaperFps: (cb) => subscribe('wallpaper-fps', cb),
+  offWallpaperFps: (cb) => unsubscribe('wallpaper-fps', cb),
+  onWallpaperPaused: (cb) => subscribe('wallpaper-pause', cb),
+  offWallpaperPaused: (cb) => unsubscribe('wallpaper-pause', cb),
+  onWallpaperState: (cb) => subscribe('wallpaper-state', cb),
+  offWallpaperState: (cb) => unsubscribe('wallpaper-state', cb),
 });

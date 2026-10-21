@@ -4,6 +4,7 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const https = require('https');
 const { pipeline } = require('stream/promises');
 const { createGunzip } = require('zlib');
@@ -256,8 +257,18 @@ function createWindow() {
 
 ipcMain.handle('screenshot', async (event, file) => {
   const img = await win.webContents.capturePage();
-  fs.writeFileSync(file, img.toPNG());
-  return file;
+  // 只允許寫進使用者圖片資料夾／暫存資料夾／EXPORT_DIR：這個 IPC 沒有另開
+  // 儲存對話框，若照單全收等於讓 renderer 能任意寫檔。
+  const name = path.basename(String(file || `screenshot-${Date.now()}.png`));
+  const allowed = [process.env.EXPORT_DIR, os.tmpdir(), app.getPath('pictures')].filter(Boolean);
+  let out = path.join(app.getPath('pictures'), name);
+  if (file) {
+    const want = path.resolve(String(file));
+    if (allowed.some((d) => pathInside(d, want))) out = want;
+  }
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  fs.writeFileSync(out, img.toPNG());
+  return out;
 });
 
 ipcMain.handle('lobby-list', async () => {
@@ -320,6 +331,7 @@ ipcMain.handle('intro-media', async () => {
 // 編碼為固定 fps / 精確時長的 MP4 / WebM，完全不依賴即時錄影。
 let animProc = null;
 let animQueued = Promise.resolve();
+let animExit = null;
 let animOutPath = null;
 let animAudioTmp = null;
 
@@ -336,7 +348,8 @@ ipcMain.handle('anim-start', async (event, payload) => {
     let outPath;
     const autoDir = process.env.EXPORT_DIR;
     if (autoDir) {
-      outPath = path.join(autoDir, defaultName);
+      // defaultName 來自 renderer：只留檔名，避免 ../../ 逃出 EXPORT_DIR
+      outPath = path.join(autoDir, path.basename(String(defaultName || 'lobby.mp4')));
     } else {
       const { canceled, filePath } = await dialog.showSaveDialog(win, {
         title: labels.title || '匯出動畫',
@@ -374,7 +387,17 @@ ipcMain.handle('anim-start', async (event, payload) => {
     animQueued = Promise.resolve();
     console.log('[anim] spawn ffmpeg', vargs.join(' '));
     animProc = spawn(findFfmpeg(), vargs, { stdio: ['pipe', 'ignore', 'pipe'] });
+    // ffmpeg 提前結束（參數錯、磁碟滿）時，後續 write/end 會 EPIPE；
+    // 沒有 listener 會變成 uncaught error 直接把主程序帶走。
+    animProc.stdin.on('error', () => {});
     animProc.stderr.on('data', () => {});
+    // exit promise 必須在 spawn 當下就掛：等到 anim-finish 才 proc.on('exit')
+    // 會錯過已經發生的事件 → 匯出永久卡住不返回。
+    animExit = new Promise((res) => {
+      animProc.once('exit', (c) => res(c));
+      // spawn 失敗（找不到 ffmpeg）不會有 exit 事件，靠 error 收尾避免卡死
+      animProc.once('error', () => res(-1));
+    });
     animProc.on('error', (e) => { console.error('[anim] ffmpeg spawn 失敗', e); });
     animProc.on('exit', (c) => { if (c !== 0 && c !== null) console.error('[anim] ffmpeg exit', c); });
     return { ok: true };
@@ -392,9 +415,10 @@ ipcMain.handle('anim-finish', async () => {
   if (!animProc) return { error: 'no_active_export' };
   const proc = animProc;
   const tmp = animAudioTmp;
-  try { await animQueued; proc.stdin.end(); } catch (e) { proc.stdin.destroy(); }
-  const code = await new Promise((res) => proc.on('exit', (c) => res(c)));
-  if (proc === animProc) animProc = null;
+  const exitP = animExit || new Promise((res) => proc.once('exit', res));
+  try { await animQueued; proc.stdin.end(); } catch { try { proc.stdin.destroy(); } catch {} }
+  const code = await exitP;
+  if (proc === animProc) { animProc = null; animExit = null; }
   if (tmp) { try { fs.unlinkSync(tmp); } catch {} animAudioTmp = null; }
   if (code !== 0) return { error: `ffmpeg 結束碼 ${code}` };
   const p = animOutPath;
@@ -403,24 +427,31 @@ ipcMain.handle('anim-finish', async () => {
 });
 
 ipcMain.on('anim-abort', () => {
-  if (animProc) { try { animProc.stdin.destroy(); } catch {} try { animProc.kill('SIGKILL'); } catch {} animProc = null; }
+  if (animProc) { try { animProc.stdin.destroy(); } catch {} try { animProc.kill('SIGKILL'); } catch {} animProc = null; animExit = null; }
   if (animAudioTmp) { try { fs.unlinkSync(animAudioTmp); } catch {} animAudioTmp = null; }
 });
 
 ipcMain.handle('bgm-export', async (event, payload) => {
   const { filename, defaultName, labels = {} } = payload || {};
   if (!filename) return { canceled: true };
-  const src = path.join(getAssetsDir(), 'bgm', filename);
-  if (!fs.existsSync(src)) return { error: 'bgm_missing' };
+  // 只接受純檔名：filename 來自 BGM 對照表，但 renderer 若被注入可送 ../..
+  // 讀出 assets 目錄外任意檔案。
+  const name = String(filename);
+  if (name !== path.basename(name) || name.includes('\0')) return { error: 'bad_name' };
+  const bgmDir = path.join(getAssetsDir(), 'bgm');
+  const src = path.join(bgmDir, name);
+  if (!pathInside(bgmDir, src) || !fs.existsSync(src)) return { error: 'bgm_missing' };
+  const outName = path.basename(String(defaultName || name));
   const autoDir = process.env.EXPORT_DIR;
   if (autoDir) {
-    const dst = path.join(autoDir, defaultName || filename);
+    const dst = path.join(autoDir, outName);
+    fs.mkdirSync(autoDir, { recursive: true });
     fs.copyFileSync(src, dst);
     return { path: dst };
   }
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
     title: labels.title || '匯出 BGM',
-    defaultPath: defaultName || filename,
+    defaultPath: outName,
     filters: [
       { name: labels.audioFilter || 'OGG 音訊', extensions: ['ogg'] },
       { name: labels.allFiles || '所有檔案', extensions: ['*'] },
@@ -444,6 +475,35 @@ ipcMain.handle('screen-size', async () => {
 const ASSETS_WORKER_BASE = 'https://ba-assets.imlindora.workers.dev';
 const ASSETS_VERSION_URL = `${ASSETS_WORKER_BASE}/latest/assets_version.json`;
 const ASSETS_PACKAGES_URL = ASSETS_WORKER_BASE;
+// Worker 端若設了 ACCESS_KEY（可選門檻），客戶端需帶同一個 key。
+// 未設定時 worker 不啟用門檻，這裡留空即可（不送 header）。
+const ASSET_KEY = process.env.BA_ASSET_KEY || '';
+function assetHeaders(extra = {}) {
+  const h = { 'User-Agent': 'BA-MemorialLobby/1.0', ...extra };
+  if (ASSET_KEY) h['x-ba-key'] = ASSET_KEY;
+  return h;
+}
+// 串流計算檔案 sha256（pack 可能 400MB，不能整檔讀進記憶體）
+function sha256File(file) {
+  return new Promise((resolve, reject) => {
+    const h = crypto.createHash('sha256');
+    const rs = fs.createReadStream(file);
+    rs.on('error', reject);
+    rs.on('data', (c) => h.update(c));
+    rs.on('end', () => resolve(h.digest('hex')));
+  });
+}
+// 下載後驗證 manifest 的 sha256；不符就刪檔，讓上層重試／下次重抓。
+// 這是「完整性檢查」唯一真正有效的位置（installed.json 只是記帳）。
+async function verifyPackFile(tarPath, pkg, name) {
+  const want = pkg?.sha256;
+  if (!want) return;
+  const got = await sha256File(tarPath);
+  if (got !== want) {
+    try { fs.rmSync(tarPath, { force: true }); } catch {}
+    throw new Error(`${name} sha256 不符（下載 ${got.slice(0, 12)}…，預期 ${want.slice(0, 12)}…）`);
+  }
+}
 // voice-m4a 包住在 companion release（tag=主版號+-m4a；1000 上限分流），其餘走主版
 const packTagFor = (name, version) =>
   (typeof name === 'string' && name.startsWith('voice-m4a/')) ? `v${version}-m4a` : `v${version}`;
@@ -475,9 +535,16 @@ function readLocalVersion() {
 
 function fetchJSON(url) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: { 'User-Agent': 'BA-MemorialLobby/1.0' } }, (res) => {
+    const req = https.get(url, { headers: assetHeaders() }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
         return fetchJSON(res.headers.location).then(resolve, reject);
+      }
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        // 403（ACCESS_KEY 未帶）／5xx 若直接 JSON.parse 會變成誤導的 parse error
+        res.resume();
+        reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+        return;
       }
       let data = '';
       res.on('data', (c) => data += c);
@@ -540,7 +607,7 @@ function downloadFile(url, dest, onProgress, ctl) {
       attempt++;
       let startOffset = 0;
       try { startOffset = fs.existsSync(partPath) ? fs.statSync(partPath).size : 0; } catch {}
-      const headers = { 'User-Agent': 'BA-MemorialLobby/1.0' };
+      const headers = assetHeaders();
       if (startOffset > 0) headers.Range = `bytes=${startOffset}-`;
       let ws = null, watchdog = null;
       let received = 0;                 // 本次連線接收量
@@ -796,10 +863,11 @@ async function runDownloadAssets({ version, packages, onlyPacks, voice, audioFmt
     };
     try {
       sendProgress({ status: 'downloading', percent: 0 });
-      const url = `${ASSETS_PACKAGES_URL}/${packTagFor(name, version)}/${tarName}` || pkg.url;
+      const url = `${ASSETS_PACKAGES_URL}/${packTagFor(name, version)}/${tarName}`;
       await downloadFile(url, tarPath, (dl, total) => {
         sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total });
       }, dlCancel);
+      await verifyPackFile(tarPath, pkg, name);
       sendProgress({ status: 'extracting', percent: 0 });
       // v2：arcname "assets/..." strip:1 到 assets/ 根；兼容舊包
       try { await extractTarGzToAssets(tarPath); }
@@ -853,16 +921,10 @@ async function runEnsureLobby({ lobby, version, packages, lobbies, voice, audioF
   // core 必須先有
   if (packages?.['core'] && installed['core'] !== packages['core'].sha256) packs.unshift('core');
   const missing = packs.filter(k => installed[k] !== packages[k]?.sha256);
-  // 額外檢查：即使 sha 相同但目錄其實不存在也視為缺失
-  const actuallyMissing = missing.length ? missing : packs.filter(k => {
-    const p = packages[k];
-    if (!p) return false;
-    // 檢查代表性路徑是否存在
-    if (k.startsWith('lobby/')) return !fs.existsSync(path.join(assetsDir, 'spine', k.split('/')[1]));
-    const vd = k.startsWith('voice-m4a/') ? k.slice('voice-m4a/'.length) : k.startsWith('voice/') ? k.slice('voice/'.length) : null;
-    if (vd) return !fs.existsSync(path.join(assetsDir, 'voice', vd));
-    return false;
-  });
+  // 額外檢查：即使 sha 相同但實體檔案被刪也要補。以前只認 lobby/voice 代表路徑，
+  // core/meta/intro 被刪掉永遠不會重抓（sha 沒變 → 永遠 cached）。
+  const actuallyMissing = missing.length ? missing
+    : packs.filter(k => packages[k] && !packLooksPresent(k));
   if (actuallyMissing.length === 0) return { ok: true, cached: true };
   // 下載指定 packs
   // .part 續傳檔需跨啟動存活 → 放 assets 目錄下固定位置（舊的 os.tmpdir 隨機
@@ -888,10 +950,11 @@ async function runEnsureLobby({ lobby, version, packages, lobbies, voice, audioF
     };
     try {
       sendProgress({ status: 'downloading', percent: 0 });
-      const url = `${ASSETS_PACKAGES_URL}/${packTagFor(name, version)}/${tarName}` || pkg.url;
+      const url = `${ASSETS_PACKAGES_URL}/${packTagFor(name, version)}/${tarName}`;
       await downloadFile(url, tarPath, (dl, total) => {
         sendProgress({ status: 'downloading', percent: total ? Math.round(dl * 100 / total) : 0, downloaded: dl, bytesTotal: total });
       });
+      await verifyPackFile(tarPath, pkg, name);
       sendProgress({ status: 'extracting', percent: 0 });
       await extractTarGzToAssets(tarPath);
       installed[name] = pkg.sha256;
@@ -945,16 +1008,39 @@ function dirStats(dir) {
 // installed.json 的 pack key → 磁碟路徑清單（與 build_assets.py 打包規則一一對應）
 function packPaths(key) {
   const assetsDir = getAssetsDir();
-  if (key === 'core') return ['students', 'ui', 'loading', 'fonts'].map(s => path.join(assetsDir, s));
+  if (key === 'core') return ['students', 'ui', 'loading', 'fonts', 'voice_title'].map(s => path.join(assetsDir, s));
   if (key === 'meta') return [path.join(assetsDir, 'data')];
   if (key === 'intro') return [path.join(assetsDir, 'intro')];
+  if (key === 'assets-player') {
+    // 與 build_assets.py 的 assets-player 清單一致；刪除時會被 core 的共用宣告擋下
+    return ['bgm', 'students', 'loading', 'ui', 'fonts', 'clickfx'].map(s => path.join(assetsDir, s));
+  }
   if (key.startsWith('lobby/')) {
     const nm = key.slice('lobby/'.length);
-    return [path.join(assetsDir, 'spine', nm), path.join(assetsDir, 'scene', nm)];
+    return [
+      path.join(assetsDir, 'spine', nm),
+      path.join(assetsDir, 'scene', nm),
+      path.join(assetsDir, 'particles', nm),
+    ];
   }
   if (key.startsWith('voice/')) return [path.join(assetsDir, 'voice', key.slice('voice/'.length))];
   if (key.startsWith('voice-m4a/')) return [path.join(assetsDir, 'voice', key.slice('voice-m4a/'.length))];
   return [];
+}
+
+// 這個 pack 的關鍵路徑是否還在（sha 沒變但檔案被手動刪掉時用來觸發重抓）。
+// lobby 包不檢查 scene/particles：這兩者本來就只存在於部分大廳。
+function packLooksPresent(key) {
+  const assetsDir = getAssetsDir();
+  const exists = (rel) => fs.existsSync(path.join(assetsDir, rel));
+  if (key === 'core') return ['students', 'ui', 'loading', 'fonts'].every(exists);
+  if (key === 'meta') return exists(path.join('data', 'lobby_index.json'));
+  if (key === 'intro') return exists('intro');
+  if (key === 'assets-player') return exists('bgm');
+  if (key.startsWith('lobby/')) return exists(path.join('spine', key.slice('lobby/'.length)));
+  if (key.startsWith('voice/')) return exists(path.join('voice', key.slice('voice/'.length)));
+  if (key.startsWith('voice-m4a/')) return exists(path.join('voice', key.slice('voice-m4a/'.length)));
+  return true;
 }
 
 // 音訊格式分包：voice/<F>（ogg）與 voice-m4a/<F>（m4a）同目錄成對。
@@ -1014,29 +1100,41 @@ ipcMain.handle('assets-manage-list', async () => {
     });
   }
   const total = packs.reduce((a, p) => a + p.size, 0);
-  return { version: localVersion, packs, totalSize: total, orphans: 0 };
+  // 孤兒計數：設定頁 >0 才顯示「清除」列（先前固定 0 → 按鈕永遠看不到，
+  // 但清理功能其實可以做）。
+  let orphans = 0;
+  try { orphans = orphanDirs(installed).length; } catch {}
+  return { version: localVersion, packs, totalSize: total, orphans };
 });
 
-// 管理空間：完整性（代表路徑存在性）＋修復（去 sha，缺席計數）
-function packPrimaryPath(key) {
-  const assetsDir = getAssetsDir();
-  if (key === 'core') return path.join(assetsDir, 'fonts');
-  if (key === 'meta') return path.join(assetsDir, 'data');
-  if (key === 'intro') return path.join(assetsDir, 'intro');
-  if (key === 'assets-player') return path.join(assetsDir, 'bgm');
-  if (key.startsWith('lobby/')) return path.join(assetsDir, 'spine', key.slice('lobby/'.length));
-  if (key.startsWith('voice/')) return path.join(assetsDir, 'voice', key.slice('voice/'.length));
-  if (key.startsWith('voice-m4a/')) return path.join(assetsDir, 'voice', key.slice('voice-m4a/'.length));
-  return null;
+// 路徑必須真的位於 base 之下（防 ../ 逃逸；同時擋掉 base 前綴相近的假路徑）
+function pathInside(base, p) {
+  const b = path.resolve(base);
+  const q = path.resolve(p);
+  return q === b || q.startsWith(b + path.sep);
+}
+
+// 每個磁碟路徑被哪些「已安裝」pack 宣告 → 刪除時用來保護共用目錄。
+// assets-player 與 core 都含 students/ui/loading/fonts，沒有這層保護時
+// 刪掉 assets-player 會把 core 的 UI 一起砍掉，畫面直接壞掉。
+function packClaims(installed) {
+  const map = new Map();
+  for (const key of Object.keys(installed)) {
+    for (const p of packPaths(key)) {
+      const q = path.resolve(p);
+      if (!map.has(q)) map.set(q, new Set());
+      map.get(q).add(key);
+    }
+  }
+  return map;
 }
 
 ipcMain.handle('assets-verify', async () => {
   const installed = readInstalled();
   const broken = {};
+  // 逐包檢查關鍵路徑（含 core/meta/intro——以前跳過，刪掉也偵測不到）
   for (const key of Object.keys(installed)) {
-    if (key === 'core' || key === 'meta') continue;
-    const p = packPrimaryPath(key);
-    if (p && !fs.existsSync(p)) broken[key] = 1;
+    if (!packLooksPresent(key)) broken[key] = 1;
   }
   return broken;
 });
@@ -1054,21 +1152,65 @@ ipcMain.handle('assets-repair', async (event, keys) => {
   return { removed };
 });
 
-ipcMain.handle('assets-clean-orphans', async () => ({ removed: 0 }));
+// 孤兒目錄＝spine/scene/particles/voice 底下沒有任何已安裝 pack 宣告的目錄。
+// 必須有真正的安裝狀態（installed.core）才算，否則 dev 模式或半殘狀態下
+// assets/ 可能有手動放入的檔案，會被誤認孤兒。
+function orphanDirs(installed) {
+  if (!Object.prototype.hasOwnProperty.call(installed, 'core')) return [];
+  const assetsDir = getAssetsDir();
+  const claimed = new Set(packClaims(installed).keys());
+  const out = [];
+  for (const group of ['spine', 'scene', 'particles', 'voice']) {
+    const dir = path.join(assetsDir, group);
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch { continue; }
+    for (const ent of entries) {
+      if (!ent.isDirectory() || ent.name.startsWith('_') || ent.name.startsWith('.')) continue;
+      const full = path.join(dir, ent.name);
+      if (!claimed.has(path.resolve(full))) out.push(full);
+    }
+  }
+  return out;
+}
+
+ipcMain.handle('assets-clean-orphans', async () => {
+  const installed = readInstalled();
+  if (!Object.prototype.hasOwnProperty.call(installed, 'core')) {
+    return { removed: 0, skipped: 'not_installed' };
+  }
+  const removed = [];
+  for (const full of orphanDirs(installed)) {
+    try {
+      fs.rmSync(full, { recursive: true, force: true });
+      removed.push(path.relative(getAssetsDir(), full));
+    } catch (e) {
+      console.warn('[assets] 孤兒清理失敗:', full, e.message);
+    }
+  }
+  return { removed: removed.length, paths: removed };
+});
 
 ipcMain.handle('assets-manage-delete', async (event, keys) => {
   const list = Array.isArray(keys) ? keys : [keys];
   const installed = readInstalled();
+  const claims = packClaims(installed);
   const removed = [], errors = [];
   for (const key of list) {
     if (key === 'core') { errors.push({ key, error: 'protect_core' }); continue; }
     // 安全檢查：只允許刪除已知 pack 對應的目錄，防止任意路徑注入
     const paths = packPaths(key);
-    if (!paths.length || !installed[key]) { errors.push({ key, error: 'unknown_pack' }); continue; }
+    if (!paths.length || !Object.prototype.hasOwnProperty.call(installed, key)) {
+      errors.push({ key, error: 'unknown_pack' }); continue;
+    }
     try {
       for (const p of paths) {
         // 必須位於 assetsDir 之下才可刪
-        if (!p.startsWith(getAssetsDir())) continue;
+        if (!pathInside(getAssetsDir(), p)) continue;
+        // 其他已安裝 pack 也宣告這個路徑 → 共用，保留
+        const owners = [...(claims.get(path.resolve(p)) || [])]
+          .filter(o => o !== key && Object.prototype.hasOwnProperty.call(installed, o));
+        if (owners.length) continue;
         fs.rmSync(p, { recursive: true, force: true });
       }
       delete installed[key];
@@ -1097,13 +1239,24 @@ app.whenReady().then(async () => {
       });
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
       const url = new URL(request.url);
-      const rel = decodeURIComponent(url.pathname);   // app://assets/X → '/X'（'assets' 是 host）
+      // app://assets/X → '/X'（'assets' 是 host）。decodeURIComponent 會拋在
+      // 非法 % 序列，且解碼後的 ../ 必須再擋一次，否則可讀出 assets 目錄外檔案。
+      let rel;
+      try { rel = decodeURIComponent(url.pathname); }
+      catch { return notFound(url.pathname); }
+      if (rel.includes('\0')) return notFound(rel);
+      const resolveIn = (base) => {
+        const b = path.resolve(base);
+        const p = path.resolve(path.join(b, rel));
+        return (p === b || p.startsWith(b + path.sep)) ? p : null;
+      };
       // ①userData/assets（執行期 Worker 下載的遊戲資產）優先
-      const userP = path.join(getAssetsDir(), rel);
+      const userP = resolveIn(getAssetsDir());
       // ②退回安裝內建（package.json files 打包的啟動資源：loading/ui/clickfx/bgm）
       //   ——pack 尚未下載完或離線時，開場畫面與原版 ClickFX 貼圖也要能用
-      const bundledP = path.join(__dirname, 'assets', rel);
-      const target = fs.existsSync(userP) ? userP : (fs.existsSync(bundledP) ? bundledP : null);
+      const bundledP = resolveIn(path.join(__dirname, 'assets'));
+      const isFile = (p) => p && fs.existsSync(p) && fs.statSync(p).isFile();
+      const target = isFile(userP) ? userP : (isFile(bundledP) ? bundledP : null);
       if (!target) return notFound(rel);
       try {
         const resp = await net.fetch(pathToFileURL(target).href);

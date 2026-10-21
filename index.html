@@ -72,9 +72,14 @@
     #hudTop { top: 0; padding: 22px 26px; justify-content: center; }
     #hudTop #btnSkip { position: absolute; right: 26px; }
     #hudTop #btnInfo { position: absolute; right: 76px; }
+    /* 頂欄橫跨整個寬度：整條都攔指標事件的話，畫面上緣的摸頭/視線拖曳會
+       完全點不到（透明區也吃事件）。只有按鈕本身要可點。 */
+    #hudTop { pointer-events: none; }
+    #hudTop .btn { pointer-events: auto; }
     #hud.idle #hudTop { opacity: 0; transform: translateY(-12px); }
     #hud.idle { pointer-events: none; }
     #hud.idle > * { pointer-events: none; }
+    #hud.idle #hudTop .btn { pointer-events: none; }   /* 淡出時不可誤點 */
 
     .btn {
       background: rgba(10,12,26,.42); color: #e8ecff; border: 1px solid rgba(255,255,255,.14);
@@ -1016,6 +1021,8 @@
     <video id="loadingVideo" autoplay muted loop playsinline
       style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:1;">
       <source src="assets/loading/title.webm" type="video/webm">
+      <!-- iOS Safari 不支援 webm：沒有 mp4 備援時首屏只會是黑底（intro pack 有同一支影片的 H.264 版） -->
+      <source src="assets/intro/title_h264.mp4" type="video/mp4">
     </video>
     <div id="loadingIndicator">
       <img id="loadingSpinner" src="assets/loading/spinner.png"

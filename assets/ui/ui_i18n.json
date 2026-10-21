@@ -174,7 +174,10 @@
     "set.wall.noMatch": "沒有符合的角色",
     "set.clickfxStyle": "樣式",
     "set.clickfxAuthentic": "原版重製",
-    "set.clickfxLegacy": "舊版仿製"
+    "set.clickfxLegacy": "舊版仿製",
+    "set.space.orphansSkipped": "沒有完整的資源清單，已略過清理（重新下載或重開後再試）",
+    "set.space.orphansFail": "清理失敗，請稍後再試",
+    "err.bad_name": "檔名不合法"
   },
   "zh-CN": {
     "boot.checking": "检查更新中……",
@@ -351,7 +354,10 @@
     "set.wall.noMatch": "没有符合的角色",
     "set.clickfxStyle": "样式",
     "set.clickfxAuthentic": "原版重制",
-    "set.clickfxLegacy": "旧版仿制"
+    "set.clickfxLegacy": "旧版仿制",
+    "set.space.orphansSkipped": "没有完整的资源清单，已跳过清理（请重新下载或重开后再试）",
+    "set.space.orphansFail": "清理失败，请稍后再试",
+    "err.bad_name": "文件名不合法"
   },
   "ja": {
     "boot.checking": "確認中です……",
@@ -528,7 +534,10 @@
     "set.wall.noMatch": "一致するキャラがいません",
     "set.clickfxStyle": "スタイル",
     "set.clickfxAuthentic": "原作再現",
-    "set.clickfxLegacy": "旧版模倣"
+    "set.clickfxLegacy": "旧版模倣",
+    "set.space.orphansSkipped": "リソース一覧が不完全なためスキップしました（再ダウンロード後にお試しください）",
+    "set.space.orphansFail": "クリーンアップに失敗しました。後でもう一度お試しください",
+    "err.bad_name": "ファイル名が不正です"
   },
   "en": {
     "boot.checking": "Checking for updates...",
@@ -705,7 +714,10 @@
     "set.wall.noMatch": "No matching character",
     "set.clickfxStyle": "Style",
     "set.clickfxAuthentic": "Authentic remake",
-    "set.clickfxLegacy": "Legacy imitation"
+    "set.clickfxLegacy": "Legacy imitation",
+    "set.space.orphansSkipped": "Skipped: the asset list is incomplete (re-download or reload, then try again)",
+    "set.space.orphansFail": "Cleanup failed. Please try again later.",
+    "err.bad_name": "Invalid file name"
   },
   "ko": {
     "boot.checking": "업데이트 확인 중...",
@@ -882,6 +894,9 @@
     "set.wall.noMatch": "일치하는 캐릭터가 없습니다",
     "set.clickfxStyle": "스타일",
     "set.clickfxAuthentic": "원작 재현",
-    "set.clickfxLegacy": "구버전 모방"
+    "set.clickfxLegacy": "구버전 모방",
+    "set.space.orphansSkipped": "리소스 목록이 불완전하여 건너뛰었습니다(다시 다운로드한 뒤 시도해 주세요)",
+    "set.space.orphansFail": "정리에 실패했습니다. 나중에 다시 시도해 주세요.",
+    "err.bad_name": "잘못된 파일 이름입니다"
   }
 }
