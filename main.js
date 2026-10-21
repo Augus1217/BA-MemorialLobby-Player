@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, screen, protocol, net } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const fs = require('fs');
 const os = require('os');
 const https = require('https');
@@ -52,6 +53,13 @@ if (process.platform === 'darwin') {
 if (process.platform === 'linux' && !process.env.ELECTRON_OZONE_PLATFORM_HINT && !process.env.OZONE_PLATFORM) {
   app.commandLine.appendSwitch('ozone-platform-hint', 'x11');
 }
+
+// app:// 資產協定（packaged：頁面 file://、資產 app://）：scheme 必須在 app ready 前
+// 註冊為 privileged，renderer 的 fetch() 才認得——否則 Blink 直接回
+// "Fetch API cannot load app://...: URL scheme "app" is not supported"（0.5.0 實測）。
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+]);
 
 // 單例鎖（wallpaper-mode 計畫）：第二實例把意圖轉交首實例——
 // 帶 --wallpaper 的 argv → 首實例啟動桌布；否則聚焦主視窗。
@@ -712,9 +720,32 @@ function assertIpc(cond, what) {
   if (!cond) throw new Error(`bad IPC payload: ${what}`);
 }
 
-ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, voice, audioFmt, requireMissing }) => {
+// 下載管線序列化＋同 key 去重：桌布模式下主視窗和 worker 視窗是兩個 renderer，
+// 開機同時 checkAssets → download-assets，兩邊併發寫同一個 .dl/<tar>.part——
+// 先完成者 rename 成功、後者 rename ENOENT（0.5.0 桌面模式實測 meta/core 全炸）。
+// 同 key 直接共用同一個 promise（另一個視窗等同一份結果）；不同 key 排隊，
+// 避免 .dl 目錄清理 / 續傳檔互踩。
+let dlTail = Promise.resolve();
+const dlInflight = new Map();
+function serializeDownload(key, fn) {
+  if (dlInflight.has(key)) return dlInflight.get(key);
+  const run = dlTail.then(fn, fn);
+  dlTail = run.then(() => {}, () => {});
+  const p = run.finally(() => dlInflight.delete(key));
+  dlInflight.set(key, p);
+  return p;
+}
+
+ipcMain.handle('download-assets', async (event, opts) => {
+  const { version, packages, onlyPacks, voice, audioFmt, requireMissing } = opts || {};
   assertIpc(typeof version === 'string' && version && packages && typeof packages === 'object',
     'download-assets needs {version, packages}');
+  const key = ['dl', version, voice || '', audioFmt || '', requireMissing ? 'req' : 'any',
+    onlyPacks ? [...onlyPacks].sort().join(',') : '*'].join('|');
+  return serializeDownload(key, () => runDownloadAssets(opts));
+});
+
+async function runDownloadAssets({ version, packages, onlyPacks, voice, audioFmt, requireMissing }) {
   const assetsDir = getAssetsDir();
   const installed = readInstalled();
   const remotePackages = packages || {};
@@ -795,12 +826,18 @@ ipcMain.handle('download-assets', async (event, { version, packages, onlyPacks, 
     if (!leftover) fs.rmSync(tmpDir, { recursive: true, force: true });
   } catch {}
   return results;
-});
+}
 
 // 按需補齊：確保某個 lobby 的資源已就緒（core + 該 lobby 需要的包）
-ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies, voice, audioFmt }) => {
+ipcMain.handle('ensure-lobby', async (event, opts) => {
+  const { lobby, packages, version, voice, audioFmt } = opts || {};
   assertIpc(typeof lobby === 'string' && lobby && packages && typeof packages === 'object',
     'ensure-lobby needs {lobby, packages}');
+  const key = ['el', lobby, version || '', voice || '', audioFmt || ''].join('|');
+  return serializeDownload(key, () => runEnsureLobby(opts));
+});
+
+async function runEnsureLobby({ lobby, version, packages, lobbies, voice, audioFmt }) {
   const assetsDir = getAssetsDir();
   const installed = readInstalled();
   // lobby 需要哪些包（由 assets_version.json 的 lobbies 表提供）
@@ -878,7 +915,7 @@ ipcMain.handle('ensure-lobby', async (event, { lobby, version, packages, lobbies
   } catch {}
   const failed = results.filter(r => !r.ok);
   return failed.length ? { ok: false, results } : { ok: true, results };
-});
+}
 
 // ---------------------------------------------------------------------------
 // Asset space management — per-pack disk usage + user-driven deletion
@@ -1048,15 +1085,34 @@ app.whenReady().then(async () => {
   if (!gotTheLock) return;
   // Register app:// protocol for serving assets in production
   if (!isDev) {
-    protocol.handle('app', (request) => {
+    protocol.handle('app', async (request) => {
+      // 頁面是 file://（origin "null"），fetch() 屬跨來源 → 回應需帶 CORS 標頭
+      const cors = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+      };
+      const notFound = (rel) => new Response(`app:// not found: ${rel}`, {
+        status: 404, headers: { ...cors, 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
       const url = new URL(request.url);
       const rel = decodeURIComponent(url.pathname);   // app://assets/X → '/X'（'assets' 是 host）
       // ①userData/assets（執行期 Worker 下載的遊戲資產）優先
       const userP = path.join(getAssetsDir(), rel);
-      if (fs.existsSync(userP)) return net.fetch('file://' + userP);
       // ②退回安裝內建（package.json files 打包的啟動資源：loading/ui/clickfx/bgm）
       //   ——pack 尚未下載完或離線時，開場畫面與原版 ClickFX 貼圖也要能用
-      return net.fetch('file://' + path.join(__dirname, 'assets', rel));
+      const bundledP = path.join(__dirname, 'assets', rel);
+      const target = fs.existsSync(userP) ? userP : (fs.existsSync(bundledP) ? bundledP : null);
+      if (!target) return notFound(rel);
+      try {
+        const resp = await net.fetch(pathToFileURL(target).href);
+        const headers = new Headers(resp.headers);
+        for (const [k, v] of Object.entries(cors)) headers.set(k, v);
+        return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
+      } catch {
+        return notFound(rel);
+      }
     });
   }
 
