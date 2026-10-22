@@ -4327,14 +4327,18 @@ function spaceKindLabel(kind) {
   return map[kind] || kind;
 }
 
-async function refreshSpaceManager() {
-  // BGM 映射傳給 web 版做舊包 backfill（lobby/X 那首 bgm 要認領回來）
-  let bgmByLobby = null;
+// BGM 對照表給 web 版用（舊包 backfill、未使用統計、清除）。key 一律小寫：
+// lobby 目錄名（Airi0_home／CH0070_home）由 bgmForLobbyDir 正規化後查表。
+function bgmByLobbyMap() {
   try {
-    // key 一律小寫：lobby 目錄名（Airi0_home／CH0070_home）由 bgmForLobbyDir 正規化
-    bgmByLobby = {};
-    for (const k of Object.keys(BGM_MAP || {})) bgmByLobby[String(k).toLowerCase()] = BGM_MAP[k];
-  } catch { bgmByLobby = null; }
+    const out = {};
+    for (const k of Object.keys(BGM_MAP || {})) out[String(k).toLowerCase()] = BGM_MAP[k];
+    return Object.keys(out).length ? out : null;
+  } catch { return null; }
+}
+
+async function refreshSpaceManager() {
+  let bgmByLobby = bgmByLobbyMap();
   try {
     _spaceInfo = bgmByLobby
       ? await window.ba.assetsManageList?.({ bgmByLobby })
@@ -8995,11 +8999,7 @@ async function init() {
       ok: t('set.space.bgmClean'), danger: true,
     })) return;
     // web 版需要 BGM 對照表才知道哪些曲子還被已裝大廳引用；Electron 自己讀 CSV
-    let bgmByLobby = null;
-    try {
-      bgmByLobby = {};
-      for (const k of Object.keys(BGM_MAP || {})) bgmByLobby[k] = BGM_MAP[k];
-    } catch {}
+    const bgmByLobby = bgmByLobbyMap();
     let r = null;
     try { r = await window.ba.assetsCleanBgm?.({ bgmByLobby }); } catch { r = null; }
     await refreshSpaceManager();
