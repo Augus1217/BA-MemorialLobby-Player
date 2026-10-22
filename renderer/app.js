@@ -4331,8 +4331,9 @@ async function refreshSpaceManager() {
   // BGM 映射傳給 web 版做舊包 backfill（lobby/X 那首 bgm 要認領回來）
   let bgmByLobby = null;
   try {
+    // key 一律小寫：lobby 目錄名（Airi0_home／CH0070_home）由 bgmForLobbyDir 正規化
     bgmByLobby = {};
-    for (const k of Object.keys(BGM_MAP || {})) bgmByLobby[k] = BGM_MAP[k];
+    for (const k of Object.keys(BGM_MAP || {})) bgmByLobby[String(k).toLowerCase()] = BGM_MAP[k];
   } catch { bgmByLobby = null; }
   try {
     _spaceInfo = bgmByLobby

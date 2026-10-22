@@ -3,7 +3,7 @@
 // ensureAssets(neededPacks, onProgress) 是唯一的啟動 gate：併發下載、去重、
 // 完成後只寫一次 __meta。SW 只看 active cache（O(1) 查找）。
 import { gunzipSync } from 'fflate';
-import { selectPacks, mergeManifests, companionTag } from './asset-core.js';
+import { selectPacks, mergeManifests, companionTag, bgmForLobbyDir } from './asset-core.js';
 import { gunzipStreamToBlob, iterateTar, stallGuard } from './tar-stream.js';
 
 const WORKER_BASE = 'https://ba-assets.imlindora.workers.dev';
@@ -817,7 +817,7 @@ const ba = {
           } else if (k.startsWith('lobby/')) {
             const dir = k.slice(6);
             list = rels.filter((r) => r.startsWith('spine/' + dir + '/') || r.startsWith('scene/' + dir + '/'));
-            const bgm = bgmByLobby?.[dir];
+            const bgm = bgmForLobbyDir(bgmByLobby, dir);
             if (bgm && inCache.has('bgm/' + bgm)) list = [...list, 'bgm/' + bgm];
           } else if (k.startsWith('voice-m4a/')) {
             list = rels.filter((r) => r.startsWith('voice/' + k.slice('voice-m4a/'.length) + '/'));
@@ -865,7 +865,7 @@ const ba = {
         const keep = new Set();
         for (const k of Object.keys(installed)) {
           if (k.startsWith('__') || !k.startsWith('lobby/')) continue;
-          const fn = map[k.slice('lobby/'.length)];
+          const fn = bgmForLobbyDir(map, k.slice('lobby/'.length));
           if (!fn) continue;
           keep.add('bgm/' + fn);
           keep.add('bgm/' + fn.replace(/\.ogg$/i, '.m4a'));
@@ -903,7 +903,7 @@ const ba = {
     }
     const keep = new Set();
     for (const k of lobbyKeys) {
-      const fn = map[k.slice('lobby/'.length)];
+      const fn = bgmForLobbyDir(map, k.slice('lobby/'.length));
       if (!fn) continue;
       keep.add('bgm/' + fn);
       keep.add('bgm/' + fn.replace(/\.ogg$/i, '.m4a'));

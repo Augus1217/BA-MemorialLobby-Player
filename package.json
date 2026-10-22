@@ -17,7 +17,7 @@
     "lint": "python3 scripts/check_i18n.py && python3 scripts/check_asset_core_parity.py",
     "test:tar": "node tests/tar_stream_test.mjs",
     "test:net": "node tests/fetch_retry_test.mjs",
-    "test:unit": "node tests/tar_stream_test.mjs && node tests/fetch_retry_test.mjs",
+    "test:unit": "node tests/tar_stream_test.mjs && node tests/fetch_retry_test.mjs && node tests/bgm_map_test.mjs",
     "dist": "vite build && electron-builder -mwl --publish always"
   },
   "build": {

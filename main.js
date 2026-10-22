@@ -1079,9 +1079,34 @@ function readLobbyBgmMap() {
     const cols = ln.split(',');
     const nm = (cols[iName] || '').trim();
     const fn = (cols[iFile] || '').trim();
-    if (nm && fn) map[nm] = fn;
+    if (nm && fn) map[nm.toLowerCase()] = fn;
   }
   return Object.keys(map).length ? map : null;
+}
+
+// 鏡像 renderer/asset-core.js 的 lobbyCoreName／bgmForLobbyDir（main 是 CJS，
+// 正式版不帶 renderer/ 源碼），由 scripts/check_asset_core_parity.py 逐字比對。
+function lobbyCoreName(key) {
+  let rest = String(key || '').toLowerCase();
+  for (;;) {
+    let hit = null;
+    for (const suf of ['_home_gl', '_home', '_gl', '_multi', '_teen']) {
+      if (rest.endsWith(suf)) { hit = suf; break; }
+    }
+    if (!hit) break;
+    rest = rest.slice(0, -hit.length);
+  }
+  if (rest.startsWith('lobby')) rest = rest.slice(5);
+  for (const suf of ['_swimsuit', '_newyear', '_ridingsuit', '_casual']) {
+    if (rest.endsWith(suf)) rest = rest.slice(0, -suf.length);
+  }
+  return rest;
+}
+
+function bgmForLobbyDir(map, dir) {
+  if (!map) return null;
+  const core = lobbyCoreName(dir);
+  return map[core] || map[core.replace(/0$/, '')] || null;
 }
 
 // 回傳 { totalFiles, totalBytes, unusedFiles, unusedBytes, unused[] }；
@@ -1097,7 +1122,7 @@ function bgmStats(installed) {
   const keep = new Set();
   for (const k of Object.keys(installed || {})) {
     if (!k.startsWith('lobby/')) continue;
-    const fn = map[k.slice('lobby/'.length)];
+    const fn = bgmForLobbyDir(map, k.slice('lobby/'.length));
     if (!fn) continue;
     keep.add(fn);
     keep.add(fn.replace(/\.ogg$/i, '.m4a'));

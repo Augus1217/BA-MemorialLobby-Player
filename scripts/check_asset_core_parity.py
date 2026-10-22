@@ -2,8 +2,8 @@
 """check_asset_core_parity.py — renderer/asset-core.js 與 main.js 鏡像一致性檢查。
 
 main.js 是 CJS 且正式版不帶 renderer/ 源碼，無法直接 import 共用模組，
-故 voiceLangKeep/audioPackFor/selectPacks 在兩檔各存一份。本腳本逐字比對
-三函數本體（正規化空白），漂移即 exit 1。供 CI／本地驗證用。
+故共用函式在兩檔各存一份。本腳本逐字比對這些函數本體（正規化空白），
+漂移即 exit 1。供 CI／本地驗證用。
 
 用法：python3 scripts/check_asset_core_parity.py [--quiet] [--debug]
 """
@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-FUNCS = ["voiceLangKeep", "audioPackFor", "selectPacks"]
+FUNCS = ["voiceLangKeep", "audioPackFor", "selectPacks", "lobbyCoreName", "bgmForLobbyDir"]
 
 
 def _mask(src: str) -> str:
