@@ -898,7 +898,9 @@ const ba = {
     const meta = await readMeta(c);
     const map = bgmByLobby || {};
     const lobbyKeys = Object.keys(meta).filter((k) => !k.startsWith('__') && k.startsWith('lobby/'));
-    if (!Object.keys(map).length || !lobbyKeys.length) {
+    // 沒有安裝任何大廳時 keep 集是空的 → 全部 BGM 都是無主檔（與桌面版一致）。
+    // 只有「對照表拿不到」才拒絕，避免在無法判斷時亂刪。
+    if (!Object.keys(map).length) {
       return { removed: 0, bytes: 0, skipped: 'no_mapping' };
     }
     const keep = new Set();
@@ -909,12 +911,21 @@ const ba = {
       keep.add('bgm/' + fn.replace(/\.ogg$/i, '.m4a'));
     }
     let removed = 0, bytes = 0;
+    const gone = new Set();
     for (const req of await c.keys()) {
       const rel = assetRelOf(req.url);
       if (!rel || !rel.startsWith('bgm/') || !/\.(ogg|m4a)$/i.test(rel) || keep.has(rel)) continue;
       let size = 0;
       try { size = Number((await c.match(req))?.headers.get('content-length')) || 0; } catch {}
-      try { if (await c.delete(req)) { removed++; bytes += size; } } catch {}
+      try { if (await c.delete(req)) { removed++; bytes += size; gone.add(rel); } } catch {}
+    }
+    // __files 是各 pack 的檔案清單：被砍掉的 BGM 要一起移除，否則管理空間的
+    // 檔數／「認領」統計會指著已經不存在的檔案。
+    if (gone.size && meta.__files) {
+      for (const k of Object.keys(meta.__files)) {
+        meta.__files[k] = (meta.__files[k] || []).filter((r) => !gone.has(r));
+      }
+      try { await writeMeta(c, meta); } catch {}
     }
     return { removed, bytes };
   },
