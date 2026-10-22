@@ -7841,7 +7841,7 @@ async function ensureLobbyAssets(lobbyName, opts = {}) {
   }
 }
 
-// Boot 官方素材（title.webm / spinner.png / font.otf）在 vite build 時已被
+// Boot 官方素材（title_h264.mp4 / spinner.png / font.otf）在 vite build 時已被
 // 拷進 dist/assets/（靜態檔案），首屏通常正常載入。若首屏載入失敗（舊版部署
 // 或 edge case），在 core pack 就緒後由本函式補救。
 async function applyBootAssets() {
@@ -7852,7 +7852,7 @@ async function applyBootAssets() {
     const src = v.querySelector('source');
     if (src) src.remove();
     v.removeAttribute('src');
-    v.src = url('assets/loading/title.webm');
+    v.src = url('assets/loading/title_h264.mp4');
     try { v.load(); } catch {}
   }
   // Spinner：通常首屏已載入，不動
@@ -7917,7 +7917,7 @@ async function ensureReady() {
   if (/(?:^|&)skipUpdate=1/.test(location.search + location.hash)) return;
 
   // 開機 gate 只擋 core+meta；intro（5.5MB）改背景補齊——慢網進場少等一截，
-  // 開場音樂/影片沒到位前缺席，下次進場就有（開機影片由內建 title.webm 頂著）
+  // 開場音樂/影片沒到位前缺席，下次進場就有（開機影片由內建 title_h264.mp4 頂著）
   if (window.ba?.ensureAssets) {
     try { await window.ba.ensureAssets(['core', 'meta'], showP); } catch (e) {
       console.warn('[lobby] ensureAssets failed:', e.message);

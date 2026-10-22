@@ -6,7 +6,7 @@
 安裝進 Cache Storage）。dist 只裝：
 
   1. vite build 產物（renderer JS/CSS）
-  2. assets/loading/（title.webm/font.otf/spinner.png/pv-a.ogg）——開場畫面，
+  2. assets/loading/（title_h264.mp4/font.otf/spinner.png/pv-a.ogg）——開場畫面，
      必須在 pack 下載開始前呈現，屬 app 啟動資源
   3. assets/ui/ui_i18n.json — 本應用自製 UI 字典（首訪需在 pack 安裝前讀取）
   4. intro/title_h264.mp4 + pv-a.ogg（開機畫面媒體）
@@ -27,9 +27,11 @@ ASSETS = ROOT / "assets"
 # ui/：只帶自製檔（ui_i18n.json）。
 UI_KEEP = ["ui_i18n.json"]
 # loading/：開場畫面（首屏在 core pack 安裝前就要顯示，不能等到 pack 下載完）——
-# title.webm 背景影片、spinner.png、font.otf 開場字型。缺了它們 Pages 版首屏
+# title_h264.mp4 背景影片、spinner.png、font.otf 開場字型。缺了它們 Pages 版首屏
 # 會是破圖＋系統字型（舊版原始碼註解說「build 會拷進 dist」但實際沒有，這裡補上）。
-LOADING_KEEP = ["title.webm", "spinner.png", "font.otf"]
+# 影片只有 H.264：來源 APK 是 HEVC，Chromium 解不了；原本另轉的 VP9 webm 體積
+# 更大、實測 PSNR 更低，已移除（mp4 帶 +faststart，可邊下載邊播）。
+LOADING_KEEP = ["title_h264.mp4", "spinner.png", "font.otf"]
 # intro：只帶 h264 mp4 + ogg（title.mp4 原始編碼瀏覽器不一定能播）
 INTRO_FILES = ["intro/title_h264.mp4", "intro/pv-a.ogg"]
 

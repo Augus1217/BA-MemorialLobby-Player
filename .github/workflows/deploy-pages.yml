@@ -49,7 +49,7 @@ jobs:
           # 注意：用 member-name 抽取而非 --include（GNU/BSD tar 相容），失敗時 fallback 本機既有 assets
           URL_CORE="$WORKER_BASE/v${VER}/assets-core-v${VER}.tar.gz"
           if curl -sf "$URL_CORE" -o /tmp/core.tar.gz && \
-             tar xzf /tmp/core.tar.gz -C . assets/loading; then
+             tar xzf /tmp/core.tar.gz -C . --exclude='assets/loading/title*' assets/loading; then
             echo "  ✓ core/loading (v${VER})"
           else
             echo "::warning::Failed to extract core/loading (v${VER}), falling back to local assets"

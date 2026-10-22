@@ -46,7 +46,7 @@ jobs:
               if curl -sf "$URL" -o /tmp/core.tar.gz; then
                 # 分開抽：轉換期（core 還沒有 clickfx 的舊 release）不要讓缺一個
                 # 成員害 loading/ui 也一起判失敗；缺 FX_TEX 由下一步 fail-loud。
-                tar xzf /tmp/core.tar.gz -C . assets/loading assets/ui || true
+                tar xzf /tmp/core.tar.gz -C . --exclude='assets/loading/title*' assets/loading assets/ui || true
                 tar xzf /tmp/core.tar.gz -C . assets/clickfx || true
                 echo "  ✓ core (v${VER})"
               else
@@ -68,7 +68,7 @@ jobs:
         run: |
           set -e
           echo "clickfx textures:"; ls assets/clickfx/FX_TEX_*.png
-          echo "loading screen:";   ls assets/loading/title.webm assets/loading/font.otf assets/loading/spinner.png
+          echo "loading screen:";   ls assets/loading/title_h264.mp4 assets/loading/font.otf assets/loading/spinner.png
 
       - name: Build renderer (Vite)
         run: npx vite build
@@ -127,7 +127,7 @@ jobs:
               if curl -sf "$URL" -o /tmp/core.tar.gz; then
                 # 分開抽：轉換期（core 還沒有 clickfx 的舊 release）不要讓缺一個
                 # 成員害 loading/ui 也一起判失敗；缺 FX_TEX 由下一步 fail-loud。
-                tar xzf /tmp/core.tar.gz -C . assets/loading assets/ui || true
+                tar xzf /tmp/core.tar.gz -C . --exclude='assets/loading/title*' assets/loading assets/ui || true
                 tar xzf /tmp/core.tar.gz -C . assets/clickfx || true
                 echo "  ✓ core (v${VER})"
               else
@@ -149,7 +149,7 @@ jobs:
         run: |
           set -e
           echo "clickfx textures:"; ls assets/clickfx/FX_TEX_*.png
-          echo "loading screen:";   ls assets/loading/title.webm assets/loading/font.otf assets/loading/spinner.png
+          echo "loading screen:";   ls assets/loading/title_h264.mp4 assets/loading/font.otf assets/loading/spinner.png
 
       - name: Build renderer (Vite)
         run: npx vite build
@@ -202,7 +202,7 @@ jobs:
               if curl -sf "$URL" -o /tmp/core.tar.gz; then
                 # 分開抽：轉換期（core 還沒有 clickfx 的舊 release）不要讓缺一個
                 # 成員害 loading/ui 也一起判失敗；缺 FX_TEX 由下一步 fail-loud。
-                tar xzf /tmp/core.tar.gz -C . assets/loading assets/ui || true
+                tar xzf /tmp/core.tar.gz -C . --exclude='assets/loading/title*' assets/loading assets/ui || true
                 tar xzf /tmp/core.tar.gz -C . assets/clickfx || true
                 echo "  ✓ core (v${VER})"
               else
@@ -224,7 +224,7 @@ jobs:
         run: |
           set -e
           echo "clickfx textures:"; ls assets/clickfx/FX_TEX_*.png
-          echo "loading screen:";   ls assets/loading/title.webm assets/loading/font.otf assets/loading/spinner.png
+          echo "loading screen:";   ls assets/loading/title_h264.mp4 assets/loading/font.otf assets/loading/spinner.png
 
       - name: Build renderer (Vite)
         run: npx vite build

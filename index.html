@@ -1129,8 +1129,10 @@
   <div id="loadingScreen">
     <video id="loadingVideo" autoplay muted loop playsinline
       style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:1;">
-      <source src="assets/loading/title.webm" type="video/webm">
-      <!-- iOS Safari 不支援 webm：沒有 mp4 備援時首屏只會是黑底（intro pack 有同一支影片的 H.264 版） -->
+      <!-- 開機影片只有一個視覺無損 H.264（與 intro 包同一個檔）。APK 原始
+           title.mp4 是 HEVC，Chromium 解不了；先前為相容而多轉的 VP9 webm
+           （14.9MB／45dB）反而比 mp4（11.2MB／51dB）大且差，已移除。 -->
+      <source src="assets/loading/title_h264.mp4" type="video/mp4">
       <source src="assets/intro/title_h264.mp4" type="video/mp4">
     </video>
     <div id="loadingIndicator">
