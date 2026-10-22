@@ -203,7 +203,7 @@ function cacheKey(p) {
 // 兩條路徑：
 //   ①串流（現代瀏覽器；DecompressionStream）：下載流邊算 sha256 邊 gunzip 成
 //     Blob（瀏覽器自行落地存放），再逐檔從 Blob 切片寫進 Cache。記憶體用量
-//     ≈ 單一檔案——舊版 gunzipSync 整包＋entries 陣列在 400MB 的 assets-player
+//     ≈ 單一檔案——舊版 gunzipSync 整包＋entries 陣列在 400MB 以上的大包
 //     上峰值約 2.5~3 倍，手機分頁直接被砍掉。
 //   ②legacy（無 DecompressionStream）：整包進記憶體（fflate gunzipSync）。
 async function installEntries(name, source, onProgress, c) {
@@ -760,7 +760,7 @@ const ba = {
   // ---- 管理空間（web）：已裝包＋manifest 標稱大小；core 不可刪；
   // 無檔案清單的舊包（此功能上線前裝的）按確定性包結構 backfill：
   // lobby/X＝spine/X/＋scene/X/＋映射表那首bgm，voice/F＝voice/F/，
-  // core/intro/assets-player＝各自固定目錄。共用檔靠 refcount 保護。
+  // core/intro/meta＝各自固定目錄。共用檔靠 refcount 保護。
   async assetsManageList({ bgmByLobby } = {}) {
     let meta = null;
     try { meta = _versionMeta?.version ? _versionMeta : await fetchRemoteVersion(); }
@@ -784,11 +784,10 @@ const ba = {
           } catch {}
         }
         const inCache = new Set(rels);
-        const PLAYER_DIRS = ['bgm/', 'students/', 'loading/', 'ui/', 'fonts/', 'clickfx/'];
-        // core 也必須 backfill：core 與 assets-player 共用 students/ui/loading/fonts，
-        // 少了 core 的清單，刪除 assets-player 時那些共用檔會被當成「沒人認領」刪掉，
-        // 整個 UI 直接壞掉（refcount 保護失效）。
-        const CORE_DIRS = ['students/', 'ui/', 'loading/', 'fonts/', 'voice_title/'];
+        // core 也必須 backfill：core 與 lobby 包可能共用部分路徑，少了 core 的
+        // 清單，刪除其他包時那些共用檔會被當成「沒人認領」刪掉（refcount 失效）。
+        // clickfx 於 2026-10 併入 core（舊 assets-player 已退役）。
+        const CORE_DIRS = ['students/', 'ui/', 'loading/', 'fonts/', 'voice_title/', 'clickfx/'];
         const rebuilt = {};
         for (const k of unmapped) {
           let list = null;
@@ -798,8 +797,6 @@ const ba = {
             list = rels.filter((r) => r.startsWith('data/'));
           } else if (k === 'intro') {
             list = rels.filter((r) => r.startsWith('intro/'));
-          } else if (k === 'assets-player') {
-            list = rels.filter((r) => PLAYER_DIRS.some((d) => r.startsWith(d)));
           } else if (k.startsWith('lobby/')) {
             const dir = k.slice(6);
             list = rels.filter((r) => r.startsWith('spine/' + dir + '/') || r.startsWith('scene/' + dir + '/'));

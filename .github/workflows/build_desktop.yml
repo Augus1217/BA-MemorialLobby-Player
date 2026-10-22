@@ -31,22 +31,28 @@ jobs:
       - name: Download game assets from Worker
         shell: bash   # 語法是 bash（win runner 預設 pwsh 會直接炸——v0.5.0 首跑實證）
         run: |
-          if [ ! -d assets/bgm ]; then
-            echo "=== Downloading game assets from Worker ==="
+          # 打包只需要三樣：clickfx 的 FX_TEX 貼圖（官方素材、不進公開 repo，所以
+          # 不在 git）、loading（開場畫面）、ui（氣泡/游標圖）。後兩者 repo 內有，
+          # 抓下來是為了跟 release 同步。舊版為了這 0.6MB 抓整個 assets-player
+          # （953MB）——2026-10 起 clickfx 併入 core（~20MB），只抽需要的目錄。
+          if ! ls assets/clickfx/FX_TEX_*.png >/dev/null 2>&1; then
+            echo "=== Downloading core assets (clickfx/loading/ui) from Worker ==="
             WORKER_BASE="https://ba-assets.imlindora.workers.dev"
             # python3 在 Windows Git Bash 不保證在 PATH → python 後備
             VER=$(curl -sf "$WORKER_BASE/latest/assets_version.json" | (python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || python -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null) || echo "")
             if [ -n "$VER" ]; then
-              for pkg in assets-player intro; do
-                # tar_pack 檔名格式：assets-<key>-v<ver>.tar.gz（assets- 前綴）
-                URL="$WORKER_BASE/v${VER}/assets-${pkg}-v${VER}.tar.gz"
-                if curl -sf "$URL" -o /tmp/pkg.tar.gz && tar xzf /tmp/pkg.tar.gz -C .; then
-                  echo "  ✓ $pkg (v${VER})"
-                else
-                  echo "::warning::Failed to download ${pkg} (v${VER}), build will use any local assets"
-                fi
-                rm -f /tmp/pkg.tar.gz
-              done
+              # tar_pack 檔名格式：assets-<key>-v<ver>.tar.gz（assets- 前綴）
+              URL="$WORKER_BASE/v${VER}/assets-core-v${VER}.tar.gz"
+              if curl -sf "$URL" -o /tmp/core.tar.gz; then
+                # 分開抽：轉換期（core 還沒有 clickfx 的舊 release）不要讓缺一個
+                # 成員害 loading/ui 也一起判失敗；缺 FX_TEX 由下一步 fail-loud。
+                tar xzf /tmp/core.tar.gz -C . assets/loading assets/ui || true
+                tar xzf /tmp/core.tar.gz -C . assets/clickfx || true
+                echo "  ✓ core (v${VER})"
+              else
+                echo "::warning::Failed to download core (v${VER}), build will use any local assets"
+              fi
+              rm -f /tmp/core.tar.gz
             else
               echo "::warning::Failed to resolve version, build will use any local assets"
             fi
@@ -106,22 +112,28 @@ jobs:
       - name: Download game assets from Worker
         shell: bash   # 語法是 bash（win runner 預設 pwsh 會直接炸——v0.5.0 首跑實證）
         run: |
-          if [ ! -d assets/bgm ]; then
-            echo "=== Downloading game assets from Worker ==="
+          # 打包只需要三樣：clickfx 的 FX_TEX 貼圖（官方素材、不進公開 repo，所以
+          # 不在 git）、loading（開場畫面）、ui（氣泡/游標圖）。後兩者 repo 內有，
+          # 抓下來是為了跟 release 同步。舊版為了這 0.6MB 抓整個 assets-player
+          # （953MB）——2026-10 起 clickfx 併入 core（~20MB），只抽需要的目錄。
+          if ! ls assets/clickfx/FX_TEX_*.png >/dev/null 2>&1; then
+            echo "=== Downloading core assets (clickfx/loading/ui) from Worker ==="
             WORKER_BASE="https://ba-assets.imlindora.workers.dev"
             # python3 在 Windows Git Bash 不保證在 PATH → python 後備
             VER=$(curl -sf "$WORKER_BASE/latest/assets_version.json" | (python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || python -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null) || echo "")
             if [ -n "$VER" ]; then
-              for pkg in assets-player intro; do
-                # tar_pack 檔名格式：assets-<key>-v<ver>.tar.gz（assets- 前綴）
-                URL="$WORKER_BASE/v${VER}/assets-${pkg}-v${VER}.tar.gz"
-                if curl -sf "$URL" -o /tmp/pkg.tar.gz && tar xzf /tmp/pkg.tar.gz -C .; then
-                  echo "  ✓ $pkg (v${VER})"
-                else
-                  echo "::warning::Failed to download ${pkg} (v${VER}), build will use any local assets"
-                fi
-                rm -f /tmp/pkg.tar.gz
-              done
+              # tar_pack 檔名格式：assets-<key>-v<ver>.tar.gz（assets- 前綴）
+              URL="$WORKER_BASE/v${VER}/assets-core-v${VER}.tar.gz"
+              if curl -sf "$URL" -o /tmp/core.tar.gz; then
+                # 分開抽：轉換期（core 還沒有 clickfx 的舊 release）不要讓缺一個
+                # 成員害 loading/ui 也一起判失敗；缺 FX_TEX 由下一步 fail-loud。
+                tar xzf /tmp/core.tar.gz -C . assets/loading assets/ui || true
+                tar xzf /tmp/core.tar.gz -C . assets/clickfx || true
+                echo "  ✓ core (v${VER})"
+              else
+                echo "::warning::Failed to download core (v${VER}), build will use any local assets"
+              fi
+              rm -f /tmp/core.tar.gz
             else
               echo "::warning::Failed to resolve version, build will use any local assets"
             fi
@@ -175,22 +187,28 @@ jobs:
       - name: Download game assets from Worker
         shell: bash   # 語法是 bash（win runner 預設 pwsh 會直接炸——v0.5.0 首跑實證）
         run: |
-          if [ ! -d assets/bgm ]; then
-            echo "=== Downloading game assets from Worker ==="
+          # 打包只需要三樣：clickfx 的 FX_TEX 貼圖（官方素材、不進公開 repo，所以
+          # 不在 git）、loading（開場畫面）、ui（氣泡/游標圖）。後兩者 repo 內有，
+          # 抓下來是為了跟 release 同步。舊版為了這 0.6MB 抓整個 assets-player
+          # （953MB）——2026-10 起 clickfx 併入 core（~20MB），只抽需要的目錄。
+          if ! ls assets/clickfx/FX_TEX_*.png >/dev/null 2>&1; then
+            echo "=== Downloading core assets (clickfx/loading/ui) from Worker ==="
             WORKER_BASE="https://ba-assets.imlindora.workers.dev"
             # python3 在 Windows Git Bash 不保證在 PATH → python 後備
             VER=$(curl -sf "$WORKER_BASE/latest/assets_version.json" | (python3 -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null || python -c "import sys,json;print(json.load(sys.stdin)['version'])" 2>/dev/null) || echo "")
             if [ -n "$VER" ]; then
-              for pkg in assets-player intro; do
-                # tar_pack 檔名格式：assets-<key>-v<ver>.tar.gz（assets- 前綴）
-                URL="$WORKER_BASE/v${VER}/assets-${pkg}-v${VER}.tar.gz"
-                if curl -sf "$URL" -o /tmp/pkg.tar.gz && tar xzf /tmp/pkg.tar.gz -C .; then
-                  echo "  ✓ $pkg (v${VER})"
-                else
-                  echo "::warning::Failed to download ${pkg} (v${VER}), build will use any local assets"
-                fi
-                rm -f /tmp/pkg.tar.gz
-              done
+              # tar_pack 檔名格式：assets-<key>-v<ver>.tar.gz（assets- 前綴）
+              URL="$WORKER_BASE/v${VER}/assets-core-v${VER}.tar.gz"
+              if curl -sf "$URL" -o /tmp/core.tar.gz; then
+                # 分開抽：轉換期（core 還沒有 clickfx 的舊 release）不要讓缺一個
+                # 成員害 loading/ui 也一起判失敗；缺 FX_TEX 由下一步 fail-loud。
+                tar xzf /tmp/core.tar.gz -C . assets/loading assets/ui || true
+                tar xzf /tmp/core.tar.gz -C . assets/clickfx || true
+                echo "  ✓ core (v${VER})"
+              else
+                echo "::warning::Failed to download core (v${VER}), build will use any local assets"
+              fi
+              rm -f /tmp/core.tar.gz
             else
               echo "::warning::Failed to resolve version, build will use any local assets"
             fi

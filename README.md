@@ -161,12 +161,12 @@ sudo dnf install alsa-lib nss gtk3 libXScrnSaver mesa-libgbm
 | 版本 | 變動的包 | 需要重新下載 |
 |---|---|---|
 | 2026.1008.0 → 2026.1012.0 | 3 包（`meta`＋2 個大廳） | 13.5 MB（全量 4.1GB 的 0.3%） |
-| 2026.1012.0 → 2026.1015.0 | 4 包 | 924 MB（其中 `assets-player` 909 MB） |
+| 2026.1012.0 → 2026.1015.0 | 4 包 | 924 MB（其中 `assets-player` 909 MB，該版後已退役） |
 
 - `meta`（大廳索引／角色資料，<1 MB）幾乎每次都會更新，也只佔開機門檻的一小角。
 - 大廳包只在自己的素材變動時更新；語音包依語言資料夾各自獨立。
 - `core`（students/ui/loading/fonts）很少變動；`intro` 只在影片換檔時更新。
-- **已知痛點**：`assets-player` 目前是單一大包（約 909 MB，其中 BGM 佔 888 MB、ogg＋m4a 雙格式），只要裡面任何一個檔案變動就會整包重下（1015 就是這樣）。BGM 不變時完全不會動到它。
+- **`assets-player`（909 MB）已在 2026-10 退役**：它把 BGM 和各 lobby 包、`core` 已有的檔案重新打包一輪，真正獨有的只有 ~0.6 MB 的 `clickfx` 貼圖。現在 `clickfx` 併進 `core`（開機一併下載，網頁版的原版點擊特效也因此修好），BGM 由各 lobby 包提供。桌機打包 CI 不再每次發布抓 953 MB（3 個 job 各一次），「下載全部」也少掉一份重複 BGM。
 - 改版不會主動刪除「新版已移除」的舊檔案；需要回收空間時用設定 → 管理空間的清理功能。
 
 ## 已知限制
@@ -359,7 +359,7 @@ Two real releases in October 2026:
 | Release | Changed packs | Re-download |
 |---|---|---|
 | 2026.1008.0 -> 2026.1012.0 | 3 (`meta` + 2 lobbies) | 13.5 MB (0.3% of 4.1 GB) |
-| 2026.1012.0 -> 2026.1015.0 | 4 | 924 MB (909 MB of it `assets-player`) |
+| 2026.1012.0 -> 2026.1015.0 | 4 | 924 MB (909 MB of it `assets-player`, retired afterwards) |
 
 - `meta` (lobby index / character data, <1 MB) changes almost every release and
   is only a small part of the boot gate.
@@ -367,9 +367,12 @@ Two real releases in October 2026:
   per language folder.
 - `core` (students/ui/loading/fonts) changes rarely; `intro` only when the video
   is re-rendered.
-- **Known weak spot**: `assets-player` is one ~909 MB pack (888 MB of it is BGM
-  in both ogg and m4a). Any file change inside it re-downloads the whole pack -
-  which is what happened in 1015. It is untouched as long as BGM does not change.
+- **`assets-player` (909 MB) was retired in 2026-10**: it was a re-pack of files
+  already shipped by the lobby packs (BGM) and `core` (students/ui/loading/fonts);
+  only ~0.6 MB of `clickfx` textures were unique. `clickfx` now lives in `core`
+  (downloaded at boot, which also fixes the authentic click effect on the web
+  build) and BGM comes with each lobby pack. The desktop build no longer pulls
+  953 MB per job, and "download all" no longer stores a duplicate BGM set.
 - Updating does not delete files that the new release dropped; use
   Settings -> Storage cleanup when you want the space back.
 

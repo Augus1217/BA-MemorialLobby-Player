@@ -778,6 +778,17 @@ ipcMain.handle('check-assets', async (event, { voice, audioFmt } = {}) => {
   // 此時僅提示有新版本、不強制下載。
   // needsDownloadPacks = 全部缺包（設定頁「預先下載全部」用）；
   // bootPacks = 其中擋開機的 core/intro（開機只等它）。
+  // 退役的包（例如 2026-10 的 assets-player）會留在 installed.json 裡：管理空間
+  // 會列出一個大小 0、按刪除又失敗的幽靈項目。以 manifest 為準清掉記帳；檔案
+  // 不動——它們的路徑現在由 core／lobby 包宣告（bgm 由 lobby 包提供）。
+  if (remoteVersion?.packages?.core) {
+    let pruned = false;
+    for (const k of Object.keys(installed)) {
+      if (!remoteVersion.packages[k]) { delete installed[k]; pruned = true; }
+    }
+    if (pruned) { try { writeInstalled(installed); } catch {} }
+  }
+
   let needsDownloadPacks = [];
   let bootPacks = [];
   const devAssets = isDev && hasAssets;
@@ -1040,16 +1051,14 @@ function dirStats(dir) {
   return { size, files };
 }
 
-// installed.json 的 pack key → 磁碟路徑清單（與 build_assets.py 打包規則一一對應）
+// installed.json 的 pack key → 磁碟路徑清單（與 build_assets.py 的 CORE_DIRS／
+// 打包規則一一對應）。舊 assets-player（909MB）已退役：bgm 由各 lobby 包帶、
+// students/ui/loading/fonts/clickfx 全部屬於 core。
 function packPaths(key) {
   const assetsDir = getAssetsDir();
-  if (key === 'core') return ['students', 'ui', 'loading', 'fonts', 'voice_title'].map(s => path.join(assetsDir, s));
+  if (key === 'core') return ['students', 'ui', 'loading', 'fonts', 'voice_title', 'clickfx'].map(s => path.join(assetsDir, s));
   if (key === 'meta') return [path.join(assetsDir, 'data')];
   if (key === 'intro') return [path.join(assetsDir, 'intro')];
-  if (key === 'assets-player') {
-    // 與 build_assets.py 的 assets-player 清單一致；刪除時會被 core 的共用宣告擋下
-    return ['bgm', 'students', 'loading', 'ui', 'fonts', 'clickfx'].map(s => path.join(assetsDir, s));
-  }
   if (key.startsWith('lobby/')) {
     const nm = key.slice('lobby/'.length);
     return [
@@ -1068,10 +1077,12 @@ function packPaths(key) {
 function packLooksPresent(key) {
   const assetsDir = getAssetsDir();
   const exists = (rel) => fs.existsSync(path.join(assetsDir, rel));
+  // 只探核心大目錄：clickfx 是 2026-10 才併進 core 的（舊 manifest 的 core 包
+  // 沒有它），若把它列為必要條件，新 Player 配舊 release 會在每次開機判定
+  // 「core 不完整」→ 反覆重下 core。缺了它只影響原版點擊特效。
   if (key === 'core') return ['students', 'ui', 'loading', 'fonts'].every(exists);
   if (key === 'meta') return exists(path.join('data', 'lobby_index.json'));
   if (key === 'intro') return exists('intro');
-  if (key === 'assets-player') return exists('bgm');
   if (key.startsWith('lobby/')) return exists(path.join('spine', key.slice('lobby/'.length)));
   if (key.startsWith('voice/')) return exists(path.join('voice', key.slice('voice/'.length)));
   if (key.startsWith('voice-m4a/')) return exists(path.join('voice', key.slice('voice-m4a/'.length)));
@@ -1150,8 +1161,11 @@ function pathInside(base, p) {
 }
 
 // 每個磁碟路徑被哪些「已安裝」pack 宣告 → 刪除時用來保護共用目錄。
-// assets-player 與 core 都含 students/ui/loading/fonts，沒有這層保護時
-// 刪掉 assets-player 會把 core 的 UI 一起砍掉，畫面直接壞掉。
+// 例：lobby 包與 core 可能共用 bgm/students 以外的路徑，沒有這層保護會砍到
+// 別的 pack 還在用的檔案。（歷史上 assets-player 與 core 共用 students/ui/
+// loading/fonts，該包已於 2026-10 退役併入 core。）
+// 註：lobby 包帶的 bgm/<檔名> 目前不在 packPaths 內——同一首 BGM 可能被多個
+// 大廳共用，刪單一大廳時不能直接刪檔；殘留檔案由管理空間的孤兒清理處理。
 function packClaims(installed) {
   const map = new Map();
   for (const key of Object.keys(installed)) {

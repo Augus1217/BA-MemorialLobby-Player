@@ -1,7 +1,7 @@
 // tar-stream.js — 網頁版資源安裝的串流管線（不把整包放進記憶體）。
 //
 // 為什麼需要：舊版 ba-web.js 用 `gunzipSync(整個壓縮包)` ＋ 第二輪複製每個檔案，
-// 400MB 級的包（assets-player）在手機上峰值約 2.5～3 倍＝必 OOM（分頁直接被砍）。
+// 400MB 級的大包在手機上峰值約 2.5～3 倍＝必 OOM（分頁直接被砍）。
 // 這裡改成：
 //   1. 下載流邊算 sha256（純 JS 增量實作，WebCrypto 沒有增量 API），邊送進
 //      DecompressionStream → Blob。大 Blob 由瀏覽器落地存放，不佔 JS 記憶體。

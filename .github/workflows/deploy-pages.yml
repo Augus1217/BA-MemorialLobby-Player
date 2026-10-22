@@ -44,7 +44,8 @@ jobs:
           fi
           echo "  version: $VER"
           mkdir -p assets/loading assets/intro assets/ui
-          # core pack：只抽 loading/ 成員（~20MB，比全抓 assets-player 423MB 快得多）
+          # core pack：只抽 loading/ 成員（~20MB）。clickfx 雖然也在 core 裡，但
+          # 官方貼圖不進公開 dist——網頁版開機安裝 core 時會進 Cache Storage。
           # 注意：用 member-name 抽取而非 --include（GNU/BSD tar 相容），失敗時 fallback 本機既有 assets
           URL_CORE="$WORKER_BASE/v${VER}/assets-core-v${VER}.tar.gz"
           if curl -sf "$URL_CORE" -o /tmp/core.tar.gz && \
