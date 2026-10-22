@@ -4110,6 +4110,20 @@ function renderSettingsAssets() {
     let bytes = 0;
     for (const k of info.needsDownloadPacks) bytes += packs[k]?.size || 0;
     html += `<br><span class="warn">⤓</span> ${t('set.pending', { n: info.needsDownloadPacks.length, size: fmtBytes(bytes) })}`;
+    // 講清楚「更新 ≠ 重下」：已安裝且 sha 相符的包直接沿用（桌機留在原地、
+    // 網頁跨版本搬進新快取），只有上面列出的缺包會走網路。
+    try {
+      const inst = info.installed || {};
+      let haveN = 0, haveBytes = 0;
+      for (const k of Object.keys(inst)) {
+        if (k.startsWith('__')) continue;
+        if (packs[k] && inst[k] === packs[k].sha256) { haveN++; haveBytes += packs[k].size || 0; }
+      }
+      if (haveN) {
+        html += `<br><span class="ok">✓</span> ${t('set.updateOnly')}`;
+        html += `<br><span class="ok">✓</span> ${t('set.reuse', { n: haveN, size: fmtBytes(haveBytes) })}`;
+      }
+    } catch {}
     // 下載中重開面板：保持暫停鈕＋進度可見，不重貼標籤
     if (_dlRunning) {
       try { setDownloadBtn.textContent = t('set.pause'); } catch {}
@@ -7675,6 +7689,7 @@ async function ensureReady() {
       if (p.status === 'done') { bootText.textContent = t('dl.packDone', { pkg: p.package }); return; }
       if (p.status === 'error') { bootText.textContent = friendlyErr(p.error) || t('dl.giveUp', { n: 3 }); return; }
       if (p.status !== 'downloading') return;
+      if (p.migrated) { bootText.textContent = t('dl.reuse', { pkg: p.package }); return; }
       wpStageThrottled('downloading');
       let line = t('dl.downloading', { pkg: p.package, i: p.index ?? 1, n: p.total ?? 1 });
       if (p.percent != null) line += ` ${p.percent}%`;
@@ -8873,6 +8888,12 @@ async function onSpaceVerify() {
         // 斷線/停滯自動重試（main 端與網頁版都會發）
         setAssetsProgress.style.display = 'block';
         setProgressText.textContent = t('dl.stalled', { i: p.attempt ?? 2, n: p.total ?? 3 });
+      } else if (p.status === 'downloading' && p.migrated) {
+        // 網頁版跨版本：把 sha 未變的包從舊快取搬過來（純本機，無網路）。
+        // 不講清楚會被誤認成「改版又要重下 4GB」。
+        setAssetsProgress.style.display = 'block';
+        setProgressText.textContent = t('dl.reuse', { pkg: p.package });
+        if (p.percent != null) { setProgressFill.style.width = p.percent + '%'; setProgressAria(p.percent); }
       } else if (p.status === 'downloading') {
         setAssetsProgress.style.display = 'block';
         const pct = p.percent != null ? `${p.percent}%`

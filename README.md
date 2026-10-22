@@ -152,6 +152,23 @@ sudo dnf install alsa-lib nss gtk3 libXScrnSaver mesa-libgbm
 
 如果完全連不上 Worker：開機仍可進入（顯示既有資源），設定頁的資源狀態會顯示離線，之後按「開始下載」即可重試。
 
+### 版本更新：只下載有變動的包
+
+更新判斷看的是**每個包的 sha256**，不是版本字串——版本換了但內容沒變的包不會重抓。網頁版跨版本時會把 sha 未變的包從舊快取**本機搬**到新快取（不經網路），進度會顯示「沿用既有資源」。
+
+以 2026.10 的兩次實際發布為例：
+
+| 版本 | 變動的包 | 需要重新下載 |
+|---|---|---|
+| 2026.1008.0 → 2026.1012.0 | 3 包（`meta`＋2 個大廳） | 13.5 MB（全量 4.1GB 的 0.3%） |
+| 2026.1012.0 → 2026.1015.0 | 4 包 | 924 MB（其中 `assets-player` 909 MB） |
+
+- `meta`（大廳索引／角色資料，<1 MB）幾乎每次都會更新，也只佔開機門檻的一小角。
+- 大廳包只在自己的素材變動時更新；語音包依語言資料夾各自獨立。
+- `core`（students/ui/loading/fonts）很少變動；`intro` 只在影片換檔時更新。
+- **已知痛點**：`assets-player` 目前是單一大包（約 909 MB，其中 BGM 佔 888 MB、ogg＋m4a 雙格式），只要裡面任何一個檔案變動就會整包重下（1015 就是這樣）。BGM 不變時完全不會動到它。
+- 改版不會主動刪除「新版已移除」的舊檔案；需要回收空間時用設定 → 管理空間的清理功能。
+
 ## 已知限制
 
 - 偶爾顯示日文＝該角色 Global 版尚未實裝，無官方翻譯時 fallback 日文；實裝後管線自動補上
@@ -329,6 +346,32 @@ dependency, to avoid a ~70 MB download on every install):
 
 If the worker is unreachable the app still boots with whatever is installed, and
 Settings -> Storage shows offline with a button to retry.
+
+### Updating: only changed packs are downloaded
+
+Update detection compares the **sha256 of every pack**, not the version string -
+a release bump with identical pack contents downloads nothing. On the web build,
+packs whose sha is unchanged are **copied locally** from the previous version's
+Cache Storage into the new one (no network) and the progress line says so.
+
+Two real releases in October 2026:
+
+| Release | Changed packs | Re-download |
+|---|---|---|
+| 2026.1008.0 -> 2026.1012.0 | 3 (`meta` + 2 lobbies) | 13.5 MB (0.3% of 4.1 GB) |
+| 2026.1012.0 -> 2026.1015.0 | 4 | 924 MB (909 MB of it `assets-player`) |
+
+- `meta` (lobby index / character data, <1 MB) changes almost every release and
+  is only a small part of the boot gate.
+- Lobby packs change only when their own assets change; voice packs are split
+  per language folder.
+- `core` (students/ui/loading/fonts) changes rarely; `intro` only when the video
+  is re-rendered.
+- **Known weak spot**: `assets-player` is one ~909 MB pack (888 MB of it is BGM
+  in both ogg and m4a). Any file change inside it re-downloads the whole pack -
+  which is what happened in 1015. It is untouched as long as BGM does not change.
+- Updating does not delete files that the new release dropped; use
+  Settings -> Storage cleanup when you want the space back.
 
 ## Known limitations
 

@@ -208,7 +208,10 @@
     "dl.slowNet": "網路較慢（約 {speed}），仍在下載中，請保持連線",
     "dl.stalled": "連線中斷，正在重試（{i}/{n}）…",
     "dl.giveUp": "下載失敗（已重試 {n} 次）。可稍後在設定 → 資源狀態重試；已下載的部分會續傳",
-    "dl.checkingSlow": "檢查更新中……（網路較慢，請稍候）"
+    "dl.checkingSlow": "檢查更新中……（網路較慢，請稍候）",
+    "dl.reuse": "沿用既有資源（{pkg}），不需重新下載",
+    "set.reuse": "其餘 {n} 個套件（約 {size}）已安裝，更新時直接沿用",
+    "set.updateOnly": "只會下載有變動的套件"
   },
   "zh-CN": {
     "boot.checking": "检查更新中……",
@@ -419,7 +422,10 @@
     "dl.slowNet": "网络较慢（约 {speed}），仍在下载中，请保持连接",
     "dl.stalled": "连接中断，正在重试（{i}/{n}）…",
     "dl.giveUp": "下载失败（已重试 {n} 次）。可稍后在设置 → 资源状态重试；已下载部分会续传",
-    "dl.checkingSlow": "正在检查更新……（网络较慢，请稍候）"
+    "dl.checkingSlow": "正在检查更新……（网络较慢，请稍候）",
+    "dl.reuse": "沿用已有资源（{pkg}），无需重新下载",
+    "set.reuse": "其余 {n} 个套件（约 {size}）已安装，更新时直接沿用",
+    "set.updateOnly": "只会下载有变动的套件"
   },
   "ja": {
     "boot.checking": "確認中です……",
@@ -630,7 +636,10 @@
     "dl.slowNet": "回線が遅いようです（約 {speed}）。ダウンロードは続行中です",
     "dl.stalled": "接続が途切れました。再試行中（{i}/{n}）…",
     "dl.giveUp": "ダウンロードに失敗しました（{n} 回再試行）。設定 → リソース状態から再開できます（続きから再開します）",
-    "dl.checkingSlow": "更新を確認中……（回線が遅いため時間がかかります）"
+    "dl.checkingSlow": "更新を確認中……（回線が遅いため時間がかかります）",
+    "dl.reuse": "既存のリソースを引き継ぎ中（{pkg}）— 再ダウンロードはありません",
+    "set.reuse": "残り {n} 個（約 {size}）はインストール済みで、更新時もそのまま使います",
+    "set.updateOnly": "変更されたパッケージだけをダウンロードします"
   },
   "en": {
     "boot.checking": "Checking for updates...",
@@ -841,7 +850,10 @@
     "dl.slowNet": "Slow network (~{speed}); still downloading, please stay connected",
     "dl.stalled": "Connection stalled; retrying ({i}/{n})…",
     "dl.giveUp": "Download failed after {n} attempts. Retry from Settings → Assets; finished parts are resumed",
-    "dl.checkingSlow": "Checking for updates… (slow network, please wait)"
+    "dl.checkingSlow": "Checking for updates… (slow network, please wait)",
+    "dl.reuse": "Reusing existing files ({pkg}) — no re-download",
+    "set.reuse": "The other {n} packs (~{size}) are installed and will be reused",
+    "set.updateOnly": "Only changed packs are downloaded"
   },
   "ko": {
     "boot.checking": "업데이트 확인 중...",
@@ -1052,6 +1064,9 @@
     "dl.slowNet": "네트워크가 느립니다(약 {speed}). 다운로드 중이니 연결을 유지해 주세요",
     "dl.stalled": "연결이 끊겼습니다. 재시도 중({i}/{n})…",
     "dl.giveUp": "다운로드에 실패했습니다({n}회 재시도). 설정 → 리소스 상태에서 재시도할 수 있으며 이어받기가 됩니다",
-    "dl.checkingSlow": "업데이트 확인 중……(네트워크가 느립니다)"
+    "dl.checkingSlow": "업데이트 확인 중……(네트워크가 느립니다)",
+    "dl.reuse": "기존 리소스를 재사용 중({pkg}) — 다시 받지 않습니다",
+    "set.reuse": "나머지 {n}개 패키지(약 {size})는 이미 설치되어 그대로 사용합니다",
+    "set.updateOnly": "변경된 패키지만 내려받습니다"
   }
 }
