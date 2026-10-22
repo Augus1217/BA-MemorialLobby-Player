@@ -782,9 +782,14 @@ ipcMain.handle('check-assets', async (event, { voice, audioFmt } = {}) => {
   // 會列出一個大小 0、按刪除又失敗的幽靈項目。以 manifest 為準清掉記帳；檔案
   // 不動——它們的路徑現在由 core／lobby 包宣告（bgm 由 lobby 包提供）。
   if (remoteVersion?.packages?.core) {
+    const known = remoteVersion.packages;
     let pruned = false;
     for (const k of Object.keys(installed)) {
-      if (!remoteVersion.packages[k]) { delete installed[k]; pruned = true; }
+      // 語音包的 key 由語言/格式選擇管理；m4a 清單來自另一支 companion manifest
+      // （抓失敗時 packages 裡就沒有 voice-m4a/*）——不能把它們當成「已退役」清掉，
+      // 否則一次暫時性失敗會讓使用者重下 GB 級語音。
+      if (k.startsWith('voice/') || k.startsWith('voice-m4a/')) continue;
+      if (!known[k]) { delete installed[k]; pruned = true; }
     }
     if (pruned) { try { writeInstalled(installed); } catch {} }
   }

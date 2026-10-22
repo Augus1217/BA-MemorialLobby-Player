@@ -33,7 +33,7 @@ jobs:
         run: |
           # 打包只需要三樣：clickfx 的 FX_TEX 貼圖（官方素材、不進公開 repo，所以
           # 不在 git）、loading（開場畫面）、ui（氣泡/游標圖）。後兩者 repo 內有，
-          # 抓下來是為了跟 release 同步。舊版為了這 0.6MB 抓整個 assets-player
+          # 抓下來是為了跟 release 同步。舊版為了這 0.5MB 抓整個 assets-player
           # （953MB）——2026-10 起 clickfx 併入 core（~20MB），只抽需要的目錄。
           if ! ls assets/clickfx/FX_TEX_*.png >/dev/null 2>&1; then
             echo "=== Downloading core assets (clickfx/loading/ui) from Worker ==="
@@ -114,7 +114,7 @@ jobs:
         run: |
           # 打包只需要三樣：clickfx 的 FX_TEX 貼圖（官方素材、不進公開 repo，所以
           # 不在 git）、loading（開場畫面）、ui（氣泡/游標圖）。後兩者 repo 內有，
-          # 抓下來是為了跟 release 同步。舊版為了這 0.6MB 抓整個 assets-player
+          # 抓下來是為了跟 release 同步。舊版為了這 0.5MB 抓整個 assets-player
           # （953MB）——2026-10 起 clickfx 併入 core（~20MB），只抽需要的目錄。
           if ! ls assets/clickfx/FX_TEX_*.png >/dev/null 2>&1; then
             echo "=== Downloading core assets (clickfx/loading/ui) from Worker ==="
@@ -189,7 +189,7 @@ jobs:
         run: |
           # 打包只需要三樣：clickfx 的 FX_TEX 貼圖（官方素材、不進公開 repo，所以
           # 不在 git）、loading（開場畫面）、ui（氣泡/游標圖）。後兩者 repo 內有，
-          # 抓下來是為了跟 release 同步。舊版為了這 0.6MB 抓整個 assets-player
+          # 抓下來是為了跟 release 同步。舊版為了這 0.5MB 抓整個 assets-player
           # （953MB）——2026-10 起 clickfx 併入 core（~20MB），只抽需要的目錄。
           if ! ls assets/clickfx/FX_TEX_*.png >/dev/null 2>&1; then
             echo "=== Downloading core assets (clickfx/loading/ui) from Worker ==="
