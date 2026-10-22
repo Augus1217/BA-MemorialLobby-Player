@@ -164,13 +164,14 @@ sudo dnf install alsa-lib nss gtk3 libXScrnSaver mesa-libgbm
 | 版本 | 變動的包 | 需要重新下載 |
 |---|---|---|
 | 2026.1008.0 → 2026.1012.0 | 3 包（`meta`＋2 個大廳） | 13.5 MB（全量 4.1GB 的 0.3%） |
-| 2026.1012.0 → 2026.1015.0 | 4 包 | 924 MB（其中 `assets-player` 909 MB，該版後已退役） |
+| 2026.1012.0 → 2026.1015.0 | 4 包 | 924 MB（其中 `assets-player` 909 MB；該包在 2026.1022.0 移除） |
+| 2026.1015.0 → 2026.1022.0 | 277 包 | 2.3 GB（`assets-player` 退役、BGM 改由各 lobby 包帶 → 大廳包各重抓一次；只裝幾間大廳的人實際只抓那幾包） |
 
 - `meta`（大廳索引／角色資料，<1 MB）幾乎每次都會更新，也只佔開機門檻的一小角。
 - 大廳包只在自己的素材變動時更新；語音包依語言資料夾各自獨立。
 - `core`（students/ui/loading/fonts/voice_title/clickfx）很少變動；`intro` 只在影片換檔時更新。
-- `core` 的 `fonts/` 只帶程式實際註冊的四個字體（NotoSansTC、NotoSans、MalgunGothic、NotoSansKR）；其餘 8 個（MPlus、Malgun Bold/Semilight、LineSeedKR、Noto JP/SC 等，約 38 MB）沒有任何程式引用，已不在包內——新安裝與每次換版都少下載這一段。
-- **`assets-player`（909 MB）已在 2026-10 退役**：它把 BGM 和各 lobby 包、`core` 已有的檔案重新打包一輪，真正獨有的只有 35 張、約 0.5 MB 的 `clickfx` 貼圖。現在 `clickfx` 併進 `core`（開機一併下載，網頁版的原版點擊特效也因此修好），BGM 由各 lobby 包提供。桌機打包 CI 不再每次發布抓 953 MB（3 個 job 各一次），「下載全部」也少掉一份重複 BGM。
+- `core` 的 `fonts/` 只帶程式實際註冊的四個字體（NotoSansTC、NotoSans、MalgunGothic、NotoSansKR）；2026.1022.0 起移除先前多包的 `BA-LineSeedKR-Bold.ttf`（3.4 MB，沒有任何程式引用）。
+- **`assets-player`（954 MB）在 2026.1022.0 移除**：它把 BGM 和各 lobby 包、`core` 已有的檔案重新打包一輪，真正獨有的只有 35 張、約 0.5 MB 的 `clickfx` 貼圖（已併進 `core`，網頁版的原版點擊特效也因此修好）。BGM 改由各 lobby 包帶自己的曲子（ogg＋m4a，同檔名在磁碟上仍只佔一份）；全量下載 4.43 GB → 3.87 GB（−556 MB），代價是換版時所有大廳包會重抓一次。桌機打包 CI 也不再每次發布抓 954 MB（3 個 job 各一次）。
 - 改版不會主動刪除「新版已移除」的舊檔案；需要回收空間時用設定 → 管理空間的清理功能。
 
 ## 已知限制
