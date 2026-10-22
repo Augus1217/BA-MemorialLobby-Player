@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('ba', {
   // 管理空間：檢視已下載資源包與磁碟用量、刪除
   assetsManageList: () => ipcRenderer.invoke('assets-manage-list'),
   assetsManageDelete: (keys) => ipcRenderer.invoke('assets-manage-delete', keys),
+  assetsCleanBgm: () => ipcRenderer.invoke('assets-clean-bgm'),
   verifyPacks: () => ipcRenderer.invoke('assets-verify'),
   repairPacks: (keys) => ipcRenderer.invoke('assets-repair', keys),
   cleanOrphans: () => ipcRenderer.invoke('assets-clean-orphans'),

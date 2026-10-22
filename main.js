@@ -1056,6 +1056,69 @@ function dirStats(dir) {
   return { size, files };
 }
 
+// ---------------------------------------------------------------------------
+// BGM 空間：assets/bgm 是「所有用得到的曲子都放在同一個目錄」，由各 lobby 包
+// 安裝時一起帶進來（同曲多廳共用同一個檔案，所以檔案層面本來就沒有重複）。
+// 但舊版 assets-player 曾把整個 bgm 目錄（364 首）塞進來，實際只有 85 首被
+// lobby_bgm_mapping.csv 引用——其餘永遠不會播放，卻一直佔著磁碟（~680MB）。
+// 這裡以「已安裝的大廳」為範圍算出沒人引用的檔案，可安全刪除；之後進到那個
+// 大廳時，lobby 包會再把曲子補回來。
+// ---------------------------------------------------------------------------
+function readLobbyBgmMap() {
+  const csvPath = path.join(getAssetsDir(), 'data', 'lobby_bgm_mapping.csv');
+  let txt;
+  try { txt = fs.readFileSync(csvPath, 'utf8'); } catch { return null; }
+  const lines = txt.split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) return null;
+  const head = lines[0].split(',').map(s => s.trim());
+  const iName = head.indexOf('name');
+  const iFile = head.indexOf('bgm_filename');
+  if (iName < 0 || iFile < 0) return null;
+  const map = {};
+  for (const ln of lines.slice(1)) {
+    const cols = ln.split(',');
+    const nm = (cols[iName] || '').trim();
+    const fn = (cols[iFile] || '').trim();
+    if (nm && fn) map[nm] = fn;
+  }
+  return Object.keys(map).length ? map : null;
+}
+
+// 回傳 { totalFiles, totalBytes, unusedFiles, unusedBytes, unused[] }；
+// 對照表或目錄不存在時回 null（寧可不顯示，也不要誤刪）。
+function bgmStats(installed) {
+  const map = readLobbyBgmMap();
+  if (!map) return null;
+  const dir = path.join(getAssetsDir(), 'bgm');
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+  catch { return null; }
+  // 只保留「已安裝大廳」引用的曲子（ogg 與 m4a 姊妹檔都算）
+  const keep = new Set();
+  for (const k of Object.keys(installed || {})) {
+    if (!k.startsWith('lobby/')) continue;
+    const fn = map[k.slice('lobby/'.length)];
+    if (!fn) continue;
+    keep.add(fn);
+    keep.add(fn.replace(/\.ogg$/i, '.m4a'));
+  }
+  const out = { totalFiles: 0, totalBytes: 0, unusedFiles: 0, unusedBytes: 0, unused: [] };
+  for (const ent of entries) {
+    if (!ent.isFile() || !/\.(ogg|m4a)$/i.test(ent.name)) continue;
+    const full = path.join(dir, ent.name);
+    let size = 0;
+    try { size = fs.statSync(full).size; } catch {}
+    out.totalFiles++;
+    out.totalBytes += size;
+    if (!keep.has(ent.name)) {
+      out.unusedFiles++;
+      out.unusedBytes += size;
+      out.unused.push(ent.name);
+    }
+  }
+  return out;
+}
+
 // installed.json 的 pack key → 磁碟路徑清單（與 build_assets.py 的 CORE_DIRS／
 // 打包規則一一對應）。舊 assets-player（909MB）已退役：bgm 由各 lobby 包帶、
 // students/ui/loading/fonts/clickfx 全部屬於 core。
@@ -1155,7 +1218,9 @@ ipcMain.handle('assets-manage-list', async () => {
   // 但清理功能其實可以做）。
   let orphans = 0;
   try { orphans = orphanDirs(installed).length; } catch {}
-  return { version: localVersion, packs, totalSize: total, orphans };
+  let bgm = null;
+  try { bgm = bgmStats(installed); } catch {}
+  return { version: localVersion, packs, totalSize: total, orphans, bgm };
 });
 
 // 路徑必須真的位於 base 之下（防 ../ 逃逸；同時擋掉 base 前綴相近的假路徑）
@@ -1243,6 +1308,31 @@ ipcMain.handle('assets-clean-orphans', async () => {
     }
   }
   return { removed: removed.length, paths: removed };
+});
+
+ipcMain.handle('assets-clean-bgm', async () => {
+  const installed = readInstalled();
+  if (!Object.prototype.hasOwnProperty.call(installed, 'core')) {
+    return { removed: 0, bytes: 0, skipped: 'not_installed' };
+  }
+  const st = bgmStats(installed);
+  if (!st) return { removed: 0, bytes: 0, skipped: 'no_mapping' };
+  const dir = path.join(getAssetsDir(), 'bgm');
+  let bytes = 0;
+  const removed = [];
+  for (const name of st.unused) {
+    const full = path.join(dir, name);
+    if (!pathInside(dir, full)) continue;   // 只刪 bgm 目錄內的檔案
+    try {
+      const size = fs.statSync(full).size;
+      fs.rmSync(full, { force: true });
+      bytes += size;
+      removed.push(name);
+    } catch (e) {
+      console.warn('[assets] BGM 清理失敗:', name, e.message);
+    }
+  }
+  return { removed: removed.length, bytes };
 });
 
 ipcMain.handle('assets-manage-delete', async (event, keys) => {

@@ -199,6 +199,19 @@ function cacheKey(p) {
   return new URL(rel.startsWith('assets/') ? rel : 'assets/' + rel, location.href).toString();
 }
 
+// cache key → 相對 assets/ 的路徑（例如 bgm/Theme_36.ogg）。
+// 站台可能掛在子路徑（GitHub Pages 專案站是 /BA-MemorialLobby-Player/），
+// 所以不能用 pathname.replace(/^\//, '') 再比 'assets/'——那在子路徑永遠不成立，
+// 會讓「檔案清單 backfill／無主檔統計／清除無主檔」全部靜默失效。
+const _assetPathPrefix = new URL('assets/', location.href).pathname;
+function assetRelOf(u) {
+  try {
+    const p = new URL(u, location.href).pathname;
+    if (!p.startsWith(_assetPathPrefix)) return null;
+    return p.slice(_assetPathPrefix.length);
+  } catch { return null; }
+}
+
 // ---- 下載單包 → 解壓進 cache ----
 // 兩條路徑：
 //   ①串流（現代瀏覽器；DecompressionStream）：下載流邊算 sha256 邊 gunzip 成
@@ -210,8 +223,15 @@ async function installEntries(name, source, onProgress, c) {
   const rels = [];
   const put = async (rel, body) => {
     rels.push(rel);
+    // Content-Length 記下來：管理空間的 BGM 統計要顯示實際佔用，而 Cache API
+    // 的 Response 不會自動帶長度（手工 new Response 沒有）。舊快取沒這個 header
+    // 時退回只顯示檔數。
+    const len = body && (body.size ?? body.byteLength);
     await c.put(cacheKey(rel), new Response(body, {
-      headers: { 'Content-Type': guessMime(rel), 'Cache-Control': 'immutable' },
+      headers: {
+        'Content-Type': guessMime(rel), 'Cache-Control': 'immutable',
+        ...(len != null ? { 'Content-Length': String(len) } : {}),
+      },
     }));
   };
   if (source.blob) {
@@ -777,11 +797,8 @@ const ba = {
         const keyReqs = await c.keys();
         const rels = [];
         for (const r of keyReqs) {
-          try {
-            const u = new URL(r.url, location.href);
-            const p = u.pathname.replace(/^\//, '');
-            if (p.startsWith('assets/')) rels.push(p.slice(7));
-          } catch {}
+          const rel = assetRelOf(r.url);
+          if (rel) rels.push(rel);
         }
         const inCache = new Set(rels);
         // core 也必須 backfill：core 與 lobby 包可能共用部分路徑，少了 core 的
@@ -835,11 +852,34 @@ const ba = {
       }
       const keyReqs = await c.keys();
       for (const r of keyReqs) {
-        try {
-          const u = new URL(r.url, location.href);
-          const p = u.pathname.replace(/^\//, '');
-          if (p.startsWith('assets/') && !claimed.has(p.slice(7))) orphans++;
-        } catch {}
+        const rel = assetRelOf(r.url);
+        if (rel && !claimed.has(rel)) orphans++;
+      }
+    } catch {}
+    // 未使用的 BGM：快取裡 bgm/* 沒有任何「已安裝大廳」引用（舊 assets-player
+    // 留下的整份目錄）。同曲多廳共用同一個檔案，所以只能以已裝大廳判斷。
+    let bgm = null;
+    try {
+      const map = bgmByLobby || {};
+      if (Object.keys(map).length) {
+        const keep = new Set();
+        for (const k of Object.keys(installed)) {
+          if (k.startsWith('__') || !k.startsWith('lobby/')) continue;
+          const fn = map[k.slice('lobby/'.length)];
+          if (!fn) continue;
+          keep.add('bgm/' + fn);
+          keep.add('bgm/' + fn.replace(/\.ogg$/i, '.m4a'));
+        }
+        let totalFiles = 0, totalBytes = 0, unusedFiles = 0, unusedBytes = 0;
+        for (const req of await c.keys()) {
+          const rel = assetRelOf(req.url);
+          if (!rel || !rel.startsWith('bgm/') || !/\.(ogg|m4a)$/i.test(rel)) continue;
+          let size = 0;
+          try { size = Number((await c.match(req))?.headers.get('content-length')) || 0; } catch {}
+          totalFiles++; totalBytes += size;
+          if (!keep.has(rel)) { unusedFiles++; unusedBytes += size; }
+        }
+        if (totalFiles) bgm = { totalFiles, totalBytes, unusedFiles, unusedBytes };
       }
     } catch {}
     return {
@@ -847,7 +887,36 @@ const ba = {
       packs,
       totalSize: packs.reduce((a, p) => a + p.size, 0),
       orphans,
+      bgm,
     };
+  },
+
+  // ---- 清除未使用的 BGM（見 assetsManageList 的 bgm 統計）----
+  async assetsCleanBgm({ bgmByLobby } = {}) {
+    const c = await activeCache();
+    if (!c) return { removed: 0, bytes: 0, skipped: 'no_cache' };
+    const meta = await readMeta(c);
+    const map = bgmByLobby || {};
+    const lobbyKeys = Object.keys(meta).filter((k) => !k.startsWith('__') && k.startsWith('lobby/'));
+    if (!Object.keys(map).length || !lobbyKeys.length) {
+      return { removed: 0, bytes: 0, skipped: 'no_mapping' };
+    }
+    const keep = new Set();
+    for (const k of lobbyKeys) {
+      const fn = map[k.slice('lobby/'.length)];
+      if (!fn) continue;
+      keep.add('bgm/' + fn);
+      keep.add('bgm/' + fn.replace(/\.ogg$/i, '.m4a'));
+    }
+    let removed = 0, bytes = 0;
+    for (const req of await c.keys()) {
+      const rel = assetRelOf(req.url);
+      if (!rel || !rel.startsWith('bgm/') || !/\.(ogg|m4a)$/i.test(rel) || keep.has(rel)) continue;
+      let size = 0;
+      try { size = Number((await c.match(req))?.headers.get('content-length')) || 0; } catch {}
+      try { if (await c.delete(req)) { removed++; bytes += size; } } catch {}
+    }
+    return { removed, bytes };
   },
   // ---- 按包刪除：只刪無其他已裝包共用的檔案（共用如 bgm 保留）
   async assetsManageDelete(keys) {
@@ -927,13 +996,10 @@ const ba = {
     let removed = 0;
     try {
       for (const r of await c.keys()) {
-        try {
-          const u = new URL(r.url, location.href);
-          const p = u.pathname.replace(/^\//, '');
-          if (p.startsWith('assets/') && !claimed.has(p.slice(7))) {
-            if (await c.delete(r)) removed++;
-          }
-        } catch {}
+        const rel = assetRelOf(r.url);
+        if (rel && !claimed.has(rel)) {
+          try { if (await c.delete(r)) removed++; } catch {}
+        }
       }
     } catch {}
     return { removed };

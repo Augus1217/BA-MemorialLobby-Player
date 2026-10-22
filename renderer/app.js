@@ -4090,6 +4090,13 @@ async function refreshSettingsAssets() {
     _settingsAssetInfo = null;
   }
   renderSettingsAssets();
+  // 管理空間的「可下載」清單依賴這裡的 lobbies/packages。checkAssets 是網路
+  // 呼叫，第一次切到管理空間時它還沒回來 → 版面會顯示 0 間待下載且不會自己
+  // 更新（只有重開面板才會）。回來後補畫一次。
+  if (document.getElementById('setTabSpace')?.style.display !== 'none') {
+    renderSpaceSummary();
+    renderSpaceList();
+  }
   try {
     renderStorageLine(await window.ba?.quotaInfo?.());
   } catch {}
@@ -4296,7 +4303,9 @@ function syncSettingsEffectCks() {
   if (setStatsCk) setStatsCk.checked = statsEnabled();
 }
 
-// ---- 管理空間（已下載資源包檢視 + 刪除 + 完整性 + 孤兒清理）----
+// ---- 管理空間（已下載資源包檢視 + 刪除 + 完整性 + 孤兒／BGM 清理）----
+// 版面：摘要 → 工具列 → BGM 列（只有需要時出現）→ 分組卡片（系統／大廳／
+// 語音／BGM／其他）。每組一張卡、四欄對齊，不再把 300 多列混成一長串。
 const setSpaceSummary = document.getElementById('setSpaceSummary');
 const setSpaceList = document.getElementById('setSpaceList');
 const setSpaceMsg = document.getElementById('setSpaceMsg');
@@ -4304,9 +4313,17 @@ let _spaceInfo = null;
 let _spaceQuery = '';
 let _spaceSort = 'size';
 let _spaceBroken = {};
+// 收合中的群組（記憶體狀態，重開面板重置）。待下載清單預設收合：一次列出
+// 近 300 間會把已安裝的清單整個淹掉，需要時再展開／用搜尋。
+const _spaceCollapsed = new Set(['missing']);
+const _spaceProgress = new Map();    // lobbyKey → 目前下載百分比
 
 function spaceKindLabel(kind) {
-  const map = { core: t('set.space.kindCore'), meta: t('set.space.kindMeta'), intro: t('set.space.kindIntro'), lobby: t('set.space.kindLobby'), voice: t('set.space.kindVoice'), 'voice-m4a': t('set.space.kindVoiceM4a') };
+  const map = {
+    core: t('set.space.kindCore'), meta: t('set.space.kindMeta'), intro: t('set.space.kindIntro'),
+    lobby: t('set.space.kindLobby'), voice: t('set.space.kindVoice'),
+    'voice-m4a': t('set.space.kindVoiceM4a'), bgm: t('set.space.groupBgm'),
+  };
   return map[kind] || kind;
 }
 
@@ -4357,28 +4374,57 @@ function renderSpaceSummary() {
     if (m > 0) summary += ` · ${t('set.space.notDownloaded', { n: m })}`;
   } catch {}
   setSpaceSummary.textContent = summary;
+
   const orphans = _spaceInfo?.orphans || 0;
   const or = document.getElementById('setSpaceOrphanRow');
   const ot = document.getElementById('setSpaceOrphans');
   if (or) or.style.display = orphans > 0 ? '' : 'none';
   if (ot) ot.textContent = t('set.space.orphans', { n: orphans });
+
+  // BGM 的磁碟用量：BGM 檔不在任何單一 pack 的目錄裡（同曲多廳共用），
+  // 所以獨立一行顯示「總量 · 其中未使用」，讓使用者知道空間被什麼佔著。
+  const bgm = _spaceInfo?.bgm;
+  const bgmRow = document.getElementById('setSpaceBgmRow');
+  const bgmTxt = document.getElementById('setSpaceBgmText');
+  const bgmBtn = document.getElementById('setSpaceCleanBgm');
+  if (bgmRow && bgmTxt) {
+    if (bgm && bgm.totalFiles) {
+      // web 版舊快取的 Response 沒有 Content-Length（大小未知）→ 只顯示檔數
+      let line = bgm.totalBytes > 0
+        ? t('set.space.bgmStat', { n: bgm.totalFiles, size: fmtBytes(bgm.totalBytes) })
+        : t('set.space.bgmStatNoSize', { n: bgm.totalFiles });
+      if (bgm.unusedFiles) {
+        line += ' · ' + (bgm.unusedBytes > 0
+          ? t('set.space.bgmUnused', { n: bgm.unusedFiles, size: fmtBytes(bgm.unusedBytes) })
+          : t('set.space.bgmUnusedNoSize', { n: bgm.unusedFiles }));
+      }
+      bgmTxt.textContent = line;
+      bgmRow.style.display = '';
+      if (bgmBtn) bgmBtn.style.display = bgm.unusedFiles ? '' : 'none';
+    } else {
+      bgmRow.style.display = 'none';
+    }
+  }
 }
 
 function spacePackName(p) {
   const key = p.key || '';
   const human = (rec, fb) =>
     (rec && (rec[langField(langMode)] || rec.name_tw || rec.name_en || rec.name_jp)) || fb;
+  // 標題給人看（角色名），副標只放「還有意義」的資訊：語音放語言，其餘不放
+  // 原始 pack key——`voice/JP_Hanako`、`lobby/Hanako_home` 對使用者是雜訊。
+  const vf = key.startsWith('voice/') ? key.slice('voice/'.length)
+    : key.startsWith('voice-m4a/') ? key.slice('voice-m4a/'.length) : null;
+  if (vf !== null) {
+    const lang = /^KR_/i.test(vf) ? t('pack.voiceKr') : /^JP_/i.test(vf) ? t('pack.voiceJp') : '';
+    const f = vf.replace(/^(JP|KR|CN|EN|TW)_/i, '');
+    const rec = (typeof studentForLobby === 'function') ? studentForLobby(f) : null;
+    return { title: human(rec, prettyName(f)), sub: lang };
+  }
   if (p.kind === 'lobby') {
     const lk = key.replace(/^lobby\//, '');
     const rec = (typeof studentForLobby === 'function') ? studentForLobby(lk) : null;
-    const title = human(rec, prettyName(lk));
-    return { title, sub: (title === key || title === lk) ? '' : key };
-  }
-  if (p.kind === 'voice') {
-    const f = key.replace(/^voice\//, '').replace(/^(JP|KR|CN|EN|TW)_/i, '');
-    const rec = (typeof studentForLobby === 'function') ? studentForLobby(f) : null;
-    const title = human(rec, prettyName(f));
-    return { title, sub: (title === key) ? '' : key };
+    return { title: human(rec, prettyName(lk)), sub: '' };
   }
   return { title: p.name || key, sub: '' };
 }
@@ -4423,41 +4469,48 @@ function spaceLobbyDisplay(key) {
   const v = (info && info.labels.length) ? `（${info.labels.join('・')}）` : '';
   return base + v;
 }
-// 單表混排：系統包置頂＋大廳（已裝/待裝同一格式，操作欄按狀態顯示 ✕/下載）
+// 一列：名稱 ／ 資訊（key・檔案數・共用） ／ 大小 ／ 操作
 function spaceInstalledRow(p, usedBy) {
   const dn = spacePackName(p);
+  const delTxt = t('set.space.delete');
   const delBtn = p.deletable
-    ? `<button class="spaceDel" data-key="${p.key}" data-i18n-title="set.space.delete" title="刪除">✕</button>`
-    : `<span class="spaceLock" data-i18n-title="set.space.locked" title="必要資源">${ICO.lock}</span>`;
-  const broken = _spaceBroken[p.key]
-    ? `<span class="spaceBroken">${ICO.warn} ${t('set.space.broken')}</span>` : '';
-  const meta = [
-    typeof p.files === 'number' ? t('set.space.files', { n: p.files }) : null,
-    (usedBy[p.key]?.size > 1) ? t('set.space.usedBy', { n: usedBy[p.key].size }) : null,
-  ].filter(Boolean).join(' · ');
-  return `<div class="spaceRow">`
-    + `<span class="spaceName sg-cell">${escapeHtml(dn.title)}</span>`
-    + `<span class="spaceKind sg-cell">${spaceKindLabel(p.kind)}</span>`
-    + `<span class="sg-cell sg-info">${broken}`
-    + (dn.sub ? `<span class="spaceKey">${escapeHtml(dn.sub)}</span> ` : '')
-    + (meta ? `<span class="spaceMeta">${escapeHtml(meta)}</span>` : '')
-    + (p.present ? '' : ` <span class="warn" style="font-size: 14px;">${ICO.warn}</span>`)
-    + `</span>`
+    ? `<button class="spaceDel" data-key="${escapeHtml(p.key)}" title="${escapeHtml(delTxt)}" aria-label="${escapeHtml(delTxt)}">✕</button>`
+    : `<span class="spaceLock" data-i18n-title="set.space.locked" title="${escapeHtml(t('set.space.locked'))}">${ICO.lock}</span>`;
+  const info = [];
+  if (dn.sub) info.push(`<span class="spaceKey">${escapeHtml(dn.sub)}</span>`);
+  if (_spaceBroken[p.key]) info.push(`<span class="spaceBroken">${ICO.warn} ${t('set.space.broken')}</span>`);
+  if (typeof p.files === 'number') {
+    info.push(`<span class="spaceMeta">${escapeHtml(t('set.space.files', { n: p.files }))}</span>`);
+  }
+  if (usedBy[p.key]?.size > 1) {
+    info.push(`<span class="spaceMeta">${escapeHtml(t('set.space.usedBy', { n: usedBy[p.key].size }))}</span>`);
+  }
+  if (!p.present) info.push(`<span class="warn">${ICO.warn}</span>`);
+  return `<div class="spaceRow" data-key="${escapeHtml(p.key)}" title="${escapeHtml(p.key)}">`
+    + `<span class="spaceName sg-cell" title="${escapeHtml(dn.title)}">${escapeHtml(dn.title)}</span>`
+    + `<span class="sg-cell sg-info">${info.join(' ')}</span>`
     + `<span class="spaceSize sg-num">${fmtBytes(p.size)}</span>`
     + `<span class="sg-act">${delBtn}</span>`
     + `</div>`;
 }
+
 function spaceMissingRow(m) {
   const k = m.key;
   const busy = _spaceDownloading.has(k);
-  // 下載鈕與刪除鈕同形（20px 圓形圖示；文字放 title/aria-label，絕不換行撐開 22px 動作格）
+  const pct = _spaceProgress.get(k);
+  // 按鈕與刪除鈕同形（20px 圓形圖示；文字放 title/aria-label，不換行撐開動作格）
   const label = busy ? t('set.space.downloading') : t('set.space.download');
-  return `<div class="spaceRow">`
+  const info = busy
+    ? `<span class="spaceKey">${escapeHtml(pct != null
+        ? t('set.space.dlPct', { pct: Math.round(pct) })
+        : t('set.space.downloading'))}</span>`
+    : `<span class="spaceKey">${escapeHtml(k)}</span>`;
+  return `<div class="spaceRow" data-lobby="${escapeHtml(k)}">`
     + `<span class="spaceName sg-cell">${escapeHtml(spaceLobbyDisplay(k))}</span>`
-    + `<span class="spaceKind sg-cell">${spaceKindLabel('lobby')}</span>`
-    + `<span class="sg-cell sg-info"><span class="spaceKey">${escapeHtml(k)}</span></span>`
+    + `<span class="sg-cell sg-info">${info}</span>`
     + `<span class="spaceSize sg-num">${m.bytes > 0 ? fmtBytes(m.bytes) : '—'}</span>`
-    + `<span class="sg-act"><button class="spaceDl" data-key="${escapeHtml(k)}"${busy ? ' disabled' : ''} title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">⤓</button></span></div>`;
+    + `<span class="sg-act"><button class="spaceDl" data-key="${escapeHtml(k)}"${busy ? ' disabled' : ''} title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${busy ? '…' : '⤓'}</button></span>`
+    + `</div>`;
 }
 
 let _rankDays = 30;
@@ -4498,6 +4551,18 @@ async function renderRankList(force = false) {
   }).join('');
 }
 
+// 群組卡片：標題列（箭頭／名稱／數量·大小）＋內容 grid
+function spaceGroupCard(id, title, rowsHtml, sub, collapsed) {
+  return `<section class="spaceGroup${collapsed ? ' collapsed' : ''}" data-group="${id}">`
+    + `<button class="spaceGroupHead" data-group="${id}" aria-expanded="${collapsed ? 'false' : 'true'}">`
+    + `<span class="sg-arrow" aria-hidden="true">▾</span>`
+    + `<span class="sg-title">${escapeHtml(title)}</span>`
+    + `<span class="sg-sub">${escapeHtml(sub)}</span>`
+    + `</button>`
+    + `<div class="spaceGrid sg-spaces">${rowsHtml}</div>`
+    + `</section>`;
+}
+
 function renderSpaceList() {
   if (!setSpaceList) return;
   const usedBy = spaceUsedBy();
@@ -4507,68 +4572,133 @@ function renderSpaceList() {
   const matchPack = (p) => {
     if (!q) return true;
     const dn = spacePackName(p);
-    return p.key.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)
+    return p.key.toLowerCase().includes(q) || String(p.name || '').toLowerCase().includes(q)
         || dn.title.toLowerCase().includes(q);
   };
   const matchMiss = (m) => !q || m.key.toLowerCase().includes(q)
     || spaceLobbyDisplay(m.key).toLowerCase().includes(q);
   const sortName = (ta, tb) => ta.localeCompare(tb, undefined, { sensitivity: 'base' });
-  // 系統包（core/intro/voice）置頂
-  let sys = packs.filter(p => p.kind !== 'lobby' && matchPack(p));
-  sys = [...sys].sort((a, b) => _spaceSort === 'name'
+  const sortPacks = (arr) => [...arr].sort((a, b) => _spaceSort === 'name'
     ? sortName(spacePackName(a).title, spacePackName(b).title)
     : (b.size - a.size) || a.key.localeCompare(b.key));
-  // 大廳混排：已裝走 pack 資料、待裝走 manifest，同一列格式
-  let lob = [];
-  let missByKey = new Map();
+
+  // 系統包固定 core → meta → intro（大小排序對三列沒有意義）
+  const SYS_ORDER = { core: 0, meta: 1, intro: 2 };
+  const sys = packs.filter(p => p.kind in SYS_ORDER && matchPack(p))
+    .sort((a, b) => SYS_ORDER[a.kind] - SYS_ORDER[b.kind]);
+  const voice = sortPacks(packs.filter(p => (p.kind === 'voice' || p.kind === 'voice-m4a') && matchPack(p)));
+  const bgmPk = sortPacks(packs.filter(p => p.kind === 'bgm' && matchPack(p)));
+  const other = sortPacks(packs.filter(p => !(p.kind in SYS_ORDER)
+    && !['lobby', 'voice', 'voice-m4a', 'bgm'].includes(p.kind) && matchPack(p)));
+
+  // 大廳：已安裝與「可下載」分開兩組。混在一起排序時，近 300 間待裝會把
+  // 已安裝的清單淹掉；分組後預設收合待裝那組，需要時再展開或搜尋。
+  const instLob = [];
+  const missLob = [];
+  const seen = new Set();
   try {
+    const missByKey = new Map();
     for (const m of spaceMissingLobbies()) missByKey.set(m.key, m);
-  } catch {}
-  try {
-    const seen = new Set();
     for (const key of (ORDER || [])) {
       try { if (lobbyGroupInfo(key).isDup) continue; } catch { continue; }
       seen.add(key);
       const p = byKey.get('lobby/' + key);
       const m = missByKey.get(key);
-      // lobby 包在本地 → 已裝列；lobby 包缺席 → 待裝列（含一起補語音）
-      if (p && matchPack(p)) lob.push({ t: 'in', p });
-      else if (!p && m && matchMiss(m)) lob.push({ t: 'out', m });
-    }
-    for (const m of missByKey.values()) {
-      if (seen.has(m.key) || !matchMiss(m)) continue;
-      lob.push({ t: 'out', m });
+      if (p) { if (matchPack(p)) instLob.push(p); }
+      else if (m && matchMiss(m)) missLob.push(m);
     }
     // manifest 沒列但本地有的 lobby 包（資源複本等）也顯示，避免刪不掉
     for (const p of packs) {
       if (p.kind !== 'lobby' || !matchPack(p)) continue;
       const lk = p.key.replace(/^lobby\//, '');
-      if (!seen.has(lk) && !lob.some(r => r.t === 'in' && r.p === p)) lob.push({ t: 'in', p });
+      if (!seen.has(lk)) instLob.push(p);
     }
   } catch {}
-  lob = lob.sort((a, b) => {
-    const na = a.t === 'in' ? spacePackName(a.p).title : spaceLobbyDisplay(a.m.key);
-    const nb = b.t === 'in' ? spacePackName(b.p).title : spaceLobbyDisplay(b.m.key);
-    if (_spaceSort === 'name') return sortName(na, nb);
-    const sa = a.t === 'in' ? a.p.size : a.m.bytes;
-    const sb = b.t === 'in' ? b.p.size : b.m.bytes;
-    return (sb - sa) || sortName(na, nb);
-  });
-  let html = sys.map(p => spaceInstalledRow(p, usedBy)).join('')
-    + lob.map(r => r.t === 'in' ? spaceInstalledRow(r.p, usedBy) : spaceMissingRow(r.m)).join('');
-  setSpaceList.innerHTML = html || `<div style="font-size: 14px;color:#9aa4e0;padding:8px;" class="sg-empty">${t('set.space.empty')}</div>`;
+  const sortRows = (arr, nameOf, sizeOf) => arr.sort((a, b) => _spaceSort === 'name'
+    ? sortName(nameOf(a), nameOf(b))
+    : (sizeOf(b) - sizeOf(a)) || sortName(nameOf(a), nameOf(b)));
+  sortRows(instLob, p => spacePackName(p).title, p => p.size);
+  sortRows(missLob, m => spaceLobbyDisplay(m.key), m => m.bytes);
+
+  const sumSize = (arr) => arr.reduce((a, p) => a + (p.size || 0), 0);
+  const groups = [];
+  if (sys.length) {
+    groups.push({
+      id: 'system', title: t('set.space.groupSystem'),
+      rows: sys.map(p => spaceInstalledRow(p, usedBy)),
+      sub: t('set.space.groupMeta', { n: sys.length, size: fmtBytes(sumSize(sys)) }),
+    });
+  }
+  if (voice.length) {
+    groups.push({
+      id: 'voice', title: t('set.space.groupVoice'),
+      rows: voice.map(p => spaceInstalledRow(p, usedBy)),
+      sub: t('set.space.groupMeta', { n: voice.length, size: fmtBytes(sumSize(voice)) }),
+    });
+  }
+  if (instLob.length) {
+    groups.push({
+      id: 'lobby', title: t('set.space.groupLobby'),
+      rows: instLob.map(p => spaceInstalledRow(p, usedBy)),
+      sub: t('set.space.groupMeta', { n: instLob.length, size: fmtBytes(sumSize(instLob)) }),
+    });
+  }
+  if (missLob.length) {
+    // 待裝：大小是 manifest 標稱下載量（含語音），不是目前佔用
+    const missBytes = missLob.reduce((a, m) => a + (m.bytes || 0), 0);
+    groups.push({
+      id: 'missing', title: t('set.space.groupMissing'),
+      rows: missLob.map(spaceMissingRow),
+      sub: t('set.space.groupMeta', { n: missLob.length, size: fmtBytes(missBytes) }),
+    });
+  }
+  if (bgmPk.length) {
+    groups.push({
+      id: 'bgm', title: t('set.space.groupBgm'),
+      rows: bgmPk.map(p => spaceInstalledRow(p, usedBy)),
+      sub: t('set.space.groupMeta', { n: bgmPk.length, size: fmtBytes(sumSize(bgmPk)) }),
+    });
+  }
+  if (other.length) {
+    groups.push({
+      id: 'other', title: t('set.space.groupOther'),
+      rows: other.map(p => spaceInstalledRow(p, usedBy)),
+      sub: t('set.space.groupMeta', { n: other.length, size: fmtBytes(sumSize(other)) }),
+    });
+  }
+
+  // 搜尋時一律展開（收合會把命中的列藏起來）
+  const html = groups.map(g => spaceGroupCard(g.id, g.title, g.rows.join(''), g.sub,
+    !q && _spaceCollapsed.has(g.id))).join('');
+  setSpaceList.innerHTML = html || `<div class="sg-empty">${t('set.space.empty')}</div>`;
   // 動態注入的列帶 data-i18n-title（刪除/必要資源 tooltip）——applyI18n 只在
   // 初始化與切語言時跑，不補這行就會永遠停在模板裡的繁中原文。
   applyI18n(setSpaceList);
-  for (const btn of setSpaceList.querySelectorAll('.spaceDel')) {
-    btn.addEventListener('click', async () => {
-      const key = btn.dataset.key;
+}
+
+// ---- 列表事件（委派一次；列會整個重繪，逐列綁定會累積 listener）----
+if (setSpaceList) {
+  setSpaceList.addEventListener('click', async (e) => {
+    const head = e.target.closest('.spaceGroupHead');
+    if (head) {
+      const id = head.dataset.group;
+      const sec = head.parentElement;
+      if (_spaceCollapsed.has(id)) _spaceCollapsed.delete(id);
+      else _spaceCollapsed.add(id);
+      const collapsed = _spaceCollapsed.has(id);
+      sec?.classList.toggle('collapsed', collapsed);
+      head.setAttribute('aria-expanded', String(!collapsed));
+      return;
+    }
+    const del = e.target.closest('.spaceDel');
+    if (del) {
+      const key = del.dataset.key;
       if (!await showConfirm({
         title: t('set.space.confirmTitle'),
         msg: t('set.space.confirm', { key }),
         ok: t('set.space.delete'), danger: true,
       })) return;
-      btn.disabled = true;
+      del.disabled = true;
       try {
         await window.ba.assetsManageDelete([key]);
         _spaceBroken = {};
@@ -4576,25 +4706,52 @@ function renderSpaceList() {
         await refreshSpaceManager();
         await refreshSettingsAssets();
       } finally {
-        btn.disabled = false;
+        del.disabled = false;
       }
-    });
-  }
-  for (const btn of setSpaceList.querySelectorAll('.spaceDl')) {
-    btn.addEventListener('click', async () => {
-      const key = btn.dataset.key;
-      if (!key || _spaceDownloading.has(key)) return;
-      _spaceDownloading.add(key);
-      renderSpaceList();
-      try { await ensureLobbyAssets(key); }
-      catch (e) { console.warn('[space] 下載大廳失敗', key, e?.message); }
-      finally { _spaceDownloading.delete(key); }
-      _spaceBroken = {};
-      setSpaceMessage('');
-      await refreshSpaceManager();
-      await refreshSettingsAssets();
-    });
-  }
+      return;
+    }
+    const dl = e.target.closest('.spaceDl');
+    if (!dl) return;
+    const key = dl.dataset.key;
+    if (!key || _spaceDownloading.has(key)) return;
+    _spaceDownloading.add(key);
+    _spaceProgress.delete(key);
+    renderSpaceList();
+    try {
+      // quiet：不彈中央遮罩（會蓋住設定頁）；進度就地更新在這一列
+      await ensureLobbyAssets(key, {
+        quiet: true,
+        onProgress: (p) => updateSpaceProgress(key, p),
+      });
+    } catch (err) {
+      console.warn('[space] 下載大廳失敗', key, err?.message);
+    } finally {
+      _spaceDownloading.delete(key);
+      _spaceProgress.delete(key);
+    }
+    _spaceBroken = {};
+    setSpaceMessage('');
+    await refreshSpaceManager();
+    await refreshSettingsAssets();
+  });
+}
+
+// 就地更新某一列的下載百分比（節流：chunk 級事件不重繪整個列表）
+let _spaceProgAt = 0;
+function updateSpaceProgress(key, p) {
+  if (p?.percent != null) _spaceProgress.set(key, p.percent);
+  const now = performance.now();
+  if (now - _spaceProgAt < 120) return;
+  _spaceProgAt = now;
+  if (!setSpaceList) return;
+  let row = null;
+  try { row = setSpaceList.querySelector(`.spaceRow[data-lobby="${CSS.escape(key)}"]`); } catch {}
+  if (!row) return;
+  const info = row.querySelector('.sg-info');
+  if (!info) return;
+  const pct = _spaceProgress.get(key);
+  info.innerHTML = `<span class="spaceKey">${escapeHtml(
+    pct != null ? t('set.space.dlPct', { pct: Math.round(pct) }) : t('set.space.downloading'))}</span>`;
 }
 
 async function spaceDeleteKeys(keys) {
@@ -4686,7 +4843,7 @@ function renderWallLobbyList(current) {
   if (!list) return;
   const q = (_wallLobbyQuery || '').toLowerCase();
   const frag = document.createDocumentFragment();
-  const mkRow = (key, label, ico) => {
+  const mkRow = (key, label, ico, hint) => {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'sb-item' + ((key || '') === (current || '') ? ' cur' : '');
@@ -4702,18 +4859,33 @@ function renderWallLobbyList(current) {
     name.className = 'name';
     name.textContent = label;
     b.appendChild(name);
+    // 同名不同造型（labels 為空）時補上 key，否則列表上兩列「栗村愛莉」分不出來
+    if (hint) {
+      const h = document.createElement('span');
+      h.className = 'sb-keyhint';
+      h.textContent = hint;
+      h.title = hint;
+      b.appendChild(h);
+    }
     return b;
   };
+  // 重名統計（造型標籤為空時才需要 keyhint）
+  const nameCount = {};
+  for (const key of ORDER) {
+    const d = (studentDisplay(studentForLobby(key)) || prettyName(key)).toLowerCase();
+    nameCount[d] = (nameCount[d] || 0) + 1;
+  }
   if (!q) frag.appendChild(mkRow('', t('set.wall.followPlayer'), null));
   let shown = 0;
   for (const key of ORDER) {
     const info = lobbyGroupInfo(key);
     const rec = studentForLobby(key);
-    const label = (studentDisplay(rec) || prettyName(key))
-      + (info.labels.length ? ' · ' + info.labels.join(' ') : '');
+    const disp = studentDisplay(rec) || prettyName(key);
+    const label = disp + (info.labels.length ? ' · ' + info.labels.join(' ') : '');
     if (q && !(label.toLowerCase().includes(q) || key.toLowerCase().includes(q))) continue;
     const ico = STUDENT_ICONS[costumeIconKey(key) || info.core] || STUDENT_ICONS[info.core];
-    frag.appendChild(mkRow(key, label, ico));
+    const hint = (!info.labels.length && (nameCount[disp.toLowerCase()] || 0) > 1) ? key : '';
+    frag.appendChild(mkRow(key, label, ico, hint));
     shown++;
   }
   if (q && shown === 0) {
@@ -7597,22 +7769,50 @@ function fadeOutLoadingScreen() {
 
 let _assetInfo = null; // 全域快取（供串流模式隨播隨下）
 
-async function ensureLobbyAssets(lobbyName) {
+// 資源包的顯示名稱：raw key（lobby/Hanako_home、voice/JP_Airi）對使用者沒有
+// 意義，下載進度一律經過這裡換成「花子」「Airi（日語）」這種說法。
+function packLabel(key) {
+  const k = String(key || '');
+  if (!k) return '';
+  if (k === 'core') return t('pack.core');
+  if (k === 'meta') return t('pack.meta');
+  if (k === 'intro') return t('pack.intro');
+  if (k.startsWith('lobby/')) {
+    const lk = k.slice('lobby/'.length);
+    try { return spaceLobbyDisplay(lk) || lk; } catch { return lk; }
+  }
+  if (k.startsWith('voice/') || k.startsWith('voice-m4a/')) {
+    const f = k.startsWith('voice-m4a/') ? k.slice('voice-m4a/'.length) : k.slice('voice/'.length);
+    const name = f.replace(/^(JP|KR|CN|EN|TW)_/i, '');
+    const lang = /^KR_/i.test(f) ? t('pack.voiceKr') : /^JP_/i.test(f) ? t('pack.voiceJp') : '';
+    return lang ? `${name}（${lang}）` : name;
+  }
+  if (k.startsWith('bgm/')) return t('pack.bgm');
+  return k;
+}
+
+async function ensureLobbyAssets(lobbyName, opts = {}) {
   if (!window.ba?.ensureLobby || !_assetInfo?.packages || !_assetInfo?.lobbies) return;
   const need = _assetInfo.lobbies[lobbyName];
   if (!need) return;
+  const quiet = opts.quiet === true;   // 管理空間：不彈遮罩，進度就地顯示
+  const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
   // 快速檢查：若本地已齊，ensureLobby 會立刻返回 cached
   const loading = document.getElementById('loading');
   const loadingText = document.getElementById('loadingText');
   let shown = false;
   const showLoading = (msg) => {
+    if (quiet) return;
     if (!shown) { loading.classList.add('show'); shown = true; }
     if (loadingText) loadingText.textContent = msg;
   };
   // 作用域內註冊、用完即刪（之前每次進大廳註冊一個不清，之後任何下載
   // 都會彈出中央遮罩擋住畫面）
   const onLobbyProgress = (p) => {
-    showLoading(t('dl.lobbyDl', { pkg: p.package, i: p.index + 1, n: p.total, pct: p.percent || 0 }));
+    if (quiet) { try { onProgress?.(p); } catch {} return; }
+    showLoading(t('dl.lobbyDl', {
+      pkg: packLabel(p.package), i: (p.index ?? 0) + 1, n: p.total ?? 1, pct: p.percent || 0,
+    }));
   };
   window.ba.onDownloadProgress?.(onLobbyProgress);
   try {
@@ -7685,13 +7885,13 @@ async function ensureReady() {
         bootText.textContent = t('dl.stalled', { i: p.attempt ?? 2, n: p.total ?? 3 });
         return;
       }
-      if (p.status === 'extracting') { bootText.textContent = t('dl.extracting', { pkg: p.package }); return; }
-      if (p.status === 'done') { bootText.textContent = t('dl.packDone', { pkg: p.package }); return; }
+      if (p.status === 'extracting') { bootText.textContent = t('dl.extracting', { pkg: packLabel(p.package) }); return; }
+      if (p.status === 'done') { bootText.textContent = t('dl.packDone', { pkg: packLabel(p.package) }); return; }
       if (p.status === 'error') { bootText.textContent = friendlyErr(p.error) || t('dl.giveUp', { n: 3 }); return; }
       if (p.status !== 'downloading') return;
-      if (p.migrated) { bootText.textContent = t('dl.reuse', { pkg: p.package }); return; }
+      if (p.migrated) { bootText.textContent = t('dl.reuse', { pkg: packLabel(p.package) }); return; }
       wpStageThrottled('downloading');
-      let line = t('dl.downloading', { pkg: p.package, i: p.index ?? 1, n: p.total ?? 1 });
+      let line = t('dl.downloading', { pkg: packLabel(p.package), i: (p.index ?? 0) + 1, n: p.total ?? 1 });
       if (p.percent != null) line += ` ${p.percent}%`;
       else if (p.received) line += ` ${fmtBytes(p.received)}`;
       const bps = p.bps || (p.received ? rate(p.received) : 0);
@@ -7731,7 +7931,7 @@ async function ensureReady() {
         ? '' : `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`;
       const cb = (p) => {
         if (!p) return;
-        if (p.status === 'extracting') { bootText.textContent = t('dl.extracting', { pkg: p.package }); return; }
+        if (p.status === 'extracting') { bootText.textContent = t('dl.extracting', { pkg: packLabel(p.package) }); return; }
         if (p.status !== 'downloading') return;
         wpStageThrottled('downloading');
         const now = performance.now();
@@ -7740,7 +7940,7 @@ async function ensureReady() {
           emaBps = emaBps ? emaBps * 0.7 + inst * 0.3 : inst;
         }
         if (p.downloaded != null) last = { t: now, b: p.downloaded };
-        let line = t('dl.downloading', { pkg: p.package, i: (p.index ?? 0) + 1, n: p.total ?? 1 });
+        let line = t('dl.downloading', { pkg: packLabel(p.package), i: (p.index ?? 0) + 1, n: p.total ?? 1 });
         if (p.percent != null) line += ` ${p.percent}%`;
         if (emaBps > 4096) {
           line += ` · ${(emaBps / 1048576).toFixed(1)} MB/s`;
@@ -8782,6 +8982,31 @@ async function init() {
     if (r.skipped) { setSpaceMessage(t('set.space.orphansSkipped')); return; }
     setSpaceMessage(t('set.space.orphans', { n: r.removed || 0 }));
   });
+  // 未使用的 BGM（舊 assets-player 留下的整份目錄）：先確認再刪
+  document.getElementById('setSpaceCleanBgm')?.addEventListener('click', async () => {
+    const bgm = _spaceInfo?.bgm;
+    if (!bgm?.unusedFiles) return;
+    if (!await showConfirm({
+      title: t('set.space.bgmConfirmTitle'),
+      msg: bgm.unusedBytes > 0
+        ? t('set.space.bgmConfirm', { n: bgm.unusedFiles, size: fmtBytes(bgm.unusedBytes) })
+        : t('set.space.bgmConfirmNoSize', { n: bgm.unusedFiles }),
+      ok: t('set.space.bgmClean'), danger: true,
+    })) return;
+    // web 版需要 BGM 對照表才知道哪些曲子還被已裝大廳引用；Electron 自己讀 CSV
+    let bgmByLobby = null;
+    try {
+      bgmByLobby = {};
+      for (const k of Object.keys(BGM_MAP || {})) bgmByLobby[k] = BGM_MAP[k];
+    } catch {}
+    let r = null;
+    try { r = await window.ba.assetsCleanBgm?.({ bgmByLobby }); } catch { r = null; }
+    await refreshSpaceManager();
+    if (!r || r.skipped) { setSpaceMessage(t('set.space.bgmFail'), true); return; }
+    setSpaceMessage((r.bytes || 0) > 0
+      ? t('set.space.bgmDone', { n: r.removed || 0, size: fmtBytes(r.bytes || 0) })
+      : t('set.space.bgmDoneNoSize', { n: r.removed || 0 }));
+  });
 
 // ---- 完整性檢查：缺檔的包去掉 sha（保留檔案清單），下次下載自動補回 ----
 async function onSpaceVerify() {
@@ -8892,7 +9117,7 @@ async function onSpaceVerify() {
         // 網頁版跨版本：把 sha 未變的包從舊快取搬過來（純本機，無網路）。
         // 不講清楚會被誤認成「改版又要重下 4GB」。
         setAssetsProgress.style.display = 'block';
-        setProgressText.textContent = t('dl.reuse', { pkg: p.package });
+        setProgressText.textContent = t('dl.reuse', { pkg: packLabel(p.package) });
         if (p.percent != null) { setProgressFill.style.width = p.percent + '%'; setProgressAria(p.percent); }
       } else if (p.status === 'downloading') {
         setAssetsProgress.style.display = 'block';

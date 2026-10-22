@@ -355,8 +355,7 @@
     .btnTxt.primary:hover { background: linear-gradient(135deg, rgba(116,168,255,.7), rgba(90,136,250,.62)); }
     .btnTxt:disabled { opacity: .55; cursor: default; pointer-events: none; }
 
-    /* 管理空間列表 */
-    #setSpaceList { border: 1px solid rgba(255,255,255,.1); border-radius: 8px; padding: 4px; }
+    /* 管理空間：工具列 + 分組卡片（名稱／資訊／大小／操作四欄，群組內對齊） */
     .spaceToolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
     .spaceToolbar input[type="search"], .spaceToolbar select {
       background: rgba(255,255,255,.06); color: #e8ecff;
@@ -367,11 +366,43 @@
     .spaceToolbar input[type="search"]::placeholder { color: rgba(210,220,255,.65); }
     .spaceToolbar select option { background: #141a38; }
     .spaceToolbar .btnTxt { padding: 7px 14px; font-size: 14px; }
+    .spaceToolbar .spaceGrow { flex: 1; }
+    .spaceOrphan { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: #c6d2f5; }
+    .spaceOrphan .btnTxt { padding: 5px 12px; }
+    .spaceSummary { font-size: 14px; color: #c6d2f5; line-height: 1.6; }
+    .spaceBgmRow {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      font-size: 14px; color: #e8d9b0; background: rgba(232,194,104,.07);
+      border: 1px solid rgba(232,194,104,.22); border-radius: 8px;
+      padding: 7px 10px; margin: 6px 0;
+    }
+    .spaceBgmRow .btnTxt { padding: 5px 12px; }
     #setSpaceMsg { font-size: 14px; color: #8fd49c; margin: 4px 0; min-height: 0; }
     #setSpaceMsg.warn { color: #e8c268; }
     .spaceRow { display: contents; }
     .spaceGrid { display: grid; column-gap: 10px; row-gap: 3px; align-items: center; }
-    .sg-spaces { grid-template-columns: minmax(90px, 1.4fr) auto minmax(0, 2fr) auto 22px; }
+    .sg-spaces { --space-cols: minmax(110px, 220px) minmax(0, 1fr) auto 22px; grid-template-columns: var(--space-cols); }
+    .spaceGroup {
+      border: 1px solid rgba(255,255,255,.09); border-radius: 10px;
+      margin-bottom: 8px; background: rgba(255,255,255,.02); overflow: hidden;
+    }
+    .spaceGroupHead {
+      width: 100%; display: flex; align-items: center; gap: 8px;
+      padding: 8px 14px 8px 10px; background: transparent; border: 0; font: inherit;
+      font-size: 14px; color: #dbe4ff; text-align: left; cursor: var(--cur-img) var(--cur-hx) var(--cur-hy), pointer;
+    }
+    .spaceGroupHead:hover { background: rgba(255,255,255,.05); }
+    .spaceGroupHead .sg-arrow { width: 12px; color: #8f9ac8; transition: transform .15s ease; }
+    .spaceGroup.collapsed .spaceGroupHead .sg-arrow { transform: rotate(-90deg); }
+    .spaceGroupHead .sg-title { font-weight: 600; letter-spacing: .02em; }
+    .spaceGroupHead .sg-sub { margin-left: auto; color: #8f9ac8; font-size: 13px; font-variant-numeric: tabular-nums; }
+    .spaceGroup.collapsed .sg-spaces { display: none; }
+    .spaceGroup .sg-spaces { padding: 2px 8px 8px; }
+    .spaceGroup .spaceRow {
+      grid-column: 1 / -1; display: grid; grid-template-columns: var(--space-cols);
+      column-gap: 10px; align-items: center; padding: 3px 2px; border-radius: 6px;
+    }
+    .spaceGroup .spaceRow:hover { background: rgba(255,255,255,.045); }
     .sg-rank { grid-template-columns: 32px minmax(100px, 1.5fr) minmax(0, 1fr) auto auto auto; }
     .sg-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sg-num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; color: #9aa4e0; font-size: 14px; }
@@ -380,7 +411,7 @@
     .spaceMain { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
     .spaceName { color: #e8ecff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .spaceKind { font-size: 14px; color: #9aa4e0; flex-shrink: 0; }
-    .spaceKey { font-size: 14px; color: #8f99c8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
+    .spaceKey { font-size: 13px; color: #7f89b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
     .spaceMeta { font-size: 14px; color: #9aa4e0; flex-shrink: 0; }
     .spaceBroken { font-size: 14px; color: #e8c268; flex-shrink: 0; }
     .rankNo { font-size: 14px; color: #9aa4e0; width: 30px; flex: none; text-align: center; font-variant-numeric: tabular-nums; }
@@ -415,6 +446,9 @@
     #setTabSpace, #setTabRank { display: flex; flex-direction: column; }
     #setTabSpace[style*="none"], #setTabRank[style*="none"] { display: none; }
     #setSpaceList, #setRankList { flex: 1; min-height: 120px; }
+    #setSpaceList::-webkit-scrollbar { width: 8px; }
+    #setSpaceList::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 4px; }
+    #setSpaceList::-webkit-scrollbar-track { background: transparent; }
     #settingsPanel::-webkit-scrollbar { width: 8px; }
     /* 設定視窗放大＋文字提亮（蓋住約八成版面，底襯不透光避免被大廳洗掉） */
     #settingsPanel {
@@ -446,6 +480,9 @@
       border:none; border-radius:6px; padding:7px 10px; outline:none; }
     .wall-search::placeholder { color: rgba(210,220,255,.5); }
     .wall-list { max-height: 235px; overflow-y: auto; background: rgba(10,14,40,.25); border-radius: 6px; padding: 3px 2px; }
+    .wall-list::-webkit-scrollbar { width: 8px; }
+    .wall-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 4px; }
+    .wall-list::-webkit-scrollbar-track { background: transparent; }
     #settingsPanel::-webkit-scrollbar { width: 8px; }
     #settingsPanel::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 4px; }
     .set-section { border-top: 1px solid rgba(130,160,255,.14); padding-top: 12px; margin-top: 14px; }
@@ -985,7 +1022,7 @@
         <div class="panel-row">
           <span class="lbl" data-i18n="set.wall.lobby">桌布大廳</span>
         </div>
-        <input type="search" id="setWallSearch" data-i18n-aria-label="a11y.searchStudents" data-i18n-ph="set.wall.search" placeholder="搜尋角色…">
+        <input type="search" id="setWallSearch" class="wall-search" data-i18n-aria-label="a11y.searchStudents" data-i18n-ph="set.wall.search" placeholder="搜尋角色…">
         <div id="setWallList" class="wall-list" style="margin-top:6px;"></div>
         <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setWallSoundCk"> <span data-i18n="set.wall.sound">桌布播放音樂</span></label>
         <label class="ck" style="margin:6px 0;"><input type="checkbox" id="setWallInteractCk"> <span data-i18n="set.wall.interact">互動模式（桌布可點擊）</span></label>
@@ -1006,10 +1043,10 @@
     </div>
 
     <div id="setTabSpace" style="display:none;">
-      <div id="setSpaceSummary" style="font-size: 14px; color:#c6d2f5; margin-bottom:4px;"></div>
+      <div id="setSpaceSummary" class="spaceSummary"></div>
       <div id="setSpaceMsg"></div>
       <div class="spaceToolbar">
-        <input type="search" id="setSpaceSearch" data-i18n-aria-label="a11y.sortBy" data-i18n-ph="set.space.search" placeholder="搜尋資源包…">
+        <input type="search" id="setSpaceSearch" data-i18n-aria-label="set.space.search" data-i18n-ph="set.space.search" placeholder="搜尋資源包…">
         <select id="setSpaceSort" data-i18n-aria-label="a11y.sortBy">
           <option value="size" data-i18n="set.space.sortSize">大小↓</option>
           <option value="name" data-i18n="set.space.sortName">名稱</option>
@@ -1019,12 +1056,17 @@
       <div class="spaceToolbar">
         <button id="setSpaceDelLobbies" class="btnTxt" data-i18n="set.space.delLobbies">刪全部大廳包</button>
         <button id="setSpaceDelOtherVoice" class="btnTxt" data-i18n="set.space.delOtherVoice">刪另一語言語音</button>
+        <span class="spaceGrow"></span>
+        <span class="spaceOrphan" id="setSpaceOrphanRow" style="display:none">
+          <span id="setSpaceOrphans"></span>
+          <button id="setSpaceCleanOrphans" class="btnTxt" data-i18n="set.space.cleanOrphans">清除</button>
+        </span>
       </div>
-      <div class="spaceToolbar" id="setSpaceOrphanRow" style="display:none">
-        <span id="setSpaceOrphans" style="font-size: 14px; color:#c6d2f5;"></span>
-        <button id="setSpaceCleanOrphans" class="btnTxt" data-i18n="set.space.cleanOrphans">清除</button>
+      <div class="spaceBgmRow" id="setSpaceBgmRow" style="display:none;">
+        <span id="setSpaceBgmText"></span>
+        <button id="setSpaceCleanBgm" class="btnTxt" data-i18n="set.space.bgmClean">清除</button>
       </div>
-      <div id="setSpaceList" class="spaceGrid sg-spaces" style="margin-top:8px; overflow-y:auto;"></div>
+      <div id="setSpaceList" style="margin-top:8px; overflow-y:auto;"></div>
     </div>
 
     <div id="setTabRank" style="display:none;">
