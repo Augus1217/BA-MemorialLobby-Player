@@ -1350,6 +1350,9 @@ let SUBTITLES = null;
 let CHAR_PROFILES = null;   // char_profiles.json（角色檔案/簡介，LocalizeCharProfile）
 // lobby_timelines.json：BA PlayableDirector 的 spine 播放軌道（每 lobby 多段開場排程）
 let TIMELINES = null;
+// lobby_spine_pools.json：主 SpineBase 序列化的 idle / idleBaseRandom clip pool
+// （PlayBaseRandomClip 只為這份 pool 開隨機 coroutine；不是所有 PlayMode=3）
+let POOLS = null;
 // DialogType per voice (assets/data/lobby_dialog_types.json, from the GL
 // CharacterDialogExcel table): "Talk" (Lobby_balloon) / "Think" (Lobby_balloon2)
 // / "UITalk" (Common_Balloon_Type2). Missing voice -> "Talk" (newest JP-only
@@ -2438,21 +2441,109 @@ function endPat() {
   log('摸頭結束');
 }
 
+// ---- BaseRandom 待機點綴（反組譯 SpineBase.PlayBaseRandomClip，0x34D2004）----
+// 遊戲對 `idleBaseRandomClipPool` 的每個 clip 各開一條無限 coroutine：
+//   1. 依 SpineClip 隨機欄位等延遲（0=Immediate、1=Random、2=DelayedRandom）
+//   2. 條件 IsInteractive() && IsIdle(true) && !IsPressing 才播；
+//      BlockInteractionOnPlay=true 的 clip 整段持有 BlockInteraction
+//   3. 播 Random.Range(AddRandomLoopMin, AddRandomLoopMax+1)+1 次（一律非 loop）
+//   4. 結束後重新等下一輪
+// pool 真值＝主 SpineBase 序列化的 idleBaseRandomClipPool（lobby_spine_pools.json）；
+// 不是「所有 PlayMode=3」（例：CH0166 的 Idle_01_R 是 PlayMode=3 但不在 pool）。
+let baseRandomJobs = [];
+const baseRandomLog = [];
+const baseRandomOff = (location.search + location.hash).includes('baseRandomOff=1');
+const baseRandomManual = (location.search + location.hash).includes('brManual=1');
+
+function randIntRange(a, b) {   // Unity Random.Range(int,int) = [min, max)
+  const lo = Math.ceil(Number(a) || 0), hi = Math.ceil(Number(b) || 0);
+  return hi <= lo ? lo : lo + Math.floor(Math.random() * (hi - lo));
+}
+function baseRandomDelayMs(cfg, extraMs = 0) {
+  const min = (Number.isFinite(cfg.RandomDelayMin) ? cfg.RandomDelayMin : 5) * 1000;
+  const max = (Number.isFinite(cfg.RandomDelayMax) ? cfg.RandomDelayMax : 15) * 1000;
+  const r = max > min ? min + Math.random() * (max - min) : min;
+  return Math.max(0, r + extraMs);
+}
+function baseRandomInitialDelayMs(cfg) {
+  const mode = cfg.RandomTimingIntroDelayMode ?? 1;
+  if (mode === 0) return 0;
+  return baseRandomDelayMs(cfg, mode === 2 ? (cfg.IntroDelayDuration || 0) * 1000 : 0);
+}
+function baseRandomPool() {
+  const p = POOLS && POOLS[currentLobby];
+  if (p && Array.isArray(p.baseRandom)) return p.baseRandom.filter(n => has(n));
+  // 舊 pack 沒有 pool 檔：只排非阻擋的 PlayMode=3 clip，避免加上遊戲沒有的
+  // 隨機擋輸入（過渡期；新 release 後走上面的真值 pool）。
+  const L = CLIP_GRAPH && CLIP_GRAPH[currentLobby];
+  if (!L) return [];
+  return Object.keys(L).filter(n => L[n] && L[n].PlayMode === 3 && !L[n].BlockInteractionOnPlay && has(n));
+}
+function stopBaseRandom() {
+  for (const j of baseRandomJobs) clearTimeout(j.timer);
+  baseRandomJobs = [];
+}
+function startBaseRandom(force = false) {
+  stopBaseRandom();
+  if (baseRandomOff || (baseRandomManual && !force) || !spine) return;
+  for (const name of baseRandomPool()) {
+    const cfg = clipCfg(name);
+    if (!cfg) continue;
+    const job = { name, cfg, lobby: currentLobby, timer: 0 };
+    baseRandomJobs.push(job);
+    job.timer = setTimeout(() => runBaseRandomJob(job), baseRandomInitialDelayMs(cfg));
+  }
+}
+function ensureBaseRandom() {
+  if (baseRandomOff) return;
+  if (baseRandomJobs.length && baseRandomJobs[0].lobby === currentLobby) return;
+  startBaseRandom();
+}
+function runBaseRandomJob(job) {
+  if (!spine || job.lobby !== currentLobby) return;
+  const cfg = job.cfg;
+  const ok = !exporting && !preview && !state.introBlock && !state.busy && !dialogActive &&
+             !ikDrag && !pressSess && isInteractionAvailable() && isIdleForInteraction();
+  if (!ok) { job.timer = setTimeout(() => runBaseRandomJob(job), Math.max(250, baseRandomDelayMs(cfg))); return; }
+  const loopCount = randIntRange(cfg.AddRandomLoopMin || 0, (cfg.AddRandomLoopMax || 0) + 1) + 1;
+  const anim = spine.state.data.skeletonData.findAnimation(job.name);
+  const durMs = Math.max(50, ((anim && anim.duration) || 0) * 1000);
+  const block = !!cfg.BlockInteractionOnPlay;
+  const key = 'baserandom:' + job.name;
+  const log = (ev) => {
+    baseRandomLog.push({ t: performance.now(), ev, name: job.name, track: cfg.Track, block });
+    if (baseRandomLog.length > 200) baseRandomLog.shift();
+  };
+  log('play');
+  let i = 0;
+  const finish = () => {
+    if (block) blockInteraction(key, false);
+    log('end');
+    job.timer = setTimeout(() => runBaseRandomJob(job), baseRandomDelayMs(cfg));
+  };
+  const step = () => {
+    if (!spine || job.lobby !== currentLobby) { if (block) blockInteraction(key, false); return; }
+    if (exporting || preview || state.busy || dialogActive) { finish(); return; }
+    if (block) { if (!state.blockList.includes(key)) blockInteraction(key, true); }
+    else if (!isInteractionAvailable() || !isIdleForInteraction()) { finish(); return; }
+    const track = cfg.Track || 1;
+    // 遊戲：SetEmptyAnimation(track, 0) → AddAnimation(track, clip, false, 0.01)
+    spine.state.setEmptyAnimation(track, 0);
+    const e = setAnimationWithClipMix(track, job.name, false);
+    if (e) e.delay = 0.01;
+    i++;
+    // 每一次（含最後一次）都要撐完整個 clip 長度；遊戲是
+    // for i<loopCount { AddAnimation; WaitForSeconds(ClipDuration+buffer) }，
+    // 最後一輪也在 loop 內 —— block 要持有到最後一輪播完才 BlockInteraction(false)。
+    if (i < loopCount) job.timer = setTimeout(step, durMs + 10);
+    else job.timer = setTimeout(finish, durMs + 10);
+  };
+  step();
+}
 function scheduleAutonomy() {
-  clearTimeout(state.autonomy);
-  state.autonomy = null;
-  // 隨機眨眼（遊戲 Eye_Close_01：Track 3, PlayMode=RandomTiming, FM=PlayIdle）。
-  // 僅在閒置無互動時排程；gesture 開始會 clearTimers() 取消，結束後再恢復。
-  if (!spine || state.introBlock) return;
-  if (state.busy || state.blockInteractionOnPlay) return;
-  if (!has('Eye_Close_01')) return;
-  state.autonomy = setTimeout(() => {
-    if (!spine || state.busy || state.introBlock) return;
-    if (state.blockInteractionOnPlay || !has('Eye_Close_01')) return;
-    setAnimationWithClipMix(3, 'Eye_Close_01', false);
-    const d = spine.state.data.skeletonData.findAnimation('Eye_Close_01');
-    state.autonomy = setTimeout(scheduleAutonomy, (d ? d.duration : 0.4) * 1000 + 700);
-  }, 1800 + Math.random() * 4200);
+  // BaseRandom 是常駐排程（互動期間只延後、不取消）；這裡確保 lobby 載入後
+  // 或任何路徑把它清掉時會重新接上。舊版隨機眨眼已由 pool 內的 Eye_Close 接手。
+  ensureBaseRandom();
 }
 
 // ---- idle clip switching (reversed PortraitSpineCharacter.set_ClipToPlayOnIdle) ----
@@ -2817,6 +2908,7 @@ function playStart() {
     startBgSequence();
   }
   syncSkipBtn();
+  ensureBaseRandom();   // introBlock 期間 job 會自行等待，不會提前播
 }
 
 // ---- MemoryLobbySkip (reversed UILobbySpineController.MemoryLobbySkip) ----
@@ -2827,6 +2919,7 @@ function playStart() {
 function memoryLobbySkip() {
   if (!spine) return;
   state.introBlock = false;
+  ensureBaseRandom();
   introVirtual = false;
   introWindowEnd = 0;
   closeupArmAt = -1;
@@ -3032,6 +3125,10 @@ window.ba_debug = {
     const l = p ? p.worldToLocal({ x: b.worldX, y: b.worldY }) : { x: b.worldX, y: b.worldY };
     return { x: +l.x.toFixed(3), y: +l.y.toFixed(3) };
   },
+  baseRandom: () => baseRandomJobs.map(j => ({ name: j.name, track: j.cfg.Track,
+    block: !!j.cfg.BlockInteractionOnPlay })),
+  baseRandomLog: () => baseRandomLog.slice(-60),
+  startBaseRandom: () => { startBaseRandom(true); return baseRandomJobs.length; },
   ikState: () => ikDrag ? { kind: ikDrag.kind, pressing: ikDrag.pressing, local: !!ikDrag.local,
     restLocal: ikDrag.restLocal || null, rect: ikDrag.rect || null,
     pointer: (() => ({ x: +ikPointer.x.toFixed(1), y: +ikPointer.y.toFixed(1) }))(),
@@ -7269,6 +7366,7 @@ async function loadLobby(name) {
   unloadLobbyAssets(oldLobby);
   destroyTextures(oldTextures);
   clearTimers();
+  stopBaseRandom();      // 換廳：取消上一個 lobby 的 BaseRandom 排程
   resetWhiteFlash();
   state.busy = null;
   state.blockInteractionOnPlay = false;
@@ -7455,6 +7553,7 @@ function onTrackComplete(entry) {
   // 不在此重啟，否則輸送帶會跳回起點（見 startBgSequence 冪等註解）。
   if (entry.trackIndex === 0 && state.introBlock) {
     state.introBlock = false;
+    ensureBaseRandom();   // 開場結束後才讓 BaseRandom 隨機點綴接手
   }
   if (entry.trackIndex === 1 && !state.busy) {
     if (state.busy === 'talk') return; // handled by timer
@@ -8313,7 +8412,8 @@ async function loadBootData() {
 
   const [camera, idx, transforms, icons, chat, touch, zones, schedule, voiceIdx,
          timelines, clipMix, clipGraph, spineMix, titleVoices, flash,
-         bgmCsv, studentsCsv, subtitles, dialogTypes, postConfig, charProfiles, lobbyParticles] = await Promise.all([
+         bgmCsv, studentsCsv, subtitles, dialogTypes, postConfig, charProfiles, lobbyParticles,
+         pools] = await Promise.all([
     settle(json('assets/data/lobby_camera_config.json')),
     settle(json('assets/data/lobby_index.json').catch(() => json('assets/lobby_index.json'))),
     settle(json('assets/data/lobby_transforms.json')),
@@ -8336,6 +8436,7 @@ async function loadBootData() {
     settle(json('assets/data/lobby_post_config.json')),
     settle(json('assets/data/char_profiles.json')),
     settle(json('assets/data/lobby_particles.json')),
+    settle(json('assets/data/lobby_spine_pools.json')),
   ]);
 
   if (camera?.MaxScale != null) CAMERA.maxScale = camera.MaxScale;
@@ -8349,6 +8450,7 @@ async function loadBootData() {
   SCHEDULE = schedule;
   VOICE_INDEX = voiceIdx || {};
   TIMELINES = timelines;
+  POOLS = pools || null;
   CLIP_CONFIGS = clipMix || {};
   CLIP_GRAPH = clipGraph || {};
   SPINE_MIX = spineMix || {};
@@ -9991,6 +10093,49 @@ if (BA_DEBUG.probe && BA_DEBUG.probeInteract) {
       await sleep(2000);
       mark('special-settled', { anim: trackAnim(), busy: state.busy });
       emit('special', { trace: trace.slice(), bone: spBone }); trace.length = 0;
+    }
+
+    // ---- BaseRandom 待機點綴（pool 真值；probeBaseRandom=1 ＆ brManual=1 時
+    //      由此處才開始排程，避免前面的固定段落被隨機擋輸入干擾）----
+    if (/probeBaseRandom=1/.test(location.hash)) {
+      if (!baseRandomJobs.length) window.ba_debug.startBaseRandom();
+      const waitMs = Number((/brWaitMs=(\d+)/.exec(location.hash) || [])[1] || 90000);
+      const t0 = performance.now();
+      let sawBlock = null, sawNonBlock = null;
+      while (performance.now() - t0 < waitMs) {
+        const log = window.ba_debug.baseRandomLog();
+        if (!sawNonBlock) {
+          const e = log.find(x => x.ev === 'play' && !x.block);
+          if (e) { sawNonBlock = e; mark('br-nonblock-play', { name: e.name, track: e.track, idle: isIdleForInteraction(), avail: isInteractionAvailable() }); }
+        }
+        if (!sawBlock) {
+          const e = log.find(x => x.ev === 'play' && x.block);
+          if (e) {
+            sawBlock = e;
+            mark('br-block-play', { name: e.name, track: e.track, idle: isIdleForInteraction(), avail: isInteractionAvailable() });
+            fire('pointerdown', talkC.x, talkC.y);
+            await sleep(50);
+            fire('pointerup', talkC.x, talkC.y);
+            await sleep(150);
+            mark('br-block-talk', { busy: state.busy, dialog: dialogActive, idle: isIdleForInteraction(), avail: isInteractionAvailable() });
+            break;
+          }
+        }
+        await sleep(150);
+      }
+      if (!sawBlock) mark('br-no-block', { waitMs, jobs: window.ba_debug.baseRandom() });
+      if (sawBlock) {
+        const t1 = performance.now();
+        while (performance.now() - t1 < 30000 && (!isInteractionAvailable() || !isIdleForInteraction() || state.busy || dialogActive)) await sleep(150);
+        mark('br-unblocked', { idle: isIdleForInteraction(), avail: isInteractionAvailable(), log: window.ba_debug.baseRandomLog().slice(-4) });
+        fire('pointerdown', talkC.x, talkC.y);
+        await sleep(60);
+        fire('pointerup', talkC.x, talkC.y);
+        await sleep(400);
+        mark('br-after-talk', { busy: state.busy, dialog: dialogActive, anim: trackAnim() });
+      }
+      emit('baserandom', { trace: trace.slice() }); trace.length = 0;
+      for (let i = 0; i < 200 && (state.busy || dialogActive); i++) await sleep(250);
     }
 
     emit('done', { lobby: currentLobby, steps: trace.length });
