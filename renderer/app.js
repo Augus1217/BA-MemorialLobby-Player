@@ -1198,11 +1198,10 @@ function endPinch() {
   if (!spine || !pinchActive) return;
   pinchActive = false;
   state.busy = null;
-  blockInteraction('pinch', false);
   const endName = state.pinchClipEnd === undefined ? resolveEndClip('Pinch_01_M') : state.pinchClipEnd;
   playGestureEnd(endName);
   state.pinchClipEnd = null;
-  after(gestureEndMs(endName, 1200), () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
+  finishGestureBlock('pinch', endName, 1200);
   log('捏頰結束');
 }
 
@@ -1231,11 +1230,10 @@ function startTouch(rec = null) {
 function endTouch() {
   if (!spine || state.busy !== 'touch') return;
   state.busy = null;
-  blockInteraction('touch', false);
   const endName = state.touchClipEnd === undefined ? resolveEndClip('Touch_01_M') : state.touchClipEnd;
   playGestureEnd(endName);
   state.touchClipEnd = null;
-  after(gestureEndMs(endName, 1200), () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
+  finishGestureBlock('touch', endName, 1200);
   log('觸摸結束');
 }
 
@@ -1280,11 +1278,10 @@ function endHandFollow() {
   if (!spine || !handFollowActive) return;
   handFollowActive = false;
   state.busy = null;
-  blockInteraction('handfollow', false);
   const endName = state.handClipEnd === undefined ? resolveEndClip('HandFollow_01_M') : state.handClipEnd;
   playGestureEnd(endName);
   state.handClipEnd = null;
-  after(gestureEndMs(endName, 1400), () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
+  finishGestureBlock('handfollow', endName, 1400);
   log('手部跟隨結束');
 }
 
@@ -2117,13 +2114,41 @@ function gestureEndMs(endName, fallbackMs) {
   let ms = 0;
   const cfg = clipCfg(endName);
   const names = [endName];
-  for (const s0 of (cfg?.Sync || [])) names.push(typeof s0 === 'string' ? s0 : (s0.name || s0));
+  const syncs = cfg ? (cfg.Sync || []) : null;
+  if (syncs && syncs.length) {
+    for (const s0 of syncs) names.push(typeof s0 === 'string' ? s0 : (s0.name || s0));
+  } else {
+    // playGestureEnd 在 SpineClip.Sync 為空時的 fallback：_M/_A 雙軌（跨包
+    // SyncPlayClipObjects 在 dump 可能只有 m_PathID、解析不到名稱，圖上會是空，
+    // 但遊戲的 PlaySyncClips 仍會播）。End 完成時間要涵蓋真的會播的每一軌。
+    const twin = endName.replace(/_M$/, '_A');
+    if (twin !== endName && has(twin)) names.push(twin);
+  }
   for (const n of names) {
     if (!n) continue;
     const a = spine.state.data.skeletonData.findAnimation(n);
     if (a) ms = Math.max(ms, (a.duration || 0) * 1000);
   }
   return ms > 0 ? ms + 50 : fallbackMs;
+}
+// SpineDragIK.CoMoveBone（RVA 0x340DE00）的生命週期：
+//   start：SpineBase.BlockInteraction(this, true) → PlaySpineClip(IngClip)，
+//          之後每幀把 Bone.localPosition 緩向 destLocalPos。
+//   release：StopSpineClipMask(IngClip) →（EndClip 非空才）PlaySpineClip(EndClip)
+//          → 把 Bone 緩回 OrigLocalPos → WaitUntil(自放開起算已達 EndClip 長度)
+//          → ReturnToIdle(-1,true) → BlockInteraction(this, false)。
+// 也就是說：EndClip 播完後，只要 IK 骨骼還在緩返，遊戲的 IsInteractive()
+// 仍為 false，OnClick/OnPress 都會被擋（不是只看 IsIdle）。這裡用同一條件
+// 才移除 blockList：max(EndClip 長度, 骨骼回 OrigLocalPos)。
+function finishGestureBlock(kind, endName, fallbackMs) {
+  const lobby = currentLobby;
+  const settle = () => {
+    if (currentLobby !== lobby) { blockInteraction(kind, false); return; }
+    if (ikDrag && ikDrag.kind === kind) { setTimeout(settle, 32); return; }
+    if (!state.busy && !exporting && !preview) { restTracks(); scheduleAutonomy(); }
+    blockInteraction(kind, false);
+  };
+  setTimeout(settle, gestureEndMs(endName, fallbackMs));
 }
 
 // 依「_01_M → End_01_M / _End_01_M」的遊戲命名對照找出釋放動畫（吃 CH0347
@@ -2306,16 +2331,11 @@ function startLook(rec = null) {
 function endLook() {
   if (!spine || state.busy !== 'look') return;
   state.busy = null;
-  blockInteraction('look', false);
   state.blockInteractionOnPlay = false;
   const endName = state.lookClipEnd === undefined ? resolveEndClip('Look_01_M') : state.lookClipEnd;
   playGestureEnd(endName);
   state.lookClipEnd = null;
-  after(gestureEndMs(endName, 500), () => {
-    if (state.busy || patting) return;
-    restTracks();
-    scheduleAutonomy();
-  });
+  finishGestureBlock('look', endName, 500);
   log('抓眼結束');
 }
 
@@ -2348,6 +2368,7 @@ function startPat(rec = null) {
   patting = true;
   clearTimers();              // interrupt an ongoing talk / look
   state.busy = 'pat';
+  blockInteraction('pat', true);   // SpineDragIK.CoMoveBone 起點（RVA 0x340DE00）
   state.patMain = main;
   state.patEndOverride = end;
   state.patEndExact = exact;
@@ -2363,6 +2384,7 @@ function endPat() {
   if (state.busy !== 'pat') {
     state.patGroup = null; state.patMain = null;
     state.patEndOverride = null; state.patEndExact = false;
+    blockInteraction('pat', false);
     return;
   }
   state.busy = null;
@@ -2374,11 +2396,7 @@ function endPat() {
   state.patEndOverride = null;
   state.patEndExact = false;
   playGestureEnd(endName);
-  after(gestureEndMs(endName, 1200), () => {
-    if (state.busy || patting) return;
-    restTracks();
-    scheduleAutonomy();
-  });
+  finishGestureBlock('pat', endName, 1200);
   log('摸頭結束');
 }
 
@@ -6275,6 +6293,9 @@ function playPreviewLine(voiceId, lineEl) {
     else spine.state.setEmptyAnimation(2, 0.3);
   }
   state.busy = 'preview';
+  // 手勢的 blockList 條目由 finishGestureBlock 在 IK 緩返完成後才移除；
+  // 試播會接手畫面，先把殘餘手勢 block 清掉以免卡住（stopPreview 只清 preview）。
+  for (const k of ['pinch', 'touch', 'handfollow', 'look', 'pat']) blockInteraction(k, false);
   blockInteraction('preview', true);
   dialogActive = true;   // 氣泡整組常駐、逐句換字（CoDialog 式），收尾才關
   preview = { groupKey: g.key, lobby: currentLobby, lines: g.lines, idx: -1,
@@ -9681,7 +9702,10 @@ if (BA_DEBUG.probe && BA_DEBUG.probeInteract) {
       const waitIdle = async (maxMs = 60000) => {
         const t0 = performance.now();
         while (performance.now() - t0 < maxMs) {
-          if (!state.busy && !dialogActive && isIdleForInteraction()) return true;
+          // 遊戲可接受的完整條件：IsIdle(true) ＋ IsInteractive()（blockList 空）。
+          // CoMoveBone 在 End clip 播完後、IK 骨骼回到 OrigLocalPos 前仍持有
+          // BlockInteraction(this)；只等 IsIdle 會在緩返窗口內誤判。
+          if (!state.busy && !dialogActive && isIdleForInteraction() && isInteractionAvailable()) return true;
           await sleep(120);
         }
         return false;
@@ -9705,16 +9729,41 @@ if (BA_DEBUG.probe && BA_DEBUG.probeInteract) {
 
       if (lookPt && ready1) {
         fire('pointerdown', lookPt.x, lookPt.y);
-        await sleep(500);
-        mark('guard-look-hold', { busy: state.busy, idle: isIdleForInteraction(), anim: trackAnim() });
+        await sleep(200);
+        // 拖遠一點（眼球會 clamp 在 prefab 矩形角落），放開後 IK 緩返時間
+        // 會拉長到超過 LookEnd clip 長度，才能測「End 播完、still returning」窗口。
+        fire('pointermove', lookPt.x - 700, lookPt.y - 500);
+        await sleep(300);
+        mark('guard-look-hold', { busy: state.busy, idle: isIdleForInteraction(),
+                                  ik: window.ba_debug.ikState(), anim: trackAnim() });
         fire('pointerup', lookPt.x, lookPt.y);
         await sleep(120);
-        mark('guard-endclip', { busy: state.busy, idle: isIdleForInteraction(), anim: trackAnim() });
+        mark('guard-endclip', { busy: state.busy, idle: isIdleForInteraction(),
+                                ik: window.ba_debug.ikState(), anim: trackAnim() });
         fire('pointerdown', talkC.x, talkC.y);
         await sleep(50);
         fire('pointerup', talkC.x, talkC.y);
         await sleep(120);
         mark('guard-talk-blocked', { busy: state.busy, idle: isIdleForInteraction(), anim: trackAnim() });
+        // End clip 已播完（IsIdle true）但骨骼仍在緩返：CoMoveBone 尚未
+        // ReturnToIdle/BlockInteraction(false)，遊戲仍會拒絕新的 OnClick。
+        const tWin = performance.now();
+        while (performance.now() - tWin < 4000 && ikDrag &&
+               (state.busy || !isIdleForInteraction())) await sleep(50);
+        mark('guard-window-end', { ik: window.ba_debug.ikState(), busy: state.busy,
+                                   idle: isIdleForInteraction(), avail: isInteractionAvailable(),
+                                   ms: Math.round(performance.now() - tWin) });
+        if (ikDrag && !state.busy && isIdleForInteraction()) {
+          mark('guard-ik-window', { idle: isIdleForInteraction(), avail: isInteractionAvailable(),
+                                    ik: !!ikDrag, anim: trackAnim() });
+          fire('pointerdown', talkC.x, talkC.y);
+          await sleep(50);
+          fire('pointerup', talkC.x, talkC.y);
+          await sleep(150);
+          mark('guard-ik-talk-blocked', { busy: state.busy, dialog: dialogActive,
+                                          idle: isIdleForInteraction(), avail: isInteractionAvailable(),
+                                          ik: !!ikDrag, anim: trackAnim() });
+        }
       }
 
       const ready2 = await waitIdle();
