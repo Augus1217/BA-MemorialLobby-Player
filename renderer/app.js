@@ -9656,7 +9656,19 @@ if (BA_DEBUG.probe && BA_DEBUG.probeInteract) {
       await sleep(1200);
       fire('pointerup', talkC.x, talkC.y);
       await sleep(450);
-      mark('hold-up', { busy: state.busy, anim: trackAnim() });
+      const t1 = spine?.state?.tracks?.[1];
+      mark('hold-up', { busy: state.busy, anim: trackAnim(), session: dialogSession,
+                        tt: t1 ? +t1.trackTime.toFixed(2) : null });
+      // 對話進行中第二次乾淨點擊：ChatDialog 的 BlockInteraction(true) 還在
+      // IsInteractive()=false，遊戲直接忽略；不可重啟／換 clip。session 與
+      // track 時間都應延續（若被接受，dialogSession 會 +1、trackTime 會歸零）。
+      fire('pointerdown', talkC.x, talkC.y);
+      await sleep(60);
+      fire('pointerup', talkC.x, talkC.y);
+      await sleep(300);
+      const t2 = spine?.state?.tracks?.[1];
+      mark('hold-second', { busy: state.busy, anim: trackAnim(), session: dialogSession,
+                            tt: t2 ? +t2.trackTime.toFixed(2) : null });
       emit('holdtalk', { trace: trace.slice() }); trace.length = 0;
     }
 
