@@ -2066,13 +2066,11 @@ function playHoldGesture(main, syncHint = null) {
   const track = cfg ? (cfg.Track || 1) : 1;
   if (cfg && !cfg.Loop) {
     setAnimationWithClipMix(track, main, false);
-    // FM=PlayNext 的續播目標：優先吃圖裡的 NextClip；遇到圖為 null 但存在同族
-    // _02（例：CH0346 Touch_02_M 於 Track5）時直接接上，維持按住循環的遊戲行為。
-    let next = cfg.NextClip;
-    if (!next) {
-      const sib = main.replace(/_(0\d)(_M)?$/, '_02$2');
-      if (sib !== main && has(sib)) next = sib;
-    }
+    // FM=PlayNext 的續播目標＝SpineClip.NextClipObject 的真值（已由
+    // NextClipObject PPtr 解出）。null 就是遊戲沒有設定下一段——不再用
+    // 「_02 同族」猜測：CH0346 Look_01_M/Touch_01_M 的 NextClipObject 是 0，
+    // 遊戲按住時並不會自動接 Look_02_M/Touch_02_M。
+    const next = cfg.NextClip;
     if (next && has(next)) addAnimationWithClipMix(track, next, true, 0);
   } else {
     setAnimationWithClipMix(track, main, true);
@@ -2095,10 +2093,10 @@ function playGestureEnd(endName) {
   const cfg = clipCfg(endName);
   const track = cfg ? (cfg.Track || 1) : 1;
   setAnimationWithClipMix(track, endName, false);
-  const twin = endName.replace(/_M$/, '_A');
-  let syncs = cfg ? (cfg.Sync || []) : null;
-  if (!syncs || !syncs.length) syncs = has(twin) ? [twin] : [];
-  for (const s0 of syncs) {
+  // 只播 SpineClip.SyncPlayClipObjects 的真值（已由 PPtr 解出）：有的廳
+  // End 有 _A sync（例：Hare LookEnd_01_A），有的廳沒有（例：CH0334
+  // LookEnd_01_M）——不可再用 _M→_A 慣例一概而論。
+  for (const s0 of (cfg ? (cfg.Sync || []) : [])) {
     const s = (typeof s0 === 'string') ? s0 : (s0.name || s0);
     if (!s || !has(s)) continue;
     const scfg = clipCfg(s);
@@ -2114,22 +2112,17 @@ function gestureEndMs(endName, fallbackMs) {
   let ms = 0;
   const cfg = clipCfg(endName);
   const names = [endName];
-  const syncs = cfg ? (cfg.Sync || []) : null;
-  if (syncs && syncs.length) {
-    for (const s0 of syncs) names.push(typeof s0 === 'string' ? s0 : (s0.name || s0));
-  } else {
-    // playGestureEnd 在 SpineClip.Sync 為空時的 fallback：_M/_A 雙軌（跨包
-    // SyncPlayClipObjects 在 dump 可能只有 m_PathID、解析不到名稱，圖上會是空，
-    // 但遊戲的 PlaySyncClips 仍會播）。End 完成時間要涵蓋真的會播的每一軌。
-    const twin = endName.replace(/_M$/, '_A');
-    if (twin !== endName && has(twin)) names.push(twin);
+  // 與 playGestureEnd 播的軌完全一致：End + 真值 SyncPlayClipObjects（PPtr 已解）。
+  for (const s0 of (cfg ? (cfg.Sync || []) : [])) {
+    names.push(typeof s0 === 'string' ? s0 : (s0.name || s0));
   }
+  let found = false;
   for (const n of names) {
     if (!n) continue;
     const a = spine.state.data.skeletonData.findAnimation(n);
-    if (a) ms = Math.max(ms, (a.duration || 0) * 1000);
+    if (a) { found = true; ms = Math.max(ms, (a.duration || 0) * 1000); }
   }
-  return ms > 0 ? ms + 50 : fallbackMs;
+  return found ? ms + 50 : fallbackMs;   // 真的有 0 秒 End clip 的廳不套 fallback
 }
 // SpineDragIK.CoMoveBone（RVA 0x340DE00）的生命週期：
 //   start：SpineBase.BlockInteraction(this, true) → PlaySpineClip(IngClip)，
@@ -2205,10 +2198,25 @@ async function playTalk() {
     try { seq = parseInt(localStorage.getItem(seqKey) || '0', 10) || 0; } catch {}
     const m = pool[((seq % pool.length) + pool.length) % pool.length];
     try { localStorage.setItem(seqKey, String(seq + 1)); } catch {}
-    const a = m.replace(/_M$/, '_A');
     setAnimationWithClipMix(1, m, false);
-    if (animNames().includes(a)) setAnimationWithClipMix(2, a, false);
-    else spine.state.setEmptyAnimation(2, 0.3);
+    // Sync 軌＝遊戲 SpineClip.SyncPlayClipObjects 真值（Talk_01_M → Talk_01_A
+    // 已由 PPtr 解出）；舊 pack 還沒有 Sync 時才退回 _M→_A 命名慣例。
+    const tcfg = clipCfg(m);
+    let tsyncs = (tcfg && tcfg.Sync) ? tcfg.Sync.slice() : [];
+    if (!tsyncs.length) {
+      const a = m.replace(/_M$/, '_A');
+      if (has(a)) tsyncs = [a];
+    }
+    if (tsyncs.length) {
+      for (const s0 of tsyncs) {
+        const s = (typeof s0 === 'string') ? s0 : (s0.name || s0);
+        if (!s || !has(s)) continue;
+        const scfg = clipCfg(s);
+        setAnimationWithClipMix(scfg ? (scfg.Track || 2) : 2, s, false);
+      }
+    } else {
+      spine.state.setEmptyAnimation(2, 0.3);
+    }
 
     // ---- Balloon lifecycle (reversed ChatDialog.<CoDialog>d__43.MoveNext) ----
     // The balloon is ONE persistent element for the whole talk: each recorded
@@ -2996,6 +3004,9 @@ window.ba_debug = {
   },
   ikState: () => ikDrag ? { kind: ikDrag.kind, pressing: ikDrag.pressing, local: !!ikDrag.local,
     restLocal: ikDrag.restLocal || null, rect: ikDrag.rect || null,
+    pointer: (() => ({ x: +ikPointer.x.toFixed(1), y: +ikPointer.y.toFixed(1) }))(),
+    target: (() => { if (!ikDrag.local) return null; const t = ikDragTargetLocal();
+      return { x: +t.x.toFixed(3), y: +t.y.toFixed(3) }; })(),
     bone: (() => { const b = ikDrag.bone; return { x: +b.x.toFixed(3), y: +b.y.toFixed(3) }; })() } : null,
   boneBounds: () => {
     if (!spine) return null;
@@ -7641,6 +7652,7 @@ function zoneAt(sx, sy) {
 }
 
 let pressSess = null;   // { kind, rec, timer, triggered }
+let ikPointer = { x: 0, y: 0 };  // NGUI 語意的拖曳位置：按下時固定，超過 dragThreshold 才更新
 let ikDrag = null;      // { bone, kind, rest:{x,y}, T:{x,y}, rect, off, spd, relSpd, pressing }
 let lastIkT = 0;
 
@@ -7674,7 +7686,7 @@ function ikSetupDrag(kind, rec) {
 //   → clamp(local + BoneCenterOffset, Min, Max)。
 function ikDragTargetLocal() {
   const d = ikDrag;
-  const c = spine.worldTransform.applyInverse({ x: mouse.x, y: mouse.y });
+  const c = spine.worldTransform.applyInverse({ x: ikPointer.x, y: ikPointer.y });
   const p = d.bone.parent;
   const l = p ? p.worldToLocal({ x: c.x, y: c.y }) : { x: c.x, y: c.y };
   const ox = l.x + d.off.x, oy = l.y - d.off.y;
@@ -7685,7 +7697,7 @@ function ikDragTargetLocal() {
 }
 // 舊版世界座標近似（無 zone 資料的 fallback 用；skeleton 幀的軸對齊 clamp）。
 function ikDragTargetWorld() {
-  const c = spine.worldTransform.applyInverse({ x: mouse.x, y: mouse.y });
+  const c = spine.worldTransform.applyInverse({ x: ikPointer.x, y: ikPointer.y });
   const d = ikDrag;
   const plx = c.x - d.T.x + d.off.x, ply = c.y - d.T.y + d.off.y;
   const dx = Math.min(Math.max(plx, d.rect.x0), d.rect.x1) - d.off.x;
@@ -7772,6 +7784,11 @@ function onPointerDown(e) {
   if (e.pointerType === 'touch') e.preventDefault();
   downTime = performance.now();
   downPos = { x: e.clientX, y: e.clientY };
+  // NGUI ProcessPress：OnPress 當下把 screenPos 定在按壓點；之後只有
+  // dragStarted（位移超過 mouseDragThreshold=4 / touchDragThreshold=40）才會
+  // 由 OnDrag 更新 screenPos/UpdateDestLocalPos。在那之前 IK 的目標點不變。
+  ikPointer.x = e.clientX;
+  ikPointer.y = e.clientY;
   if (hasZoneData() && spine) {
     // Game path: arm the topmost zone; its TriggerDelay fires the gesture.
     // (Talk needs no timer — release inside the box clicks. Movement never
@@ -7782,7 +7799,8 @@ function onPointerDown(e) {
     // left：NGUI 在按下期間只要 current 換過物件（含拖出所有 collider）就把
     // clickNotification 設 None，之後即使拖回原點也不會 OnClick。
     const sess = pressSess = { kind: z ? z.kind : 'none', rec: (z && z.rec) || null,
-      timer: 0, triggered: false, left: false, lobby: currentLobby };
+      timer: 0, triggered: false, left: false, lobby: currentLobby,
+      dragStarted: false, pointerType: e.pointerType || 'mouse' };
     // 遊戲的 SpineDragIK.OnPress 在按下的那一刻就檢查 IsInteractive + IsIdle；
     // 不合格時連 TriggerDelay 的 coroutine 都不會啟動。talk 區沒有 OnPress。
     if (z && z.kind !== 'talk' && isInteractionAvailable() && isIdleForInteraction()) {
@@ -7814,6 +7832,19 @@ function onPointerMove(e) {
   // Press-and-drag gesture — legacy path only. (Game path: the trigger timer
   // is never cancelled by movement; the drag only steers the bone.)
   if (pressSess) {
+    // NGUI ProcessPress：位移（totalDelta 向量和）超過 dragThreshold 才把
+    // dragStarted 設 true，之後才由 OnDrag 更新 screenPos → IK 目標。
+    if (!pressSess.dragStarted) {
+      const thr = dragThresholdPx(pressSess.pointerType);
+      if (downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) >= thr) {
+        pressSess.dragStarted = true;
+        ikPointer.x = e.clientX;
+        ikPointer.y = e.clientY;
+      }
+    } else {
+      ikPointer.x = e.clientX;
+      ikPointer.y = e.clientY;
+    }
     // NGUI ProcessPress：按壓期間 currentTouch.last != currentTouch.current
     // → dragStarted 且 clickNotification=None（永久取消這次 OnClick）。
     if (pressSess.kind === 'talk' && !pressSess.left) {
@@ -7849,6 +7880,10 @@ function onPointerMove(e) {
 // 期間 current 換過物件，都會把 clickNotification 設 None → 收不到 OnClick。
 function clickThresholdPx(e) {
   return (e && e.pointerType === 'touch') ? 40 : 10;
+}
+function dragThresholdPx(pointerType) {
+  // level0 UICamera 序列化值：mouseDragThreshold=4、touchDragThreshold=40。
+  return pointerType === 'touch' ? 40 : 4;
 }
 function onPointerUp(e) {
   clearTimeout(longPressTimer);
@@ -9729,7 +9764,13 @@ if (BA_DEBUG.probe && BA_DEBUG.probeInteract) {
 
       if (lookPt && ready1) {
         fire('pointerdown', lookPt.x, lookPt.y);
+        await sleep(350);   // 等 IK 緩到「按壓點」目標
+        mark('guard-thr-before', { ik: window.ba_debug.ikState(), anim: trackAnim() });
+        // 3px < mouseDragThreshold(4)：NGUI 尚未 dragStarted，OnDrag 不更新
+        // screenPos → IK 目標不應隨這 3px 改變（bone 值與 before 相同）。
+        fire('pointermove', lookPt.x + 3, lookPt.y);
         await sleep(200);
+        mark('guard-thr-small', { ik: window.ba_debug.ikState() });
         // 拖遠一點（眼球會 clamp 在 prefab 矩形角落），放開後 IK 緩返時間
         // 會拉長到超過 LookEnd clip 長度，才能測「End 播完、still returning」窗口。
         fire('pointermove', lookPt.x - 700, lookPt.y - 500);
