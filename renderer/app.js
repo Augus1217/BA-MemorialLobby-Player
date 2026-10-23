@@ -2059,6 +2059,20 @@ function clipCfg(name) {
 //   * 舊 lobby（Loop=true）：直接循環 _01_M。
 //   * Sync 清單（如 CH0242 Pinch_01_A）依各自 Track 同時播放。
 // syncHint：無 clip_graph 資料（一般 lobby）時的手動 _A 對應清單。
+// 這份 clip_graph 是否已含 PPtr 解出的真值。舊 pack 的 Talk_MM sync 全是
+// 空（PathID 解不出），新版每個 Talk_xx_M 都有 Talk_xx_A；用這個簽名判斷，
+// 避免舊資料裡少數「內嵌 components」已解的 clip（例：Pinch_01_A）讓判斷
+// 誤以為整廳都解好了。未解時才允許 _A/_02 慣例回退（過渡期相容）。
+function graphRefsResolved() {
+  const L = CLIP_GRAPH && CLIP_GRAPH[currentLobby];
+  if (!L) return false;
+  for (const k in L) {
+    if (!/^Talk_\d+_M$/.test(k)) continue;
+    const e = L[k];
+    if (e && e.Sync && e.Sync.length) return true;
+  }
+  return false;
+}
 function playHoldGesture(main, syncHint = null) {
   if (!spine || !has(main)) return null;
   spine.state.setEmptyAnimation(3, 0);   // 暫停眼球隨機眨眼 overlay（Eye_Close_01）
@@ -2070,7 +2084,12 @@ function playHoldGesture(main, syncHint = null) {
     // NextClipObject PPtr 解出）。null 就是遊戲沒有設定下一段——不再用
     // 「_02 同族」猜測：CH0346 Look_01_M/Touch_01_M 的 NextClipObject 是 0，
     // 遊戲按住時並不會自動接 Look_02_M/Touch_02_M。
-    const next = cfg.NextClip;
+    let next = cfg.NextClip;
+    if (!next && !graphRefsResolved()) {
+      // 舊 pack 過渡期：資料完全沒有真值時退回舊的 _02 慣例。
+      const sib = main.replace(/_(0\d)(_M)?$/, '_02$2');
+      if (sib !== main && has(sib)) next = sib;
+    }
     if (next && has(next)) addAnimationWithClipMix(track, next, true, 0);
   } else {
     setAnimationWithClipMix(track, main, true);
@@ -2095,8 +2114,14 @@ function playGestureEnd(endName) {
   setAnimationWithClipMix(track, endName, false);
   // 只播 SpineClip.SyncPlayClipObjects 的真值（已由 PPtr 解出）：有的廳
   // End 有 _A sync（例：Hare LookEnd_01_A），有的廳沒有（例：CH0334
-  // LookEnd_01_M）——不可再用 _M→_A 慣例一概而論。
-  for (const s0 of (cfg ? (cfg.Sync || []) : [])) {
+  // LookEnd_01_M）——不可再用 _M→_A 慣例一概而論。舊 pack（整廳都無真值）
+  // 才退回 _A 慣例，等新 Assets release 換上真值。
+  let syncs = cfg ? (cfg.Sync || []) : [];
+  if (!syncs.length && !graphRefsResolved()) {
+    const twin = endName.replace(/_M$/, '_A');
+    if (twin !== endName && has(twin)) syncs = [twin];
+  }
+  for (const s0 of syncs) {
     const s = (typeof s0 === 'string') ? s0 : (s0.name || s0);
     if (!s || !has(s)) continue;
     const scfg = clipCfg(s);
@@ -2113,8 +2138,13 @@ function gestureEndMs(endName, fallbackMs) {
   const cfg = clipCfg(endName);
   const names = [endName];
   // 與 playGestureEnd 播的軌完全一致：End + 真值 SyncPlayClipObjects（PPtr 已解）。
-  for (const s0 of (cfg ? (cfg.Sync || []) : [])) {
+  const syncs = cfg ? (cfg.Sync || []) : [];
+  for (const s0 of syncs) {
     names.push(typeof s0 === 'string' ? s0 : (s0.name || s0));
+  }
+  if (!syncs.length && !graphRefsResolved()) {
+    const twin = endName.replace(/_M$/, '_A');
+    if (twin !== endName && has(twin)) names.push(twin);
   }
   let found = false;
   for (const n of names) {
