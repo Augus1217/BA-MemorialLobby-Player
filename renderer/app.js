@@ -2656,6 +2656,8 @@ function whiteFlashAlpha(t) {
 // advanced by real/frame time — NEVER from spine trackTime (which loops / fades /
 // switches clips and is not the game's timeline clock).
 let introVirtual = false;    // virtual intro clock armed
+let introTimelineTrack = 0;  // 本廳 timeline 主體鏈所在 spineTrack（0=track 0；36 廳用 1/2）
+let introChainClips = new Set();  // 開場 timeline 鏈的 clip 名（track1 完成時不可被 restTracks 清掉）
 let introVirtualTime = 0;
 let introWindowEnd = 0;      // flash window length for the current lobby (0 = no flash)
 let introClockStart = -1;    // performance.now() when armed (live wall-clock source)
@@ -2679,6 +2681,19 @@ function startIntroClock() {
   introVirtualTime = 0;
   introClockStart = performance.now();
 }
+// 分頁切走時 rAF 停火 → Spine/背景都暫停，但 flash 是 wall-clock，回來會超前
+// （使用者回報：切回分頁時 Spine 從原處續播、白霧已經跑掉）。把開場相關的
+// wall-clock 原點在 hidden 期間整體平移，兩者就同步。
+let introHiddenAt = -1;
+document.addEventListener('visibilitychange', () => {
+  const now = performance.now();
+  if (document.hidden) { introHiddenAt = now; return; }
+  if (introHiddenAt < 0) return;
+  const hiddenMs = now - introHiddenAt;
+  introHiddenAt = -1;
+  if (introClockStart >= 0) introClockStart += hiddenMs;
+  if (closeupArmAt >= 0) closeupArmAt += hiddenMs;
+});
 // Timeline body-spine start time for the current lobby: 本體 track 的第一個 clip
 // start（lobby_timelines.json），flash_curves 的 body_start 為 fallback。
 // Akari=3.0s（特寫先跑 0→5s）、CH0184=0s（home 即本體，00 副層 4s 才進）。
@@ -2727,20 +2742,24 @@ const dofScaleHash = Number((/(?:^|&)dofScale=(\d+(?:\.\d+)?)/.exec(location.has
 const dofScale = () => dofScaleHash * ((app.renderer && app.renderer.height) / 1080 || 1);
 let bgBlurFilter = null;
 function syncBgBlur() {
-  // 全層模糊（Q&A 實驗：遊戲 DoF 為深度制，本骨架無深度——先以全層近似驗證方向）
+  // 逐層 filter 合成：
+  //  - BG_BLUR（hash 實驗）＝全層模糊，原本的近似驗證用。
+  //  - flashBlur（開場 DoF）＝只掛在背景層（bg）。遊戲 DoF 是深度制：主體
+  //    （spine 本體／scene 特寫）在焦平面要清楚，全屏模糊會變成一層白霧
+  //    （akari/CH0060 回報）。掛 bg 是目前無深度資料下最接近的近似。
   const targets = [bg, scene, ...extras, spine].filter(Boolean);
-  if (!BG_BLUR) {
-    for (const t of targets) { try { t.filters = null; } catch {} }
-    return;
+  if (BG_BLUR && !bgBlurFilter) bgBlurFilter = new BlurFilter({ strength: BG_BLUR, quality: 3 });
+  if (bgBlurFilter) bgBlurFilter.strength = BG_BLUR * ((app.renderer && app.renderer.height) / 1080 || 1);
+  for (const t of targets) {
+    const fs = [];
+    if (BG_BLUR && bgBlurFilter) fs.push(bgBlurFilter);
+    if (flashBlurOn && t === bg) fs.push(flashBlur);
+    try { t.filters = fs.length ? fs : null; } catch {}
   }
-  if (!bgBlurFilter) bgBlurFilter = new BlurFilter({ strength: BG_BLUR, quality: 3 });
-  bgBlurFilter.strength = BG_BLUR * ((app.renderer && app.renderer.height) / 1080 || 1);
-  for (const t of targets) { try { t.filters = [bgBlurFilter]; } catch {} }
 }
 function syncFlashFilters() {
   if (!postWrap) return;
   const fs = [];
-  if (flashBlurOn && flashBlur) fs.push(flashBlur);
   if (baPostOn && baPostFilter) fs.push(baPostFilter);
   postWrap.filters = fs;
   syncBgBlur();
@@ -2764,10 +2783,14 @@ function tickWhiteFlash() {
   const on = dof > 0.01;
   if (on !== flashBlurOn) {
     flashBlurOn = on;
-    if (on) ensurePostWrap();   // flashBlur 需 postWrap（v8 root stage filter 無效）
     syncFlashFilters();
   }
-  if (on) flashBlur.strength = clamp(dof * 1.5 * dofScale(), 0, 200);   // 1.5=game gaussianMaxRadius(UV)，×dofScale 換算像素
+  if (on) {
+    // 只掛 bg（syncBgBlur），主體保持清楚。dof 值少數廳是 11.76/75/800
+    // （同一個 Recorded binding 的原始資料；可能是距離/半徑而非 weight），
+    // 先以正常廳的 0..1 上限近似，避免整張被糊成白霧。
+    flashBlur.strength = clamp(Math.min(1, dof) * 1.5 * dofScale(), 0, 200);
+  }
 }
 function resetWhiteFlash() {
   lastFlashAlpha = -1;
@@ -2848,22 +2871,30 @@ function playStart() {
       // current.trackLast >= next.delay 時切換（trackLast 從前一段成為 current
       // 起算，不含它自己的 delay），所以錨點是前一段起點而非終點。
       // （曾誤用終點錨，CH0184 的 home Start_Idle_02 被提前到 4s，和 00 重疊。）
+      // 主體鏈放在 timeline 給的 spineTrack（多數廳 0；CH0184/CH0060 等 36 廳是
+      // 1/2）。遊戲 SpineBase 的 track 0 永遠有 base idle，timeline 軌疊在上面；
+      // 若把鏈壓在 track 0，clip 之間的空窗（CH0184 6.667→10.667 有 4 秒）會
+      // 整隻凍住，看起來就是「每轉換一次卡一次」。
+      const trackMain = (bodyClips[0].spineTrack != null) ? bodyClips[0].spineTrack : 0;
+      introTimelineTrack = trackMain;
+      introChainClips = new Set(bodyClips.map((c) => c.anim));
+      if (trackMain !== 0) setAnimationWithClipMix(0, idleClip, true);   // 底層常駐 idle
       let prevStart = 0;   // 前一個 clip 的絕對 start（資料時間）
       let first = true;
       let queuedIdle = false;
       for (const clip of bodyClips) {
         const isIdle = clip.anim === idleClip;
         if (first) {
-          setAnimationWithClipMix(0, clip.anim, isIdle, Math.max(0, clip.start));
+          setAnimationWithClipMix(trackMain, clip.anim, isIdle, Math.max(0, clip.start));
           first = false;
         } else {
           const gap = Math.max(0, clip.start - prevStart);
-          addAnimationWithClipMix(0, clip.anim, isIdle, gap);
+          addAnimationWithClipMix(trackMain, clip.anim, isIdle, gap);
         }
         prevStart = clip.start;
         if (isIdle) { queuedIdle = true; break; }
       }
-      if (!queuedIdle) spine.state.addAnimation(0, idleClip, true, 0);
+      if (!queuedIdle) spine.state.addAnimation(trackMain, idleClip, true, 0);
       // 額外 skeleton：每個非本體 skeleton 載入獨立物件並依其 clips 播放。該 skeleton
       // 若已作為 bg/scene 載入（Yuzu_bg/Akari_Scene...）即由既有機制（startBgSequence）
       // 驅動，這裡不重複碰——只有真正缺席的（CH0184_00 / Shigure_00 / Shigure_01）才新建。
@@ -3125,6 +3156,8 @@ window.ba_debug = {
     const l = p ? p.worldToLocal({ x: b.worldX, y: b.worldY }) : { x: b.worldX, y: b.worldY };
     return { x: +l.x.toFixed(3), y: +l.y.toFixed(3) };
   },
+  tracks: () => (spine ? spine.state.tracks.map((e, i) => e && e.animation
+    ? { i, name: e.animation.name, t: +e.trackTime.toFixed(3), loop: !!e.loop } : null) : null),
   baseRandom: () => baseRandomJobs.map(j => ({ name: j.name, track: j.cfg.Track,
     block: !!j.cfg.BlockInteractionOnPlay })),
   baseRandomLog: () => baseRandomLog.slice(-60),
@@ -7367,6 +7400,8 @@ async function loadLobby(name) {
   destroyTextures(oldTextures);
   clearTimers();
   stopBaseRandom();      // 換廳：取消上一個 lobby 的 BaseRandom 排程
+  introTimelineTrack = 0;
+  introChainClips = new Set();
   resetWhiteFlash();
   state.busy = null;
   state.blockInteractionOnPlay = false;
@@ -7551,11 +7586,14 @@ function onTrackComplete(entry) {
   // the player can tap/pat; track 0 now loops the idle clip.
   // 背景序列（track 3）自 t=0 獨立運行，與 track 0 完成與否無關——
   // 不在此重啟，否則輸送帶會跳回起點（見 startBgSequence 冪等註解）。
-  if (entry.trackIndex === 0 && state.introBlock) {
+  const wasIntro = state.introBlock;
+  if ((entry.trackIndex === 0 || entry.trackIndex === introTimelineTrack) && wasIntro) {
     state.introBlock = false;
+    introTimelineTrack = 0;
     ensureBaseRandom();   // 開場結束後才讓 BaseRandom 隨機點綴接手
   }
   if (entry.trackIndex === 1 && !state.busy) {
+    if (wasIntro || (entry.animation && introChainClips.has(entry.animation.name))) return;  // 開場鏈不可被 restTracks 清掉
     if (state.busy === 'talk') return; // handled by timer
     restTracks();
   }
@@ -9760,6 +9798,40 @@ if (BA_DEBUG.probe && BA_DEBUG.probeInteract) {
 
     // 等大廳載入＋intro 收斂到 idle（introBlock 鎖互動；最長 45s）
     await sleep(4000);
+    // ---- 0b) 開場 hitch 取樣（probeHitch=1）：每幀記 delta 與 track0 動畫，
+    //          結束時回報長 frame 與動畫切換點（CH0184 多骨架開場頓挫用）。----
+    if (/probeHitch=1/.test(location.hash)) {
+      (async () => {
+        const rows = [], changes = [];
+        let last = performance.now(), lastKey = '';
+        const loop = () => {
+          const n = performance.now(), dd = n - last; last = n;
+          const ts = (window.ba_debug.tracks() || []);
+          const key = ts.map(t => t ? t.name + (t.loop ? 'L' : '') : '-').join('+') || 'null';
+          rows.push([Math.round(n), +dd.toFixed(1), key]);
+          if (key !== lastKey) { changes.push([Math.round(n), lastKey, key, +dd.toFixed(1)]); lastKey = key; }
+          requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+        await sleep(Number((/hitchMs=(\d+)/.exec(location.hash) || [])[1] || 32000));
+        emit('hitch', { changes: changes.slice(0, 60), longs: rows.filter(r => r[1] > 33).slice(0, 80), n: rows.length });
+      })();
+    }
+    // ---- 0) 開場白霧/flash 取樣（probeFlash=1）：非阻塞、從載入初期就開始 ----
+    if (/probeFlash=1/.test(location.hash)) {
+      (async () => {
+        const n = Number((/flashSamples=(\d+)/.exec(location.hash) || [])[1] || 160);
+        for (let i = 0; i < n; i++) {
+          const fl = window.ba_debug.flash;
+          const t = fl.introTime();
+          emit('flash', { i, t: t != null ? +t.toFixed(3) : null, alpha: +fl.alphaAt(t).toFixed(3),
+                          dom: fl.elOpacity(), blur: fl.blurOn(), blurStr: +fl.blurStrength().toFixed(1),
+                          window: +fl.windowEnd().toFixed(2), intro: state.introBlock,
+                          anims: trackAnim() });
+          await sleep(150);
+        }
+      })();
+    }
     const idleName = resolveIdleClip();
     for (let i = 0; i < 180; i++) {
       if (!state.introBlock && trackAnim() === idleName) break;
@@ -9770,6 +9842,8 @@ if (BA_DEBUG.probe && BA_DEBUG.probeInteract) {
     emit('lobby', { lobby: currentLobby, interactionMode, anim: trackAnim(),
       zones: { bodytouch: (BODYTOUCH[currentLobby] || []).length, ik: Object.keys(IKZONES[currentLobby] || {}) },
       scale: spine ? +spine.scale.x.toFixed(4) : null });
+
+
 
     // ---- 1) 說話：bodytouch 中心 down+up → Talk 動畫＋語音＋字幕（字體/語言/氣泡型）----
     const tb = (window.ba_debug?.touchBoxes() || [])[0];
