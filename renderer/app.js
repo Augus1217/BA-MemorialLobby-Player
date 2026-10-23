@@ -1170,18 +1170,22 @@ function setupInteraction() {
 // 按住 → 依 clip_graph 播 Pinch_01_M（舊 lobby 直接循環 / 現代 lobby 一次後自動
 // 接 Pinch_02_M 循環）。釋放 → PinchEnd。遊戲本身即「01 一次 → 02
 // 循環」的 SpineClip 鏈（FM=PlayNext，見 clip_graph.json），不需額外距離推圖。
-function startPinch() {
+function startPinch(rec = null) {
   if (!spine || pinchActive) return;
   if (state.busy === 'preview') return;
   if (state.introBlock) return;
+  if (!isInteractionAvailable() || !isIdleForInteraction()) return; // OnPress gates
   if (state.busy === 'talk' && !isInteractionAvailable()) return;
-  const main = has('Pinch_01_M') ? 'Pinch_01_M' : (has('Pinch_01') ? 'Pinch_01' : null);
-  if (!main) return;
+  const fallback = has('Pinch_01_M') ? 'Pinch_01_M' : (has('Pinch_01') ? 'Pinch_01' : null);
+  const clips = gestureClips(rec, fallback, () => resolveEndClip(fallback || 'Pinch_01_M'));
+  if (!clips.exact && !clips.main) return;
   clearTimers();
   pinchActive = true;
   state.busy = 'pinch';
+  state.pinchClipEnd = clips.end;
   blockInteraction('pinch', true);
-  playHoldGesture(main);
+  if (clips.main) playHoldGesture(clips.main);
+  else spine.state.setEmptyAnimation(3, 0);
   log('捏頰 (拖曳)');
 }
 
@@ -1195,8 +1199,10 @@ function endPinch() {
   pinchActive = false;
   state.busy = null;
   blockInteraction('pinch', false);
-  playGestureEnd(has('Pinch_01_M') ? resolveEndClip('Pinch_01_M') : 'PinchEnd_01_M');
-  after(1200, () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
+  const endName = state.pinchClipEnd === undefined ? resolveEndClip('Pinch_01_M') : state.pinchClipEnd;
+  playGestureEnd(endName);
+  state.pinchClipEnd = null;
+  after(gestureEndMs(endName, 1200), () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
   log('捏頰結束');
 }
 
@@ -1205,25 +1211,31 @@ function endPinch() {
 // poke（._01 短暫後 immediately TouchEnd）。釋放播 TouchEnd —— CH0347 底線
 // 版 Touch_End_01_M 由 resolveEndClip 解析。移除舊的 700ms 硬排程（遊戲是
 // press-and-hold，非 tap-and-release-after-timeout）。
-function startTouch() {
+function startTouch(rec = null) {
   if (!spine) return;
   if (state.busy === 'preview') return;
   if (state.introBlock) return;
+  if (!isInteractionAvailable() || !isIdleForInteraction()) return; // OnPress gates
   if (state.busy === 'talk' && !isInteractionAvailable()) return;
-  const main = has('Touch_01_M') ? 'Touch_01_M' : (has('Touch_02_M') ? 'Touch_02_M' : null);
-  if (!main) return;
+  const fallback = has('Touch_01_M') ? 'Touch_01_M' : (has('Touch_02_M') ? 'Touch_02_M' : null);
+  const clips = gestureClips(rec, fallback, () => resolveEndClip(fallback || 'Touch_01_M'));
+  if (!clips.exact && !clips.main) return;
   clearTimers();
   state.busy = 'touch';
+  state.touchClipEnd = clips.end;
   blockInteraction('touch', true);
-  playHoldGesture(main);
+  if (clips.main) playHoldGesture(clips.main);
+  else spine.state.setEmptyAnimation(3, 0);
   log('戳 / 觸摸');
 }
 function endTouch() {
   if (!spine || state.busy !== 'touch') return;
   state.busy = null;
   blockInteraction('touch', false);
-  playGestureEnd(resolveEndClip('Touch_01_M'));
-  after(1200, () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
+  const endName = state.touchClipEnd === undefined ? resolveEndClip('Touch_01_M') : state.touchClipEnd;
+  playGestureEnd(endName);
+  state.touchClipEnd = null;
+  after(gestureEndMs(endName, 1200), () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
   log('觸摸結束');
 }
 
@@ -1231,17 +1243,21 @@ function endTouch() {
 // 拖曳任意處：hand bone 朝指標移動（eased），動畫走 HandFollow_01→02 循環鏈
 // （CH0310 Track2 / CH0334 Track1）。釋放播 HandFollowEnd。移除舊的
 // pointer-move pulse 換圖——遊戲的 02 是循環維持，由 PlayNext 鏈自動接上。
-function startHandFollow() {
+function startHandFollow(rec = null) {
   if (!spine || handFollowActive) return;
   if (state.busy === 'preview') return;
   if (state.introBlock) return;
+  if (!isInteractionAvailable() || !isIdleForInteraction()) return; // OnPress gates
   if (state.busy === 'talk' && !isInteractionAvailable()) return;
-  if (!has('HandFollow_01_M')) return;
+  const clips = gestureClips(rec, 'HandFollow_01_M', () => resolveEndClip('HandFollow_01_M'));
+  if (!clips.exact && !clips.main) return;
   clearTimers();
   handFollowActive = true;
   state.busy = 'handfollow';
+  state.handClipEnd = clips.end;
   blockInteraction('handfollow', true);
-  playHoldGesture('HandFollow_01_M');
+  if (clips.main) playHoldGesture(clips.main);
+  else spine.state.setEmptyAnimation(3, 0);
   log('手部跟隨');
 }
 
@@ -1265,8 +1281,10 @@ function endHandFollow() {
   handFollowActive = false;
   state.busy = null;
   blockInteraction('handfollow', false);
-  playGestureEnd(resolveEndClip('HandFollow_01_M'));
-  after(1400, () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
+  const endName = state.handClipEnd === undefined ? resolveEndClip('HandFollow_01_M') : state.handClipEnd;
+  playGestureEnd(endName);
+  state.handClipEnd = null;
+  after(gestureEndMs(endName, 1400), () => { if (state.busy) return; restTracks(); scheduleAutonomy(); });
   log('手部跟隨結束');
 }
 
@@ -1700,21 +1718,25 @@ function bgmForLobby(name) {
 //   Track 0: Start_Idle_01 (once) -> Idle_01 (loop)
 //   Track 1: reactive _M (talk/look/pat, lip + mouth)
 //   Track 2: reactive _A (secondary, synced with _M)
-// State mirrors the fields at [SpineCharacter+0xb0 / +0xa8 / +0xa0]:
-//   blockInteractionOnPlay  ⇔ byte [+0xb0]  – when true, the spine event path
-//                                               (OnSpikeEvent -> PlayVoiceEvent) is
-//                                               short-circuited and the player must
-//                                               finish the current talk animation
-//                                               before the next voice line plays.
+// State mirrors the fields at [SpineCharacter+0xc8 / +0xa8 / +0xa0]:
 //   blockList               ⇔ List<object> [+0xc8] – requester instances that are
 //                                               currently blocking interactions
-//                                               (in-game: dialog boxes add themselves
-//                                               via BlockInteraction(dialogBox, true)).
-//   talkDelegate / voiceDelegate (we don't bind Spine delegates in JS; the
-//   equivalent is just the talk/pat flow below).
+//                                               (in-game: ChatDialog.<CoDialog>
+//                                               calls BlockInteraction(this, true)
+//                                               when a dialog starts, and
+//                                               BlockInteraction(this, false) only
+//                                               after the last line finishes).
+//   blockInteractionOnPlay  – Player-side guard: a hold gesture or dialog owns the
+//                                               character, so autonomy/voice lines
+//                                               stay paused.  NOTE: this is NOT
+//                                               SpineCharacter+0xb0 — that byte is
+//                                               MuteVoice.  The real
+//                                               BlockInteractionOnPlay is a
+//                                               per-clip field (SpineClip+0x68)
+//                                               used by IsIdle rule 2 below.
 const state = {
   busy: null,                 // 'talk' | 'look' | 'pat' | null
-  blockInteractionOnPlay: false,  // mirrors SpineCharacter+0xb0
+  blockInteractionOnPlay: false,  // Player-side guard (not a game field; see above)
   blockList: [],                   // mirrors SpineCharacter+0xc8 (List<object>)
   autonomy: null,
   timers: [],
@@ -1733,10 +1755,69 @@ function isInteractionAvailable() {
   return state.blockList.length === 0 && !state.blockInteractionOnPlay;
 }
 
+// ---- IsIdle(true) — the second gate of both game entry points ----
+// BodyTouch.OnClick (RVA 0x34D6B40) and SpineDragIK.OnPress (RVA 0x340DB78) are:
+//     if (spine == null) return;
+//     if (!spine.IsInteractive()) return;        // Slot 11, vtable 0x1e8
+//     if (!spine.IsIdle(true)) return;           // Slot 9,  vtable 0x1c8
+//     ...
+// IsIdle (RVA 0x34D39F0) walks **every** AnimationState track:
+//   1) entry.Animation == IdleClipIncludingSyncsTable[track]  → idle
+//      (that table = idleClipPool + each idle clip's SyncPlayClipObjects)
+//   2) entry.Animation == IdleBaseRandomClipTable[track]
+//      && !clip.BlockInteractionOnPlay (SpineClip+0x68)        → idle
+//   3) entry.loop                                              → NOT idle
+//   4) entry.IsComplete() (trackTime ≥ animationEnd−animationStart) → idle
+//   5) otherwise                                               → NOT idle
+// So while Talk/Look/Pat/Pinch/Touch/HandFollow — or their End clip — is still
+// running, the game ignores OnClick and OnPress outright (it never supersedes).
+// The proxy below uses the runtime track entries + clip_graph metadata:
+//   * the lobby's idle loop (and any Loop clip on the base track) is idle;
+//   * PlayMode=BaseRandom (3) clips with BlockInteractionOnPlay=false are idle
+//     (these are the Eye_Close random clips — blinks never block input);
+//   * a looping non-idle entry never becomes complete → not idle;
+//   * a finished entry is idle even during its mix-out (Spine's IsComplete).
+function trackEntryIsIdle(e) {
+  if (!e || !e.animation) return true;
+  const name = e.animation.name;
+  if (name === resolveIdleClip()) return true;                 // rule 1
+  const cfg = clipCfg(name);
+  if (cfg && cfg.PlayMode === 0 && cfg.Track === 0 && cfg.Loop) return true; // rule 1
+  if (cfg && cfg.PlayMode === 3 && !cfg.BlockInteractionOnPlay) return true; // rule 2
+  if (e.loop) return false;                                    // rule 3
+  if (typeof e.isComplete === 'function') return e.isComplete(); // rule 4
+  // spine 4.2 always has isComplete(); keep a numeric fallback for safety.
+  const at = e.getAnimationTime ? e.getAnimationTime() : (e.animationTime ?? 0);
+  const end = e.animationEnd ?? e.animation.duration ?? 0;
+  return at >= end - 1e-4;
+}
+function isIdleForInteraction() {
+  if (!spine) return false;
+  const tracks = spine.state.tracks || [];
+  for (const e of tracks) if (!trackEntryIsIdle(e)) return false;
+  return true;
+}
+
 function animNames() {
   return spine.state.data.skeletonData.animations.map(a => a.name);
 }
 function has(name) { return spine && animNames().includes(name); }
+// 手勢 clip 決策：zone 資料帶 clip/end（由 prefab SpineClip 引用解析，遊戲真值）
+// 就嚴格照資料——clip/end 為 null 表示遊戲該欄位就是空的（例如 CH0259/Hiyori/
+// Saya_casual 的 EyeIK IngClip=null：不播起始 clip 但仍抓眼、釋放播 LookEnd）。
+// 沒有資料（6 廳缺 zone 資料、舊資料）才用命名慣例 fallback。
+// 回傳 { exact, main, end }；exact=true 時 main/end 可為 null（=不播）。
+function gestureClips(rec, fallbackMain, fallbackEnd) {
+  if (rec && ('clip' in rec || 'end' in rec)) {
+    return { exact: true,
+      main: (rec.clip && has(rec.clip)) ? rec.clip : null,
+      end: (rec.end && has(rec.end)) ? rec.end : null };
+  }
+  const mains = Array.isArray(fallbackMain) ? fallbackMain : [fallbackMain];
+  const main = mains.find((c) => c && has(c)) || null;
+  const end = (typeof fallbackEnd === 'function') ? fallbackEnd() : (fallbackEnd || null);
+  return { exact: false, main, end };
+}
 function hasAny(prefix) { return animNames().some(n => n.startsWith(prefix)); }
 
 // 本體（主）骨架的規範名：lobby_index 的 skel 檔名主幹（小寫）。timeline 的 per-clip
@@ -2027,6 +2108,23 @@ function playGestureEnd(endName) {
     setAnimationWithClipMix(scfg ? (scfg.Track || 2) : 2, s, false);
   }
 }
+// End clip 的實際長度（含 Sync 軌）：遊戲讓 FinishMask/PlayIdle 的 End clip
+// 完整播完，且 IsComplete 之前 IsIdle(false) 會擋掉所有互動。固定 500/1200/
+// 1400ms 會把較長的 End（例：CH0334 HandFollowEnd 2.33s）提前切掉，連帶讓
+// 互動閘門提早打開，因此改用 skeleton 的真實 duration。
+function gestureEndMs(endName, fallbackMs) {
+  if (!endName || !spine) return fallbackMs;
+  let ms = 0;
+  const cfg = clipCfg(endName);
+  const names = [endName];
+  for (const s0 of (cfg?.Sync || [])) names.push(typeof s0 === 'string' ? s0 : (s0.name || s0));
+  for (const n of names) {
+    if (!n) continue;
+    const a = spine.state.data.skeletonData.findAnimation(n);
+    if (a) ms = Math.max(ms, (a.duration || 0) * 1000);
+  }
+  return ms > 0 ? ms + 50 : fallbackMs;
+}
 
 // 依「_01_M → End_01_M / _End_01_M」的遊戲命名對照找出釋放動畫（吃 CH0347
 // 底線版 Touch_End_01_M，也吃一般 TouchEnd_01_M）。
@@ -2047,14 +2145,14 @@ function resolveEndClip(mainName) {
 async function playTalk() {
   if (!spine) return;
   if (preview) { log('Talk: 拒絕 (試播中)'); return; }
-  // ---- BlockInteraction constraint from reversed code ----
-  // In-game, the dialog system calls BlockInteraction(dialogBox, true) which
-  // pushes the blocking requester onto [SpineCharacter+0xc8] (the blockList).
-  // While blocked, BodyTouch (pat) is no-op.  And the OnSpikeEvent path checks
-  // [SpineCharacter+0xb0] (BlockInteractionOnPlay) to determine whether a new
-  // voice line should be allowed while the previous one is still running.
-  if (state.blockInteractionOnPlay) { log('Talk: 拒絕 (voice busy)'); return; }
-  if (state.busy === 'pat') { log('Talk: 拒絕 (pat)'); return; }
+  // ---- OnClick 的兩個前置條件（RVA 0x34D6B40 反組譯）----
+  //   if (!IsInteractive()) return;   // [SpineCharacter+0xc8] 無 blocker
+  //   if (!IsIdle(true)) return;      // 所有 track 都在 idle / 已完成
+  // 對話框進行中 ChatDialog 會把自己 BlockInteraction(this, true) 加入 0xc8；
+  // 手勢/End clip 尚未播完則 IsIdle(false)。兩種情況遊戲都直接忽略這次點擊，
+  // 不會中斷 / 重啟現有動作。
+  if (!isInteractionAvailable()) { log('Talk: 拒絕 (blocked)'); return; }
+  if (!isIdleForInteraction()) { log('Talk: 拒絕 (not idle)'); return; }
 
   state.busy = 'talk';
   blockInteraction('talk', true);           // mirrors [this+0xc8].Add(requester)
@@ -2180,23 +2278,28 @@ function nextVoiceToken() { return ++voiceToken; }
 // On release the LookEnd plays and Touch_Eye eases back to its setup pose.
 // BodyTouchCB carries no screen coordinate, so Pat-vs-Look is routed here by the
 // head region test (Touch_Eye/Touch_Point anchor).
-function startLook() {
+function startLook(rec = null) {
   if (!spine) return;
   if (state.busy === 'preview') return;
   if (state.introBlock) return;                 // intro timeline locks input
+  if (!isInteractionAvailable() || !isIdleForInteraction()) return; // OnPress gates
   if (state.blockInteractionOnPlay) { log('Look: 拒絕 (voice busy)'); return; }
   if (state.busy === 'pat') { log('Look: 拒絕 (pat)'); return; }
   if (state.busy === 'look') return;
-  if (!has('Look_01_M')) return;
+  const clips = gestureClips(rec, 'Look_01_M', () => resolveEndClip('Look_01_M'));
+  if (!clips.exact && !clips.main) return;      // 無資料又無慣例 clip（舊行為）
 
   clearTimers();                       // interrupt an ongoing talk
   state.busy = 'look';
+  state.lookClipEnd = clips.end;
   blockInteraction('look', true);      // mirrors [this+0xc8].Add(requester)
   state.blockInteractionOnPlay = true; // mirrors byte [+0xb0]
 
   // 依 clip_graph：現代 lobby = Look_01_M 一次 → Look_02_M 循環（Track 依圖）；
   // 舊 lobby = Loop=true 直接循環。Sync（如 Look_01_A）同現行規則。
-  playHoldGesture('Look_01_M', has('Look_01_A') ? ['Look_01_A'] : null);
+  // 遊戲 EyeIK IngClip=null 的廳（CH0259/Hiyori）不播起始 clip，但眼球仍跟手。
+  if (clips.main) playHoldGesture(clips.main, has('Look_01_A') ? ['Look_01_A'] : null);
+  else spine.state.setEmptyAnimation(3, 0);
   log('抓眼 (hold)');
 }
 
@@ -2205,8 +2308,10 @@ function endLook() {
   state.busy = null;
   blockInteraction('look', false);
   state.blockInteractionOnPlay = false;
-  playGestureEnd(resolveEndClip('Look_01_M'));
-  after(500, () => {
+  const endName = state.lookClipEnd === undefined ? resolveEndClip('Look_01_M') : state.lookClipEnd;
+  playGestureEnd(endName);
+  state.lookClipEnd = null;
+  after(gestureEndMs(endName, 500), () => {
     if (state.busy || patting) return;
     restTracks();
     scheduleAutonomy();
@@ -2221,46 +2326,55 @@ function pickPatGroup() {
   return has('Pat2_01_M') && Math.random() < 0.5 ? 'Pat2' : 'Pat';
 }
 
-function startPat(clipMain = null, clipEnd = null) {
+function startPat(rec = null) {
   if (!spine || patting) return;
   if (state.busy === 'preview') return;      // 單句試播中不接受手勢
   if (state.introBlock) return;                 // intro timeline locks input
+  if (!isInteractionAvailable() || !isIdleForInteraction()) return; // OnPress gates
   if (state.busy === 'talk' && !isInteractionAvailable()) return; // blocked by dialog
-  patting = true;
-  let main;
-  if (clipMain && has(clipMain)) {
-    // Zone-explicit clip (CH0346/47 Pat vs Pat2 bands, proven from the prefab).
+  // 遊戲真值：rec 帶 clip/end 就照資料（clip=null → 不播起始 clip，骨骼照跟）。
+  // 無資料才用 Pat/Pat2 隨機交替的命名慣例。
+  const exact = !!(rec && ('clip' in rec || 'end' in rec));
+  let main = null, end = null;
+  if (exact) {
+    main = (rec.clip && has(rec.clip)) ? rec.clip : null;
+    end = (rec.end && has(rec.end)) ? rec.end : null;
     state.patGroup = null;
-    main = clipMain;
-    state.patMain = main;
-    state.patEndOverride = (clipEnd && has(clipEnd)) ? clipEnd : null;
   } else {
     state.patGroup = pickPatGroup();
     main = state.patGroup + '_01_M';
-    state.patMain = null;
-    state.patEndOverride = null;
+    if (!has(main)) { state.patGroup = null; return; }
   }
-  if (!has(main)) { patting = false; state.patGroup = null; state.patMain = null; state.patEndOverride = null; return; }
+  patting = true;
   clearTimers();              // interrupt an ongoing talk / look
   state.busy = 'pat';
-  const syncA = state.patGroup ? (state.patGroup + '_01_A') : main.replace(/_M$/, '_A');
-  playHoldGesture(main, has(syncA) ? [syncA] : null);
-  log('摸頭 (' + (state.patGroup || main) + ')');
+  state.patMain = main;
+  state.patEndOverride = end;
+  state.patEndExact = exact;
+  const syncA = main ? (state.patGroup ? (state.patGroup + '_01_A') : main.replace(/_M$/, '_A')) : null;
+  if (main) playHoldGesture(main, (syncA && has(syncA)) ? [syncA] : null);
+  else spine.state.setEmptyAnimation(3, 0);
+  log('摸頭 (' + (state.patGroup || main || 'clip=null') + ')');
 }
 
 function endPat() {
   if (!spine || !patting) return;
   patting = false;
-  if (state.busy !== 'pat') return;
+  if (state.busy !== 'pat') {
+    state.patGroup = null; state.patMain = null;
+    state.patEndOverride = null; state.patEndExact = false;
+    return;
+  }
   state.busy = null;
-  const main = state.patMain || (state.patGroup || 'Pat') + '_01_M';
-  const endName = (state.patEndOverride && has(state.patEndOverride))
-    ? state.patEndOverride : resolveEndClip(main);
+  const main = state.patMain;
+  const endName = state.patEndExact ? state.patEndOverride
+    : (main ? resolveEndClip(main) : null);
   state.patGroup = null;
   state.patMain = null;
   state.patEndOverride = null;
+  state.patEndExact = false;
   playGestureEnd(endName);
-  after(1200, () => {
+  after(gestureEndMs(endName, 1200), () => {
     if (state.busy || patting) return;
     restTracks();
     scheduleAutonomy();
@@ -2694,17 +2808,19 @@ function syncSkipBtn() {
 // ---- debug surface for the reversed state ----
 // `ba_debug.state` is a frozen-ish snapshot that other tools (or the devtools
 // console) can use to inspect the BlockInteraction / Talk / Voice state machine.
-// Mirrors the SpineCharacter+0xb0 / +0xc8 / busy fields, useful when tweaking.
+// blockList ⇔ SpineCharacter+0xc8; `idle` is the live IsIdle(true) gate result.
 window.ba_debug = {
   state: () => ({
     busy: state.busy,
     blockInteractionOnPlay: state.blockInteractionOnPlay,
     blockList: [...state.blockList],
     introBlock: state.introBlock,
+    idle: isIdleForInteraction(),
     pendingVoiceName: lastVoiceName,
     idleClip,
     validVoices: validVoices ? [...validVoices].sort().slice(0, 8) : null,
   }),
+  isIdle: () => isIdleForInteraction(),
   triggerTalk: () => playTalk(),
   subtitleProbe: (v) => subtitleFor(v),
   playVoiceProbe: (v) => playVoice(v),
@@ -2838,16 +2954,31 @@ window.ba_debug = {
     if (!spine) return null;
     const Z = IKZONES[currentLobby] || {};
     const out = {};
-    const put = (k, rec) => { if (rec) out[k] = { quad: zoneCornersScreen(rec), depth: rec.depth ?? -89, src: rec.src }; };
+    const put = (k, rec) => { if (rec) out[k] = { quad: zoneCornersScreen(rec), depth: rec.depth ?? -89, src: rec.src,
+      clip: rec.clip ?? null, end: rec.end ?? null, trigDelay: rec.trigDelay ?? null }; };
     put('eye', Z.eye);
     put('hairpat', Z.hairpat);
-    (Z.pat2 || []).forEach((b, i) => put('pat2_' + i + ':' + (b.clip || '?'), b));
+    out.pat2 = (Z.pat2 || []).map((b) => ({ quad: zoneCornersScreen(b), depth: b.depth ?? -89, src: b.src,
+      clip: b.clip ?? null, end: b.end ?? null, trigDelay: b.trigDelay ?? null }));
     put('pinch', Z.pinch);
     put('touch', Z.touch);
     put('hand', Z.hand);
     return out;
   },
-  zoneAt: (x, y) => { const z = zoneAt(x, y); return { kind: z.kind, src: z.rec?.src || null }; },
+  zoneAt: (x, y) => { const z = zoneAt(x, y); return z ? { kind: z.kind, depth: z.d, src: z.rec?.src || null,
+    clip: z.rec?.clip ?? null, end: z.rec?.end ?? null } : { kind: 'none' }; },
+  // 骨骼 parent-local（spine data 系、y 朝上）——SpineDragIK 的真正工作座標；
+  // 供探針量「眼是否真的被拖動」（世界座標會含頭部 idle 擺動，不能當判據）。
+  boneLocal: (name) => {
+    const b = spine && spine.skeleton.findBone(name);
+    if (!b) return null;
+    const p = b.parent;
+    const l = p ? p.worldToLocal({ x: b.worldX, y: b.worldY }) : { x: b.worldX, y: b.worldY };
+    return { x: +l.x.toFixed(3), y: +l.y.toFixed(3) };
+  },
+  ikState: () => ikDrag ? { kind: ikDrag.kind, pressing: ikDrag.pressing, local: !!ikDrag.local,
+    restLocal: ikDrag.restLocal || null, rect: ikDrag.rect || null,
+    bone: (() => { const b = ikDrag.bone; return { x: +b.x.toFixed(3), y: +b.y.toFixed(3) }; })() } : null,
   boneBounds: () => {
     if (!spine) return null;
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
@@ -7455,8 +7586,13 @@ function pointInQuad(px, py, q) {
 function hasZoneData() {
   return !!(IKZONES[currentLobby] || BODYTOUCH[currentLobby]);
 }
-// Topmost zone at the press point. pat2 entries (CH0346/47) carry their own
-// clip/end (Pat vs Pat2 by pressed band); same-depth ties -> nearest center.
+// Topmost zone at the press point（NGUI Raycast：依 depth 只取最上層單一物件，
+// 同深度時取離中心近者）。pat2 entries (CH0346/47) carry their own clip/end。
+// BodyTouch(depth −90) 是真正的 OnClick→Talk 目標，壓在 EyeIK(−100) 之上：
+// 軀幹/頸部被 bodytouch 蓋到的位置按住時，遊戲只會收到 bodytouch 的
+// OnPress/OnClick（沒有任何 handler）→ 不會啟動 EyeIK（眼不跟手），僅在
+// 原地乾淨點擊（見 onPointerUp 的位移門檻）時 Talk。無命中回 null（遊戲端
+// 就是沒有任何 collider 收到事件）。
 function zoneAt(sx, sy) {
   const Z = IKZONES[currentLobby];
   const cands = [];
@@ -7466,44 +7602,68 @@ function zoneAt(sx, sy) {
     for (const b of (Z.pat2 || [])) cands.push({ kind: 'pat', rec: b });
     if (Z.touch) cands.push({ kind: 'touch', rec: Z.touch });
     if (Z.hand) cands.push({ kind: 'hand', rec: Z.hand });
-    if (Z.eye) cands.push({ kind: 'look', rec: Z.eye });   // 抓眼區為正式候選（深度 -100，
-    // 在臉上與 bodytouch 重疊）：遊戲語義＝NGUI OnClick（乾淨點擊→Talk）與 DragIK
-    // （按住拖曳→眼隨指）並存，見 onPointerUp 的 look-session 補 Talk。
+    if (Z.eye) cands.push({ kind: 'look', rec: Z.eye });
+  }
+  for (const b of (BODYTOUCH[currentLobby] || [])) {
+    if (pointInQuad(sx, sy, zoneCornersScreen(b))) { cands.push({ kind: 'talk', rec: b }); break; }
   }
   let best = null;
   for (const c of cands) {
     const q = zoneCornersScreen(c.rec);
     if (!pointInQuad(sx, sy, q)) continue;
     const r = zoneRectScreen(c.rec);
-    const d = c.rec.depth ?? -89;
+    const d = c.rec.depth ?? (c.kind === 'talk' ? -90 : -89);   // bodytouch UIWidget depth = −90（278/278 廳）
     const nc = Math.hypot(sx - (r.x0 + r.x1) / 2, sy - (r.y0 + r.y1) / 2);
     if (!best || d > best.d || (d === best.d && nc < best.nc)) best = { ...c, d, nc };
   }
-  if (best) return best;
-  if (isBodyTouchRegion(sx, sy)) return { kind: 'talk', rec: null };
-  return { kind: 'look', rec: Z ? Z.eye : null };
+  return best;
 }
 
 let pressSess = null;   // { kind, rec, timer, triggered }
 let ikDrag = null;      // { bone, kind, rest:{x,y}, T:{x,y}, rect, off, spd, relSpd, pressing }
 let lastIkT = 0;
 
+// SpineDragIK 忠實版（parent-local）：目標計算與緩動都在骨骼的 parent local
+// 座標（spine data 系、y 朝上）進行，等同遊戲直接寫 Bone.localPosition 的空間。
+//   * 抽出值（rect/ox/oy/off）是 y 朝下的骨架單位 → clamp 前翻回 y-up：
+//     Min=(x0, −y1)、Max=(x1, −y0)、OrigLocalPos=(ox, −oy)、OffY=−offy。
+//   * BoneCenterOffset 依遊戲 UpdateDestLocalPos：clamp「前」相加、不扣回。
+//   * CoTrigger 觸發時遊戲先 Bone.localPosition = OrigLocalPos（snap 回原點）再
+//     起跑，這裡同序處理。
 function ikSetupDrag(kind, rec) {
   if (!spine || !rec || !rec.dragBone || !rec.drag) return false;
   const bone = spine.skeleton.findBone(rec.dragBone);
   if (!bone) return false;
   const g = rec.drag;
-  ikDrag = { bone, kind,
+  const restLocal = { x: g.ox || 0, y: -(g.oy || 0) };
+  ikDrag = { bone, kind, local: !!bone.parent,
+    restLocal,
     rest: { x: bone.worldX, y: bone.worldY },
     T: { x: bone.worldX - (g.ox || 0), y: bone.worldY - (g.oy || 0) },
     rect: { x0: g.x0, y0: g.y0, x1: g.x1, y1: g.y1 },
     off: { x: g.offx || 0, y: g.offy || 0 },
+    // 遊戲 |d|² < 5e-5 視為到位（Unity local；local = 骨架/100 → 骨架單位² = 5e-5×100²）
+    eps2: 0.5,
     spd: rec.dragSpd || 0.1, relSpd: rec.relSpd || 0.1, pressing: true };
+  if (ikDrag.local) { bone.x = restLocal.x; bone.y = restLocal.y; }   // CoTrigger 的 OrigLocalPos 重置
   return true;
 }
-// Pointer -> bone target in skeleton units: the baked Min/Max/Orig are lobby
-// (== skeleton) units in the bone-parent frame whose origin sits at T.
-function ikDragTarget() {
+// 指標 → 目標（parent local，y-up）。等價遊戲 UpdateDestLocalPos：
+//   parent.InverseTransformPoint(Camera.ScreenToWorldPoint(screenPos))
+//   → clamp(local + BoneCenterOffset, Min, Max)。
+function ikDragTargetLocal() {
+  const d = ikDrag;
+  const c = spine.worldTransform.applyInverse({ x: mouse.x, y: mouse.y });
+  const p = d.bone.parent;
+  const l = p ? p.worldToLocal({ x: c.x, y: c.y }) : { x: c.x, y: c.y };
+  const ox = l.x + d.off.x, oy = l.y - d.off.y;
+  return {
+    x: Math.min(Math.max(ox, d.rect.x0), d.rect.x1),
+    y: Math.min(Math.max(oy, -d.rect.y1), -d.rect.y0),
+  };
+}
+// 舊版世界座標近似（無 zone 資料的 fallback 用；skeleton 幀的軸對齊 clamp）。
+function ikDragTargetWorld() {
   const c = spine.worldTransform.applyInverse({ x: mouse.x, y: mouse.y });
   const d = ikDrag;
   const plx = c.x - d.T.x + d.off.x, ply = c.y - d.T.y + d.off.y;
@@ -7517,9 +7677,30 @@ function updateIkDrag() {
   const dt = Math.min(0.05, Math.max(0, now - (lastIkT || now)));
   lastIkT = now;
   const d = ikDrag;
+  if (d.local) {
+    // SpineDragIK.CoMoveBone：k = clamp(Speed01·dt·60, 0, 1)，直接在 parent local 緩動；
+    // 放開後沿 OrigLocalPos 緩返，|d|² < 5e-5（Unity local）到位即停。
+    const b = d.bone;
+    const k = Math.min(1, Math.max(0, (d.pressing ? d.spd : d.relSpd) * dt * 60));
+    if (k <= 0) return;
+    if (d.pressing) {
+      const t = ikDragTargetLocal();
+      b.x += (t.x - b.x) * k;
+      b.y += (t.y - b.y) * k;
+    } else {
+      b.x += (d.restLocal.x - b.x) * k;
+      b.y += (d.restLocal.y - b.y) * k;
+      const dx = d.restLocal.x - b.x, dy = d.restLocal.y - b.y;
+      if (dx * dx + dy * dy < d.eps2) {
+        b.x = d.restLocal.x; b.y = d.restLocal.y;
+        if (ikDrag === d) ikDrag = null;
+      }
+    }
+    return;
+  }
   let tx, ty, k;
   if (d.pressing) {
-    const t = ikDragTarget();
+    const t = ikDragTargetWorld();
     tx = t.x; ty = t.y;
     k = Math.min(1, Math.max(0, d.spd * dt * 60));
   } else {
@@ -7540,11 +7721,11 @@ function pressTrigger() {
   const sess = pressSess;
   if (!sess || sess.triggered || !spine || sess.lobby !== currentLobby) return;
   let ok = false;
-  if (sess.kind === 'pinch') { startPinch(); ok = pinchActive; }
-  else if (sess.kind === 'touch') { startTouch(); ok = state.busy === 'touch'; }
-  else if (sess.kind === 'hand') { startHandFollow(); ok = handFollowActive; }
-  else if (sess.kind === 'pat') { startPat(sess.rec?.clip || null, sess.rec?.end || null); ok = patting; }
-  else if (sess.kind === 'look') { startLook(); ok = state.busy === 'look'; }
+  if (sess.kind === 'pinch') { startPinch(sess.rec); ok = pinchActive; }
+  else if (sess.kind === 'touch') { startTouch(sess.rec); ok = state.busy === 'touch'; }
+  else if (sess.kind === 'hand') { startHandFollow(sess.rec); ok = handFollowActive; }
+  else if (sess.kind === 'pat') { startPat(sess.rec); ok = patting; }
+  else if (sess.kind === 'look') { startLook(sess.rec); ok = state.busy === 'look'; }
   sess.triggered = ok;
   if (ok && sess.rec) ikSetupDrag(sess.kind, sess.rec);
   else if (ok && sess.kind === 'look') ikSetupLookFallback();
@@ -7555,7 +7736,7 @@ function ikSetupLookFallback() {
   const b = lookBone || headBone();
   if (!b) return;
   const r = LOOK_RADIUS_UNITS;
-  ikDrag = { bone: b, kind: 'look',
+  ikDrag = { bone: b, kind: 'look', local: false,
     rest: { x: b.worldX, y: b.worldY }, T: { x: b.worldX, y: b.worldY },
     rect: { x0: -r, y0: -r, x1: r, y1: r }, off: { x: 0, y: 0 },
     spd: 0.1, relSpd: 0.1, pressing: true };
@@ -7575,8 +7756,15 @@ function onPointerDown(e) {
     // (Talk needs no timer — release inside the box clicks. Movement never
     // cancels the trigger: NGUI OnPress already fired.)
     const z = zoneAt(e.clientX, e.clientY);
-    const sess = pressSess = { kind: z.kind, rec: z.rec || null, timer: 0, triggered: false, lobby: currentLobby };
-    if (z.kind !== 'talk') {
+    // 無命中（所有 collider 都沒蓋到）：只設一個 no-op session，避免 pointerup
+    // 落入 legacy 快點路徑憑空觸發互動。
+    // left：NGUI 在按下期間只要 current 換過物件（含拖出所有 collider）就把
+    // clickNotification 設 None，之後即使拖回原點也不會 OnClick。
+    const sess = pressSess = { kind: z ? z.kind : 'none', rec: (z && z.rec) || null,
+      timer: 0, triggered: false, left: false, lobby: currentLobby };
+    // 遊戲的 SpineDragIK.OnPress 在按下的那一刻就檢查 IsInteractive + IsIdle；
+    // 不合格時連 TriggerDelay 的 coroutine 都不會啟動。talk 區沒有 OnPress。
+    if (z && z.kind !== 'talk' && isInteractionAvailable() && isIdleForInteraction()) {
       const delayMs = Math.max(0, ((z.rec && z.rec.trigDelay) ?? 0.1)) * 1000;
       sess.timer = setTimeout(() => { if (pressSess === sess) pressTrigger(); }, delayMs);
     }
@@ -7604,7 +7792,15 @@ function onPointerMove(e) {
   markUserActive();
   // Press-and-drag gesture — legacy path only. (Game path: the trigger timer
   // is never cancelled by movement; the drag only steers the bone.)
-  if (pressSess) return;
+  if (pressSess) {
+    // NGUI ProcessPress：按壓期間 currentTouch.last != currentTouch.current
+    // → dragStarted 且 clickNotification=None（永久取消這次 OnClick）。
+    if (pressSess.kind === 'talk' && !pressSess.left) {
+      const z = zoneAt(e.clientX, e.clientY);
+      if (!z || z.rec !== pressSess.rec) pressSess.left = true;
+    }
+    return;
+  }
   if (longPressTimer && downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 7) {
     clearTimeout(longPressTimer);
     if (state.busy === null) {
@@ -7623,29 +7819,37 @@ function onPointerMove(e) {
   }
 }
 
+// NGUI OnClick（level0 主場景 UICamera 實例序列化值，UnityPy 解出：
+// eventType=1(UI_3D)、mouseDragThreshold=4、mouseClickThreshold=10、
+// touchDragThreshold=40、touchClickThreshold=40、allowMultiTouch=1、
+// tooltipDelay=1；此版 NGUI 沒有 longPressDelay 欄位 → 沒有長按取消 click）。
+// ProcessPress 以 totalDelta += delta 累積（向量和＝起訖直線位移，反組譯
+// fadd v0.2s/str totalDelta 證實）；totalDelta² 超過 clickThreshold、或按壓
+// 期間 current 換過物件，都會把 clickNotification 設 None → 收不到 OnClick。
+function clickThresholdPx(e) {
+  return (e && e.pointerType === 'touch') ? 40 : 10;
+}
 function onPointerUp(e) {
   clearTimeout(longPressTimer);
-  let cleanClickTalk = false;
   if (pressSess) {
     const sess = pressSess;
     pressSess = null;
     clearTimeout(sess.timer);
+    const dist = downPos ? Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) : 1e9;
     if (sess.triggered) {
       // Release: the hold branches end the gesture (EndClip + bone eases back).
       if (ikDrag) ikDrag.pressing = false;
-      // NGUI OnClick（抽取器文檔：OnClick → BodyTouch → Talk）：抓眼區與 bodytouch
-      // 在臉上重疊——乾淨點擊（位移 <10px、釋放在盒內）即使 look 已觸發也要補 Talk
-      // （臉上輕點=說話、按住拖=抓眼）；拖過檻則 OnClick 取消，純抓眼。
-      // 注意得等 endLook() 清完 busy 再 playTalk（playTalk 有 busy 防護）。
-      cleanClickTalk = sess.kind === 'look' && !state.introBlock && !!downPos &&
-        Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) < 10 &&
-        isBodyTouchRegion(e.clientX, e.clientY);
-      if (window.__probeT0) console.log('[interact-probe] ' + JSON.stringify({ tag: 'up-debug', kind: sess.kind, triggered: sess.triggered, dist: +Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y).toFixed(1), inBox: isBodyTouchRegion(e.clientX, e.clientY), clean: cleanClickTalk }));
-    } else if (sess.kind === 'talk' && !state.introBlock &&
-        isBodyTouchRegion(e.clientX, e.clientY)) {
-      // NGUI OnClick: press + release inside the box, no time limit.
-      playTalk();
+    } else if (sess.kind === 'talk' && !state.introBlock) {
+      // NGUI OnClick（pressed == current 且 totalDelta < clickThreshold）：
+      // totalDelta 是 delta 的向量和（反組譯 ProcessPress：fadd totalDelta+delta），
+      // 因此「起訖直線距離」正確（不是路徑長）。另外按壓期間換過物件（sess.left）
+      // 或放開時最上層不是同一顆 BodyTouch（pressed != current）都不算 click。
+      // 無時間限制（此版 UICamera 沒有 longPress 欄位／流程）。
+      const z = zoneAt(e.clientX, e.clientY);
+      if (!sess.left && z && z.kind === 'talk' && z.rec === sess.rec &&
+          dist < clickThresholdPx(e)) playTalk();
     }
+    if (window.__probeT0) console.log('[interact-probe] ' + JSON.stringify({ tag: 'up-debug', kind: sess.kind, triggered: sess.triggered, dist: +dist.toFixed(1), thr: clickThresholdPx(e), inBox: isBodyTouchRegion(e.clientX, e.clientY) }));
   } else if (downPos) {
     const dt = performance.now() - downTime;
     const d = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
@@ -7665,7 +7869,6 @@ function onPointerUp(e) {
   else if (state.busy === 'touch') endTouch();
   else if (state.busy === 'look') endLook();
   else if (patting) endPat();
-  if (cleanClickTalk) playTalk();
   downPos = null;
   downTime = 0;
 }
@@ -9356,6 +9559,16 @@ if (BA_DEBUG.probe && BA_DEBUG.probeInteract) {
       return ts.filter(Boolean).map((t) => t.animation?.name).join('+') || null;
     };
     const boneOf = (name) => spine?.skeleton?.findBone(name);
+    // Wait until the game would accept a new OnPress/OnClick: no busy action,
+    // no dialog block, and IsIdle(true) (no End clip still running).
+    const waitInteractive = async (maxMs = 25000) => {
+      const t0 = performance.now();
+      while (performance.now() - t0 < maxMs) {
+        if (!state.busy && !dialogActive && isIdleForInteraction() && isInteractionAvailable()) return true;
+        await sleep(200);
+      }
+      return false;
+    };
 
     // 等大廳載入＋intro 收斂到 idle（introBlock 鎖互動；最長 45s）
     await sleep(4000);
@@ -9397,35 +9610,193 @@ if (BA_DEBUG.probe && BA_DEBUG.probeInteract) {
     emit('talk', { trace: trace.slice() }); trace.length = 0;
     await sleep(2500);
 
+    // ---- 1b) 軀幹拖曳（NGUI 語意）：bodytouch(−90) 蓋過 EyeIK(−100) → 按住拖曳
+    //          不啟動抓眼（Touch_Eye 不動），位移 > clickThreshold 後釋放也不說話
+    //          （clickNotification→None）。釋放點的位移確保 >10px。
+    for (let i = 0; i < 100 && (state.busy || dialogActive); i++) await sleep(250);
+    const teLoc0 = window.ba_debug.boneLocal('Touch_Eye');
+    const eyeDev = () => {
+      const l = window.ba_debug.boneLocal('Touch_Eye');
+      const d = (spine && spine.skeleton.findBone('Touch_Eye'))?.data;
+      return (l && d) ? +Math.hypot(l.x - d.x, l.y - d.y).toFixed(2) : null;   // parent-local 偏離 rest
+    };
+    mark('dragtalk-down', { at: talkC, zone: window.ba_debug.zoneAt(talkC.x, talkC.y), eyeLocal: teLoc0 });
+    fire('pointerdown', talkC.x, talkC.y);
+    for (let i = 1; i <= 6; i++) { fire('pointermove', talkC.x + i * 5, talkC.y - i * 2); await sleep(70); }
+    mark('dragtalk-mid', { busy: state.busy, anim: trackAnim(), eyeDev: eyeDev(), ik: window.ba_debug.ikState() });
+    fire('pointerup', talkC.x + 30, talkC.y - 12);
+    await sleep(700);
+    mark('dragtalk-up', { busy: state.busy, anim: trackAnim(), eyeDev: eyeDev() });
+    emit('dragtalk', { trace: trace.slice() }); trace.length = 0;
+    await sleep(400);
+
+    // ---- 1c) NGUI clickNotification：拖出所有 collider 再拖回原點放開＝不說話 ----
+    // ProcessPress 在 current(last) 換物件時就把 clickNotification=None（永久），
+    // 之後即使總位移回到 0 也不會 OnClick。
+    for (let i = 0; i < 100 && (state.busy || dialogActive); i++) await sleep(250);
+    mark('return-down', { at: talkC, zone: window.ba_debug.zoneAt(talkC.x, talkC.y) });
+    fire('pointerdown', talkC.x, talkC.y);
+    await sleep(90);
+    fire('pointermove', talkC.x + 220, talkC.y - 80);
+    await sleep(90);
+    mark('return-out', { zone: window.ba_debug.zoneAt(talkC.x + 220, talkC.y - 80) });
+    fire('pointermove', talkC.x, talkC.y);
+    await sleep(90);
+    fire('pointerup', talkC.x, talkC.y);
+    await sleep(350);
+    mark('return-up', { busy: state.busy, anim: trackAnim(), zone: window.ba_debug.zoneAt(talkC.x, talkC.y) });
+    emit('clickcases', { trace: trace.slice() }); trace.length = 0;
+
+    // ---- 1d) 長按不動 1.2s 再放開：此版 UICamera 沒有 longPressDelay 欄位/流程，
+    //          仍應 OnClick → Talk（只在 probeClickCases=1 時跑，避免每次多9秒語音）。
+    if (/probeClickCases=1/.test(location.hash)) {
+      for (let i = 0; i < 100 && (state.busy || dialogActive); i++) await sleep(250);
+      mark('hold-down', { at: talkC });
+      fire('pointerdown', talkC.x, talkC.y);
+      await sleep(1200);
+      fire('pointerup', talkC.x, talkC.y);
+      await sleep(450);
+      mark('hold-up', { busy: state.busy, anim: trackAnim() });
+      emit('holdtalk', { trace: trace.slice() }); trace.length = 0;
+    }
+
+    // ---- 1e) IsIdle(true) 閘門（RVA 0x34D39F0）：End clip 尚未播完時，
+    //          OnClick 與 OnPress 都被遊戲直接忽略（不是「中斷並重播」）。
+    //          A) LookEnd 播放中點 talk → 不說話
+    //          B) LookEnd 播放中按 hairpat → 不啟動 Pat
+    //          C) End clip 結束、回到 idle 後點 talk → 正常說話
+    if (/probeIdleGuard=1/.test(location.hash)) {
+      const waitIdle = async (maxMs = 60000) => {
+        const t0 = performance.now();
+        while (performance.now() - t0 < maxMs) {
+          if (!state.busy && !dialogActive && isIdleForInteraction()) return true;
+          await sleep(120);
+        }
+        return false;
+      };
+      const bandPoint = (band, kind) => {
+        if (!band?.quad) return null;
+        const [p0, p1, p2, p3] = band.quad;
+        const ok = (x, y) => { const z = window.ba_debug.zoneAt(x, y); return !!z && z.kind === kind; };
+        for (let u = 0.3; u <= 0.9; u += 0.1) for (let v = 0.3; v <= 0.9; v += 0.1) {
+          const x = (1-u)*(1-v)*p0.x + u*(1-v)*p1.x + u*v*p2.x + (1-u)*v*p3.x;
+          const y = (1-u)*(1-v)*p0.y + u*(1-v)*p1.y + u*v*p2.y + (1-u)*v*p3.y;
+          if (ok(x, y)) return { x, y };
+        }
+        return null;
+      };
+      const ikg = window.ba_debug?.ikZones();
+      const lookPt = bandPoint(ikg?.eye, 'look');
+      const patPt = bandPoint(ikg?.hairpat || (ikg?.pat2 || [])[0], 'pat');
+      const ready1 = await waitIdle();
+      if (!ready1) mark('guard-timeout', { where: 'initial', busy: state.busy, anim: trackAnim() });
+
+      if (lookPt && ready1) {
+        fire('pointerdown', lookPt.x, lookPt.y);
+        await sleep(500);
+        mark('guard-look-hold', { busy: state.busy, idle: isIdleForInteraction(), anim: trackAnim() });
+        fire('pointerup', lookPt.x, lookPt.y);
+        await sleep(120);
+        mark('guard-endclip', { busy: state.busy, idle: isIdleForInteraction(), anim: trackAnim() });
+        fire('pointerdown', talkC.x, talkC.y);
+        await sleep(50);
+        fire('pointerup', talkC.x, talkC.y);
+        await sleep(120);
+        mark('guard-talk-blocked', { busy: state.busy, idle: isIdleForInteraction(), anim: trackAnim() });
+      }
+
+      const ready2 = await waitIdle();
+      if (!ready2) mark('guard-timeout', { where: 'before-pat', busy: state.busy, anim: trackAnim() });
+      if (lookPt && patPt && ready2) {
+        fire('pointerdown', lookPt.x, lookPt.y);
+        await sleep(500);
+        fire('pointerup', lookPt.x, lookPt.y);
+        await sleep(120);
+        fire('pointerdown', patPt.x, patPt.y);
+        await sleep(350);
+        mark('guard-pat-blocked', { busy: state.busy, idle: isIdleForInteraction(), anim: trackAnim() });
+        fire('pointerup', patPt.x, patPt.y);
+        await sleep(300);
+      }
+
+      const ready3 = await waitIdle();
+      if (!ready3) mark('guard-timeout', { where: 'before-talk', busy: state.busy, anim: trackAnim() });
+      if (ready3) {
+        fire('pointerdown', talkC.x, talkC.y);
+        await sleep(60);
+        fire('pointerup', talkC.x, talkC.y);
+        await sleep(400);
+        mark('guard-talk-ok', { busy: state.busy, idle: isIdleForInteraction(), anim: trackAnim() });
+      }
+      emit('idleguard', { trace: trace.slice() }); trace.length = 0;
+      for (let i = 0; i < 160 && (state.busy || dialogActive); i++) await sleep(250);
+    }
+
     // ---- 2) 摸頭：hairpat 區 down→hold→up，記錄動畫＋Touch_Point 驅動 ----
     // 等前一互動的對話/手勢收尾（BlockInteraction 窗口內 BodyTouch 無效＝遊戲行為）
-    for (let i = 0; i < 100 && (state.busy || dialogActive); i++) await sleep(250);
+    await waitInteractive();
     const ikz = window.ba_debug?.ikZones();
-    const patQ = ikz?.hairpat?.quad;
-    const patC = patQ ? quadCenter(patQ) : { x: innerWidth * 0.35, y: innerHeight * 0.18 };
+    // 所有摸頭帶：hairpat + 每個 pat2（CH0346/47 的 HairPatIK_N 各自對應
+    // Pat_01_M 或 Pat2_01_M，prefab 的 SpineClip 已證實）。逐帶各按一次，
+    // 取樣帶內且 zoneAt 命中同一 src 的點，避免測到被更高 depth 蓋掉的區。
+    const patBands = [];
+    if (ikz?.hairpat) patBands.push({ tag: 'hairpat', ...ikz.hairpat });
+    (ikz?.pat2 || []).forEach((b, i) => patBands.push({ tag: 'pat2_' + i, ...b }));
+    const findBandPoint = (band) => {
+      if (!band?.quad) return null;
+      const okHere = (x, y) => { const z = window.ba_debug.zoneAt(x, y);
+        return z.kind === 'pat' && (!band.src || z.src === band.src); };
+      const c = quadCenter(band.quad);
+      if (okHere(c.x, c.y)) return c;
+      const [p0, p1, p2, p3] = band.quad;
+      for (let u = 0.1; u <= 0.9001; u += 0.1) {
+        for (let v = 0.1; v <= 0.9001; v += 0.1) {
+          const x = (1-u)*(1-v)*p0.x + u*(1-v)*p1.x + u*v*p2.x + (1-u)*v*p3.x;
+          const y = (1-u)*(1-v)*p0.y + u*(1-v)*p1.y + u*v*p2.y + (1-u)*v*p3.y;
+          if (okHere(x, y)) return { x, y };
+        }
+      }
+      return null;
+    };
     const tp = boneOf('Touch_Point');
-    mark('pat-down', { at: patC, bone: !!tp });
-    fire('pointerdown', patC.x, patC.y);
     const patBone = [];
-    for (let i = 0; i < 12; i++) {
-      await sleep(100);
-      fire('pointermove', patC.x + i * 2, patC.y - i);
-      if (tp) patBone.push({ t: +((performance.now() - window.__probeT0) / 1000).toFixed(2), x: +tp.worldX.toFixed(2), y: +tp.worldY.toFixed(2) });
-      if (i === 1) mark('pat-anim', { anim: trackAnim(), busy: state.busy });
+    for (const band of patBands) {
+      const pt = findBandPoint(band);
+      mark(band.tag + '-down', { at: pt, src: band.src, expect: { clip: band.clip ?? null, end: band.end ?? null },
+        hit: pt ? window.ba_debug.zoneAt(pt.x, pt.y) : null });
+      if (!pt) continue;
+      fire('pointerdown', pt.x, pt.y);
+      for (let i = 0; i < 12; i++) {
+        await sleep(100);
+        fire('pointermove', pt.x + i * 2, pt.y - i);
+        if (tp) patBone.push({ t: +((performance.now() - window.__probeT0) / 1000).toFixed(2), x: +tp.worldX.toFixed(2), y: +tp.worldY.toFixed(2) });
+        if (i === 1) mark(band.tag + '-anim', { anim: trackAnim(), busy: state.busy });
+      }
+      mark(band.tag + '-up', { anim: trackAnim() });
+      fire('pointerup', pt.x + 20, pt.y - 10);
+      await sleep(120);
+      mark(band.tag + '-end-anim', { anim: trackAnim(), busy: state.busy });
+      await sleep(2500);
+      mark(band.tag + '-settled', { anim: trackAnim(), busy: state.busy });
+      // End clip（例：CH0346 PatEnd_01_M 5.33s）完整播完前，遊戲的 IsIdle(false)
+      // 會拒絕下一次 OnPress；等真值 idle 再測下一帶。
+      await waitInteractive();
     }
-    mark('pat-up', { anim: trackAnim() });
-    fire('pointerup', patC.x + 20, patC.y - 10);
-    await sleep(2500);
-    mark('pat-settled', { anim: trackAnim(), busy: state.busy });
-    emit('pat', { trace: trace.slice(), bone: patBone }); trace.length = 0;
+    emit('pat', { trace: trace.slice(), bone: patBone, bands: patBands.map(b => ({ tag: b.tag, src: b.src, clip: b.clip, end: b.end })) }); trace.length = 0;
 
     // ---- 3) 抓眼：eye 區 down→拖曳→up，記錄 Touch_Eye 驅動 vs drag 關鍵影格 ----
-    for (let i = 0; i < 100 && (state.busy || dialogActive); i++) await sleep(250);
+    await waitInteractive();
     const eyeQ = ikz?.eye?.quad;
-    const eyeC = eyeQ ? quadCenter(eyeQ) : { x: innerWidth * 0.5, y: innerHeight * 0.4 };
+    const eyeC0 = eyeQ ? quadCenter(eyeQ) : { x: innerWidth * 0.5, y: innerHeight * 0.4 };
     const te = boneOf('Touch_Eye');
+    // 抓眼取點必須在「臉」上：eye 區幾何中心＝畫面中心，常與 bodytouch 盒重疊
+    // （遊戲端 bodytouch −90 在上，壓到就變 Talk）。用 Touch_Eye 骨骼的螢幕位置
+    // （真正的眼部）作為按點，跨廳穩健。
+    const eyeC = (te && spine) ? spine.toGlobal({ x: te.worldX, y: te.worldY }) : eyeC0;
     const eyeRec = IKZONES[currentLobby]?.eye;
-    mark('look-down', { at: eyeC, bone: !!te, dragKeys: eyeRec ? [eyeRec.drag?.x0, eyeRec.drag?.y0, eyeRec.drag?.x1, eyeRec.drag?.y1] : null });
+    mark('look-down', { at: eyeC, bone: !!te, zone: window.ba_debug.zoneAt(eyeC.x, eyeC.y),
+      expect: eyeRec ? { clip: eyeRec.clip ?? null, end: eyeRec.end ?? null } : null,
+      dragKeys: eyeRec ? [eyeRec.drag?.x0, eyeRec.drag?.y0, eyeRec.drag?.x1, eyeRec.drag?.y1] : null });
     fire('pointerdown', eyeC.x, eyeC.y);
     const eyeBone = [];
     const dragPath = [[0.3, 0.3], [0.7, 0.35], [0.5, 0.6], [0.35, 0.45]];
@@ -9434,21 +9805,45 @@ if (BA_DEBUG.probe && BA_DEBUG.probeInteract) {
       fire('pointermove', eyeC.x + fx * 60, eyeC.y + fy * 40);
       await sleep(120);
       if (te) eyeBone.push({ t: +((performance.now() - window.__probeT0) / 1000).toFixed(2), x: +te.worldX.toFixed(2), y: +te.worldY.toFixed(2) });
-      if (i === 3) mark('look-anim', { anim: trackAnim(), busy: state.busy, eyeFollow: state.busy === 'look' });
+      if (i === 3) mark('look-anim', { anim: trackAnim(), busy: state.busy, eyeFollow: state.busy === 'look', eyeDev: eyeDev() });
+    }
+    // clamp 角驗證：沿 parent-local (+x,−y) 方向拖到遠超 rect → 目標必為角落
+    // (x1, −y1)（y-up local；資料即 x1/y1）。驗證 F3 的座標系/翻轉/clamp 正確。
+    let clampLocal = null;
+    if (te && te.parent && spine) {
+      const p = te.parent;
+      // parent local (+x, −y) → world：x' = a·x + c·y、y' = b·x + d·y
+      // （spine Matrix2x3 的 a,b 是第一欄、c,d 是第二欄；不能把 a,b 當列用）。
+      const dx = p.a * 1 + p.c * -1, dy = p.b * 1 + p.d * -1;
+      const n = Math.hypot(dx, dy) || 1;
+      const farW = { x: te.worldX + dx / n * 700, y: te.worldY + dy / n * 700 };
+      const farS = spine.toGlobal(farW);
+      fire('pointermove', farS.x, farS.y);
+      await sleep(900);
+      clampLocal = window.ba_debug.boneLocal('Touch_Eye');
+      mark('look-clamp', { at: { x: +farS.x.toFixed(1), y: +farS.y.toFixed(1) }, local: clampLocal,
+        expect: eyeRec ? { x: eyeRec.drag.x1, y: -eyeRec.drag.y1 } : null,
+        ik: window.ba_debug.ikState() });
     }
     mark('look-up', {});
     fire('pointerup', eyeC.x, eyeC.y);
+    await sleep(120);
+    mark('look-end-anim', { anim: trackAnim(), busy: state.busy });
     await sleep(1800);
-    mark('look-settled', { anim: trackAnim(), busy: state.busy });
+    mark('look-settled', { anim: trackAnim(), busy: state.busy, eyeDev: eyeDev() });
     emit('look', { trace: trace.slice(), bone: eyeBone }); trace.length = 0;
 
     // ---- 4) 特殊互動（若有）：臉區按住 → 對應手勢 ----
     if (interactionMode) {
-      for (let i = 0; i < 100 && (state.busy || dialogActive); i++) await sleep(250);
-      const spQ = (ikz?.[{ pinch: 'pinch', touch: 'touch', handfollow: 'hand' }[interactionMode]] || {}).quad;
+      await waitInteractive();
+      const spKey = { pinch: 'pinch', touch: 'touch', handfollow: 'hand' }[interactionMode];
+      const spQ = (ikz?.[spKey] || {}).quad;
       const faceC = spQ ? quadCenter(spQ) : { x: innerWidth * 0.5, y: innerHeight * 0.45 };
+      const spRec = (IKZONES[currentLobby] || {})[spKey] || null;
       mark('special-zone', { quad: !!spQ });
-      mark('special-down', { mode: interactionMode, at: faceC });
+      mark('special-down', { mode: interactionMode, at: faceC,
+        expect: spRec ? { clip: spRec.clip ?? null, end: spRec.end ?? null } : null,
+        hit: spQ ? window.ba_debug.zoneAt(faceC.x, faceC.y) : null });
       fire('pointerdown', faceC.x, faceC.y);
       const spBone = [];
       for (let i = 0; i < 14; i++) {
@@ -9459,6 +9854,8 @@ if (BA_DEBUG.probe && BA_DEBUG.probeInteract) {
         if (hb) spBone.push({ t: +((performance.now() - window.__probeT0) / 1000).toFixed(2), x: +hb.worldX.toFixed(2), y: +hb.worldY.toFixed(2) });
       }
       fire('pointerup', faceC.x, faceC.y + 20);
+      await sleep(120);
+      mark('special-end-anim', { anim: trackAnim(), busy: state.busy });
       await sleep(2000);
       mark('special-settled', { anim: trackAnim(), busy: state.busy });
       emit('special', { trace: trace.slice(), bone: spBone }); trace.length = 0;
